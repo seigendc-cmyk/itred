@@ -1,0 +1,1534 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useState, useEffect, useMemo } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import {
+  Users,
+  Plus,
+  Edit2,
+  Lock,
+  Unlock,
+  UserX,
+  UserCheck,
+  Archive,
+  History,
+  Monitor,
+  Search,
+  X,
+  Save,
+  Eye,
+  EyeOff,
+  Shield,
+  RotateCcw,
+  FileText,
+  Download,
+  History as HistoryIcon,
+} from "lucide-react";
+import {
+  TablePanel,
+  StatusBadge,
+  PrimaryButton,
+  SecondaryButton,
+  EmptyState,
+  SearchInput,
+  ConfirmDialog,
+  DataPanel,
+  FormField,
+  StatCard,
+} from "../components/CommonUI.tsx"; // Ensure StatusBadge is imported
+import { staffService, ROLE_TEMPLATES } from "../services/staffService.ts";
+import { analyticsService } from "../services/analyticsService.ts";
+import { permissionService } from "../services/permissionService.ts";
+import {
+  Staff,
+  MenuKey,
+  PermissionLevel,
+  DeskType,
+  ActivityLog,
+  EventType,
+} from "../types.ts";
+import { asArray } from "../utils/safeData.ts";
+import { pdfService } from "../services/pdfService.ts";
+
+const ROLES = Object.keys(staffService.ROLE_TEMPLATES);
+const DESKS: DeskType[] = [
+  "SysAdmin Desk",
+  "Backoffice Desk",
+  "Product Data Desk",
+  "Catalogue Deployment Desk",
+  "Collections Desk",
+  "RPN Management Desk",
+  "CAH Operations Desk",
+  "BI & Analytics Desk",
+  "Viewer Desk",
+];
+
+const MENU_KEYS: MenuKey[] = [
+  "dashboard",
+  "vendorManagement",
+  "addNewVendor",
+  "rpnManagement",
+  "addNewAgent",
+  "productManagement",
+  "addNewProduct",
+  "productList",
+  "accessHub",
+  "cahBooths",
+  "pricing",
+  "subscriptionsCollections",
+  "collectionCalendar",
+  "createCatalogue",
+  "createStorefront",
+  "inventorySpotChecks",
+  "analytics",
+  "biMarketAnalytics",
+  "performanceMetrics",
+  "activityLogs",
+  "adminDashboard",
+  "staffManagement",
+  "roleMenuPermissions",
+  "staffAccessLogs",
+  "systemSettings",
+];
+const PERMISSIONS = [
+  { id: "dashboard", label: "Dashboard" },
+  { id: "vendorManagement", label: "Vendor Management" },
+  { id: "addNewVendor", label: "Add New Vendor" },
+  { id: "rpnManagement", label: "RPN Management" },
+  { id: "addNewAgent", label: "Add New Agent" },
+  { id: "productManagement", label: "Product Management" },
+  { id: "addNewProduct", label: "Add New Product" },
+  { id: "productList", label: "Product List" },
+  { id: "accessHub", label: "Access Hub" },
+  { id: "cahBooths", label: "CAH Booths" },
+  { id: "pricing", label: "Pricing" },
+  { id: "subscriptionsCollections", label: "Subscriptions & Collections" },
+  { id: "collectionCalendar", label: "Collection Calendar" },
+  { id: "createCatalogue", label: "Create Catalogue" },
+  { id: "createStorefront", label: "Create Storefront" },
+  { id: "inventorySpotChecks", label: "Inventory Spot Checks" },
+  { id: "analytics", label: "Analytics" },
+  { id: "biMarketAnalytics", label: "BI Market Analytics" },
+  { id: "performanceMetrics", label: "Performance Metrics" },
+  { id: "activityLogs", label: "Activity Logs" },
+  { id: "adminDashboard", label: "Admin Dashboard" },
+  { id: "staffManagement", label: "Staff Management" },
+  { id: "roleMenuPermissions", label: "Role & Menu Permissions" },
+  { id: "staffAccessLogs", label: "Staff Access Logs" },
+  { id: "systemSettings", label: "System Settings" },
+];
+
+export const StaffManagement: React.FC = () => {
+  const [staffList, setStaffList] = useState<Staff[]>([]);
+  const [allLogs, setAllLogs] = useState<ActivityLog[]>([]);
+  const [activeTab, setActiveTab] = useState<
+    "directory" | "roles" | "logs" | "settings"
+  >("directory");
+  const location = useLocation();
+
+  useEffect(() => {
+    if (location.pathname === "/role-menu-permissions") {
+      setActiveTab("roles");
+    } else if (location.pathname === "/staff-access-logs") {
+      setActiveTab("logs");
+    } else if (location.pathname === "/system-settings") {
+      setActiveTab("settings");
+    } else {
+      setActiveTab("directory");
+    }
+  }, [location.pathname]);
+
+  const [view, setView] = useState<
+    "list" | "form" | "permissions" | "roleEdit"
+  >("list");
+  const [selectedStaff, setSelectedStaff] = useState<Staff | null>(null);
+  const [search, setSearch] = useState("");
+  const [logSearch, setLogSearch] = useState("");
+  const [filterStaff, setFilterStaff] = useState("all");
+  const [filterEventType, setFilterEventType] = useState("all");
+  const [filterResult, setFilterResult] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [formData, setFormData] = useState<Partial<Staff>>({});
+  const [showPasscode, setShowPasscode] = useState(false);
+  const [tempPasscode, setTempPasscode] = useState("");
+  const [confirmTempPasscode, setConfirmTempPasscode] = useState("");
+  const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+  const [isPasscodeModalOpen, setIsPasscodeModalOpen] = useState(false);
+  const [isApplyRoleModalOpen, setIsApplyRoleModalOpen] = useState(false);
+  const [applyRoleConfig, setApplyRoleConfig] = useState<{
+    role: string;
+  } | null>(null);
+  const [applyRoleStaffId, setApplyRoleStaffId] = useState("");
+  const [passcodeModalConfig, setPasscodeModalConfig] = useState<{
+    staff: Staff;
+    isOverride: boolean;
+  } | null>(null);
+  const [formError, setFormError] = useState("");
+  const [confirmConfig, setConfirmConfig] = useState<{
+    title: string;
+    message: string;
+    action: () => void;
+    variant: "danger" | "warning" | "success";
+  } | null>(null);
+
+  useEffect(() => {
+    loadStaff();
+    loadLogs();
+  }, []);
+  const loadStaff = async () => {
+    setStaffList(
+      asArray<Staff>(await Promise.resolve(staffService.getAllStaff())),
+    );
+  };
+  const loadLogs = async () => {
+    setAllLogs(
+      asArray<ActivityLog>(await Promise.resolve(analyticsService.getEvents())),
+    );
+  };
+
+  const filteredStaff = useMemo(
+    () =>
+      asArray<Staff>(staffList).filter(
+        (s) =>
+          ((s.fullName || "").toLowerCase().includes(search.toLowerCase()) ||
+            (s.staffCode || "").toLowerCase().includes(search.toLowerCase())) &&
+          s.status !== "archived",
+      ),
+    [staffList, search],
+  );
+
+  const staffLogs = useMemo(() => {
+    const safeAllLogs = asArray<ActivityLog>(allLogs);
+    return safeAllLogs
+      .filter((log) => {
+        const isStaffEvent =
+          log.eventType?.startsWith("STAFF_") ||
+          log.eventType === "ACCESS_DENIED";
+        if (!isStaffEvent) return false;
+
+        const staffId = log.actorId || log.details?.staffId;
+        const matchesStaff = filterStaff === "all" || staffId === filterStaff;
+        const matchesEvent =
+          filterEventType === "all" || log.eventType === filterEventType;
+        const matchesResult =
+          filterResult === "all" || log.result === filterResult;
+
+        const searchBlob =
+          `${log.actorName} ${log.eventType} ${JSON.stringify(log.details)}`.toLowerCase();
+        const matchesSearch =
+          logSearch === "" || searchBlob.includes(logSearch.toLowerCase());
+
+        const logDate = log.timestamp.split("T")[0];
+        const matchesDateFrom = !dateFrom || logDate >= dateFrom;
+        const matchesDateTo = !dateTo || logDate <= dateTo;
+
+        return (
+          matchesStaff &&
+          matchesEvent &&
+          matchesResult &&
+          matchesSearch &&
+          matchesDateFrom &&
+          matchesDateTo
+        );
+      })
+      .sort(
+        (a, b) =>
+          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+      );
+  }, [
+    allLogs,
+    filterStaff,
+    filterEventType,
+    filterResult,
+    logSearch,
+    dateFrom,
+    dateTo,
+  ]);
+
+  const logStats = useMemo(() => {
+    const safeAllLogs = asArray<ActivityLog>(allLogs);
+    const safeStaffList = asArray<Staff>(staffList);
+    const today = new Date().toISOString().split("T")[0];
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    return {
+      failedToday: safeAllLogs.filter(
+        (l) =>
+          l.eventType === "STAFF_LOGIN_FAILED" && l.timestamp.startsWith(today),
+      ).length,
+      lockedAccounts: safeStaffList.filter((s) => s.isLocked).length,
+      recentResets: safeAllLogs.filter(
+        (l) =>
+          (l.eventType === "STAFF_PASSCODE_RESET" ||
+            l.eventType === "STAFF_PASSCODE_OVERRIDDEN") &&
+          new Date(l.timestamp) > sevenDaysAgo,
+      ).length,
+      permissionChanges: safeAllLogs.filter(
+        (l) =>
+          l.eventType === "STAFF_PERMISSIONS_UPDATED" &&
+          new Date(l.timestamp) > sevenDaysAgo,
+      ).length,
+    };
+  }, [allLogs, staffList]);
+
+  const handleAddStaff = () => {
+    setFormData({
+      id: `STF-${Date.now()}`,
+      staffCode: staffService.generateStaffCode(),
+      fullName: "",
+      displayName: "",
+      status: "active",
+      role: "Backoffice Operator",
+      desk: "Backoffice Desk",
+      menuPermissions: ROLE_TEMPLATES["Backoffice Operator"],
+      mustChangePasscode: true,
+      passcode: "",
+      failedAttemptCount: 0,
+      isLocked: false,
+      createdAt: new Date().toISOString(),
+      createdBy: "SysAdmin",
+    });
+    setTempPasscode("");
+    setSelectedStaff(null);
+    setFormError("");
+    setView("form");
+  };
+
+  const saveStaff = () => {
+    setFormError("");
+    if (
+      !formData.fullName ||
+      !formData.displayName ||
+      !formData.role ||
+      !formData.desk
+    ) {
+      setFormError(
+        "Please fill in all required fields: Full Name, Display Name, Role, and Desk.",
+      );
+      return;
+    }
+    if (!selectedStaff && (!tempPasscode || tempPasscode.length !== 6)) {
+      setFormError("Please set a 6-digit passcode for new staff members.");
+      return;
+    }
+    if (!selectedStaff && tempPasscode !== formData.passcode) {
+      setFormError("Passcode confirmation does not match.");
+      return;
+    } else if (
+      selectedStaff &&
+      formData.passcode &&
+      formData.passcode.length !== 6
+    ) {
+      setFormError("Passcode must be 6 digits.");
+      return;
+    }
+
+    const defaultPermissions =
+      ROLE_TEMPLATES[formData.role as string] || ROLE_TEMPLATES["Viewer"];
+
+    const staffToSave = {
+      ...formData,
+      staffCode: selectedStaff
+        ? formData.staffCode
+        : staffService.generateStaffCode(),
+      menuPermissions: !selectedStaff
+        ? defaultPermissions
+        : formData.menuPermissions,
+      failedAttemptCount: !selectedStaff ? 0 : formData.failedAttemptCount,
+      isLocked: !selectedStaff ? false : formData.isLocked,
+      passcode: selectedStaff
+        ? formData.passcode || selectedStaff.passcode
+        : tempPasscode,
+      updatedAt: new Date().toISOString(),
+    };
+    staffService.saveStaff(staffToSave as Staff);
+    analyticsService.logEvent({
+      eventType: selectedStaff ? "STAFF_UPDATED" : "STAFF_CREATED",
+      actorType: "admin",
+      actorName: "SysAdmin",
+      actorId: formData.id,
+      result: "updated",
+      details: { staffCode: staffToSave.staffCode },
+    });
+    loadStaff();
+    loadLogs();
+    setTempPasscode("");
+    setView("list");
+  };
+
+  const triggerAction = (staff: Staff, type: string) => {
+    const configs: any = {
+      suspend: {
+        title: "Suspend Staff?",
+        variant: "danger",
+        status: "suspended",
+        eventType: "STAFF_SUSPENDED",
+      },
+      reactivate: {
+        title: "Reactivate Staff?",
+        variant: "success",
+        status: "active",
+        eventType: "STAFF_REACTIVATED",
+      },
+      lock: {
+        title: "Lock Profile?",
+        variant: "danger",
+        status: "locked",
+        isLocked: true,
+        eventType: "STAFF_LOCKED",
+      },
+      unlock: {
+        title: "Unlock Profile?",
+        variant: "success",
+        status: "active",
+        isLocked: false,
+        failedAttemptCount: 0,
+        eventType: "STAFF_UNLOCKED",
+      },
+      resetPasscode: {
+        title: "Reset Passcode?",
+        variant: "warning",
+        status: "passcode_reset_required",
+        mustChangePasscode: true,
+        isLocked: false,
+        failedAttemptCount: 0,
+        eventType: "STAFF_PASSCODE_RESET",
+      },
+      overridePasscode: {
+        title: "Override Passcode?",
+        variant: "danger",
+        status: "active",
+        mustChangePasscode: false,
+        isLocked: false,
+        failedAttemptCount: 0,
+        eventType: "STAFF_PASSCODE_OVERRIDDEN",
+      },
+    };
+    const cfg = configs[type];
+    setConfirmConfig({
+      title: cfg.title,
+      message: `Confirm change for ${staff.displayName}.`,
+      variant: cfg.variant,
+      action: () => {
+        staffService.saveStaff({
+          // Use saveStaff directly for status/lock changes
+          ...staff,
+          status: cfg.status || staff.status,
+          isLocked: cfg.isLocked !== undefined ? cfg.isLocked : staff.isLocked,
+          failedAttemptCount:
+            cfg.failedAttemptCount !== undefined
+              ? cfg.failedAttemptCount
+              : staff.failedAttemptCount,
+          mustChangePasscode:
+            cfg.mustChangePasscode !== undefined
+              ? cfg.mustChangePasscode
+              : staff.mustChangePasscode,
+          updatedAt: new Date().toISOString(),
+        });
+        analyticsService.logEvent({
+          eventType: cfg.eventType || `STAFF_${type.toUpperCase()}`,
+          actorType: "admin",
+          actorName: "SysAdmin",
+          actorId: staff.id,
+          result: "updated",
+          details: { staffId: staff.id, action: type },
+        });
+        loadStaff();
+        loadLogs();
+      },
+    });
+    setIsConfirmOpen(true);
+  };
+
+  const handlePasscodeAction = (
+    staff: Staff,
+    newPasscode: string,
+    isOverride: boolean,
+  ) => {
+    if (newPasscode.length !== 6 || !/^\d{6}$/.test(newPasscode)) {
+      alert("Passcode must be exactly 6 digits.");
+      return;
+    }
+    staffService.saveStaff({
+      ...staff,
+      passcode: newPasscode,
+      mustChangePasscode: true,
+      failedAttemptCount: 0,
+      isLocked: false,
+      updatedAt: new Date().toISOString(),
+    });
+    analyticsService.logEvent({
+      eventType: "STAFF_PASSCODE_OVERRIDDEN",
+      actorType: "admin",
+      actorName: "SysAdmin",
+      actorId: staff.id,
+      result: "updated",
+      details: { staffId: staff.id },
+    });
+    loadStaff();
+    loadLogs();
+    setTempPasscode("");
+    setConfirmTempPasscode("");
+    setIsPasscodeModalOpen(false);
+  };
+
+  const exportLogsJSON = () => {
+    const data = JSON.stringify(staffLogs, null, 2);
+    const blob = new Blob([data], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `staff_access_logs_${new Date().toISOString()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportLogsPDF = () => {
+    pdfService.generateStaffAccessReport({
+      logs: staffLogs,
+      staffList,
+      dateFrom,
+      dateTo,
+      filters: {
+        staff:
+          filterStaff !== "all"
+            ? staffList.find((s) => s.id === filterStaff)?.fullName ||
+              "Selected"
+            : "All",
+        eventType: filterEventType !== "all" ? filterEventType : "All",
+        result: filterResult !== "all" ? filterResult : "All",
+      },
+    });
+  };
+
+  const handlePermissionChange = (menuKey: MenuKey, level: PermissionLevel) => {
+    setFormData((prev) => ({
+      ...prev,
+      menuPermissions: {
+        ...prev?.menuPermissions,
+        [menuKey]: level,
+      },
+    }));
+  };
+
+  return (
+    <div className="space-y-8 pb-20">
+      <div
+        className="flex bg-stone-100 p-1 rounded-none w-fit"
+        id="staff-management-header"
+        tabIndex={-1}
+      >
+        {["directory", "roles", "logs", "settings"].map((tab) => (
+          <button
+            key={tab}
+            onClick={() => {
+              setActiveTab(tab as any);
+              setView("list");
+            }}
+            className={`px-6 py-2 text-[10px] font-bold uppercase tracking-widest ${activeTab === tab ? "bg-white text-brand-orange shadow-sm" : "text-stone-400"}`}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === "roles" && view === "list" && (
+        <div className="space-y-6">
+          <DataPanel title="Role Templates">
+            <div className="space-y-4">
+              {Object.keys(ROLE_TEMPLATES).map((role) => (
+                <div
+                  key={role}
+                  className="border border-stone-200 rounded-lg p-4"
+                >
+                  <div className="flex justify-between items-start mb-4">
+                    <div>
+                      <h3 className="font-semibold text-stone-800">{role}</h3>
+                      <p className="text-sm text-stone-600">
+                        {role === "SysAdmin" || role === "Admin"
+                          ? "Full system access"
+                          : role === "Backoffice Operator"
+                            ? "General operational tasks"
+                            : role === "Product Data Clerk"
+                              ? "Product data management"
+                              : role === "Catalogue Officer"
+                                ? "Catalogue creation and deployment"
+                                : role === "Collections Officer"
+                                  ? "Subscription and collections management"
+                                  : role === "RPN Manager"
+                                    ? "RPN network management"
+                                    : role === "CAH Officer"
+                                      ? "Commerce Access Hub operations"
+                                      : role === "BI Analyst"
+                                        ? "Business intelligence and analytics"
+                                        : "Read-only access"}
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <PrimaryButton
+                        onClick={() => {
+                          setApplyRoleConfig({ role });
+                          setApplyRoleStaffId("");
+                          setIsApplyRoleModalOpen(true);
+                        }}
+                        className="text-xs px-3 py-1"
+                      >
+                        Apply to Staff
+                      </PrimaryButton>
+                      <SecondaryButton
+                        onClick={() => {
+                          setFormData({
+                            menuPermissions: ROLE_TEMPLATES[role],
+                          });
+                          setSelectedStaff({ role } as any);
+                          setView("roleEdit");
+                        }}
+                        className="text-xs px-3 py-1"
+                      >
+                        Edit Permissions
+                      </SecondaryButton>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                    {Object.entries(ROLE_TEMPLATES[role]).map(
+                      ([key, level]) => (
+                        <div key={key} className="flex justify-between">
+                          <span className="text-stone-600">
+                            {PERMISSIONS.find((p) => p.id === key)?.label ||
+                              key}
+                            :
+                          </span>
+                          <span
+                            className={`font-medium ${
+                              level === "full"
+                                ? "text-green-600"
+                                : level === "hidden"
+                                  ? "text-red-600"
+                                  : "text-blue-600"
+                            }`}
+                          >
+                            {level}
+                          </span>
+                        </div>
+                      ),
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </DataPanel>
+        </div>
+      )}
+
+      {activeTab === "roles" && view === "roleEdit" && selectedStaff?.role && (
+        <div className="space-y-8">
+          <div className="flex justify-between items-center bg-stone-900 text-white p-6">
+            <h3 className="text-sm font-bold uppercase tracking-widest">
+              Edit Role Template - {selectedStaff.role}
+            </h3>
+            <div className="flex gap-3">
+              <SecondaryButton
+                onClick={() => setView("list")}
+                className="text-white border-white/20"
+              >
+                Cancel
+              </SecondaryButton>
+              <PrimaryButton
+                onClick={() => {
+                  const updatedRole = selectedStaff.role as string;
+                  const newTemplates = {
+                    ...ROLE_TEMPLATES,
+                    [updatedRole]: formData.menuPermissions as MenuPermissions,
+                  };
+                  staffService.saveRoleTemplates(newTemplates);
+                  analyticsService.logEvent({
+                    eventType: "ROLE_TEMPLATE_UPDATED",
+                    actorType: "admin",
+                    actorName: "SysAdmin",
+                    result: "updated",
+                    details: { role: updatedRole },
+                  });
+                  setView("list");
+                }}
+              >
+                Save Role Permissions
+              </PrimaryButton>
+            </div>
+          </div>
+          <DataPanel title="Role Template Permissions">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {MENU_KEYS.map((key) => (
+                <div
+                  key={key}
+                  className="flex items-center justify-between p-3 border border-stone-200 rounded"
+                >
+                  <span className="text-sm font-medium">
+                    {PERMISSIONS.find((p) => p.id === key)?.label || key}
+                  </span>
+                  <select
+                    value={formData.menuPermissions?.[key] || "hidden"}
+                    onChange={(e) =>
+                      handlePermissionChange(
+                        key,
+                        e.target.value as PermissionLevel,
+                      )
+                    }
+                    disabled={
+                      selectedStaff.role === "SysAdmin" ||
+                      selectedStaff.role === "Admin"
+                    }
+                    className="text-xs border border-stone-200 rounded px-2 py-1"
+                  >
+                    <option value="hidden">Hidden</option>
+                    <option value="view">View</option>
+                    <option value="create">Create</option>
+                    <option value="edit">Edit</option>
+                    <option value="approve">Approve</option>
+                    <option value="delete">Delete</option>
+                    <option value="export">Export</option>
+                    <option value="full">Full</option>
+                  </select>
+                </div>
+              ))}
+            </div>
+          </DataPanel>
+        </div>
+      )}
+      {activeTab === "directory" &&
+        (view === "list" || permissionService.isSysAdmin()) && (
+          <div className="space-y-6">
+            <div className="flex justify-between items-center">
+              <SearchInput
+                placeholder="Search staff..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-64"
+              />
+              {permissionService.canEdit("staffManagement") && (
+                <PrimaryButton onClick={handleAddStaff}>
+                  <Plus size={16} className="mr-2" />
+                  Add Staff
+                </PrimaryButton>
+              )}
+            </div>
+
+            <DataPanel title="Staff Registry">
+              {filteredStaff.length === 0 ? (
+                <EmptyState
+                  title="No Staff Records"
+                  description="No staff records found. Click Add Staff to create a staff profile."
+                  icon={Users}
+                />
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-stone-200">
+                        <th className="text-left py-3 px-6 font-semibold text-stone-700">
+                          ID / Code
+                        </th>
+                        <th className="text-left py-3 px-6 font-semibold text-stone-700">
+                          Identity
+                        </th>
+                        <th className="text-left py-3 px-6 font-semibold text-stone-700">
+                          Role
+                        </th>
+                        <th className="text-left py-3 px-6 font-semibold text-stone-700">
+                          Desk
+                        </th>
+                        <th className="text-left py-3 px-6 font-semibold text-stone-700">
+                          Status
+                        </th>
+                        <th className="text-right py-3 px-6 font-semibold text-stone-700">
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredStaff.map((staff) => (
+                        <tr
+                          key={staff.id}
+                          className="border-b border-stone-200 hover:bg-stone-50"
+                        >
+                          <td className="px-6 py-4 font-mono text-sm">
+                            {staff.staffCode}
+                          </td>
+                          <td className="px-6 py-4">
+                            <div>
+                              <p className="font-medium">{staff.displayName}</p>
+                              <p className="text-sm text-stone-600">
+                                {staff.fullName}
+                              </p>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">{staff.role}</td>
+                          <td className="px-6 py-4">{staff.desk}</td>
+                          <td className="px-6 py-4">
+                            <StatusBadge
+                              status={staff.status}
+                              variant={
+                                staff.status === "active"
+                                  ? "success"
+                                  : staff.status === "suspended"
+                                    ? "warning"
+                                    : "danger"
+                              }
+                            />
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <div className="flex justify-end gap-2">
+                              {permissionService.canEdit("staffManagement") && (
+                                <button
+                                  onClick={() => {
+                                    setFormData(staff);
+                                    setSelectedStaff(staff);
+                                    setView("form");
+                                  }}
+                                  className="p-1.5 border border-stone-200 rounded hover:bg-stone-100"
+                                  title="Edit Staff"
+                                >
+                                  <Edit2 size={12} />
+                                </button>
+                              )}
+                              {permissionService.canEdit("staffManagement") && (
+                                <button
+                                  onClick={() =>
+                                    triggerAction(
+                                      staff,
+                                      staff.isLocked ? "unlock" : "lock",
+                                    )
+                                  }
+                                  className="p-1.5 border border-stone-200 rounded hover:bg-stone-100"
+                                  title={
+                                    staff.isLocked
+                                      ? "Unlock Staff"
+                                      : "Lock Staff"
+                                  }
+                                >
+                                  {staff.isLocked ? (
+                                    <Unlock size={12} />
+                                  ) : (
+                                    <Lock size={12} />
+                                  )}
+                                </button>
+                              )}
+                              {permissionService.canEdit("staffManagement") && (
+                                <button
+                                  onClick={() => {
+                                    setPasscodeModalConfig({
+                                      staff,
+                                      isOverride: false,
+                                    });
+                                    setTempPasscode("");
+                                    setIsPasscodeModalOpen(true);
+                                  }}
+                                  className="p-1.5 border border-stone-200 rounded hover:bg-stone-100"
+                                  title="Reset Passcode (Force Change)"
+                                >
+                                  <RotateCcw size={12} />
+                                </button>
+                              )}
+                              {permissionService.isSysAdmin() && (
+                                <button
+                                  onClick={() => {
+                                    setPasscodeModalConfig({
+                                      staff,
+                                      isOverride: true,
+                                    });
+                                    setTempPasscode("");
+                                    setIsPasscodeModalOpen(true);
+                                  }}
+                                  className="p-1.5 border border-stone-200 rounded hover:bg-stone-100"
+                                  title="Reset Passcode"
+                                >
+                                  <Shield size={12} />
+                                </button>
+                              )}
+                              {permissionService.canEdit("staffManagement") && (
+                                <button
+                                  onClick={() =>
+                                    triggerAction(
+                                      staff,
+                                      staff.status === "active"
+                                        ? "suspend"
+                                        : "reactivate",
+                                    )
+                                  }
+                                  className="p-1.5 border border-stone-200 rounded hover:bg-stone-100"
+                                  title={
+                                    staff.status === "active"
+                                      ? "Suspend Staff"
+                                      : "Reactivate Staff"
+                                  }
+                                >
+                                  <UserX size={12} />
+                                </button>
+                              )}
+                              {permissionService.canEdit("staffManagement") && (
+                                <button
+                                  onClick={() => {
+                                    setFormData(staff);
+                                    setSelectedStaff(staff);
+                                    setView("permissions");
+                                  }}
+                                  className="p-1.5 border border-stone-200 rounded hover:bg-stone-100"
+                                  title="Edit Permissions"
+                                >
+                                  <Shield size={12} />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </DataPanel>
+          </div>
+        )}
+      {activeTab === "logs" && (
+        <div className="space-y-6">
+          <div className="flex flex-wrap gap-4 items-center justify-between">
+            <div className="flex gap-4">
+              <SearchInput
+                placeholder="Search logs..."
+                value={logSearch}
+                onChange={(e) => setLogSearch(e.target.value)}
+                className="w-64"
+              />
+              <select
+                value={filterStaff}
+                onChange={(e) => setFilterStaff(e.target.value)}
+                className="form-input w-48"
+              >
+                <option value="all">All Staff</option>
+                {staffList.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.displayName}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={filterEventType}
+                onChange={(e) => setFilterEventType(e.target.value)}
+                className="form-input w-48"
+              >
+                <option value="all">All Events</option>
+                <option value="STAFF_LOGIN_SUCCESS">Login Success</option>
+                <option value="STAFF_LOGIN_FAILED">Login Failed</option>
+                <option value="STAFF_CREATED">Staff Created</option>
+                <option value="STAFF_UPDATED">Staff Updated</option>
+                <option value="STAFF_SUSPENDED">Staff Suspended</option>
+                <option value="STAFF_REACTIVATED">Staff Reactivated</option>
+                <option value="STAFF_LOCKED">Staff Locked</option>
+                <option value="STAFF_UNLOCKED">Staff Unlocked</option>
+                <option value="STAFF_PASSCODE_RESET">Passcode Reset</option>
+                <option value="STAFF_PASSCODE_OVERRIDDEN">
+                  Passcode Override
+                </option>
+                <option value="STAFF_PERMISSIONS_UPDATED">
+                  Permissions Updated
+                </option>
+                <option value="STAFF_ROLE_CHANGED">Role Changed</option>
+                <option value="ACCESS_DENIED">Access Denied</option>
+              </select>
+              <select
+                value={filterResult}
+                onChange={(e) => setFilterResult(e.target.value)}
+                className="form-input w-32"
+              >
+                <option value="all">All Results</option>
+                <option value="success">Success</option>
+                <option value="failed">Failed</option>
+                <option value="updated">Updated</option>
+              </select>
+            </div>
+            <div className="flex gap-2">
+              <PrimaryButton onClick={exportLogsJSON} className="text-xs">
+                <Download size={14} className="mr-2" /> Export JSON
+              </PrimaryButton>
+              <PrimaryButton onClick={exportLogsPDF} className="text-xs">
+                <FileText size={14} className="mr-2" /> Export PDF
+              </PrimaryButton>
+              <SecondaryButton
+                onClick={() => {
+                  if (confirm("Clear all demo logs? This cannot be undone.")) {
+                    analyticsService.clearLogs();
+                    loadLogs();
+                  }
+                }}
+                className="text-xs text-red-600"
+              >
+                Clear Logs
+              </SecondaryButton>
+            </div>
+          </div>
+          <DataPanel title={`Staff Access Logs (${staffLogs.length})`}>
+            <div className="space-y-2 max-h-96 overflow-y-auto">
+              {staffLogs.slice(0, 100).map((log, index) => (
+                <div
+                  key={index}
+                  className="flex items-center justify-between p-3 bg-stone-50 rounded border"
+                >
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs font-mono text-stone-500">
+                        {new Date(log.timestamp).toLocaleString()}
+                      </span>
+                      <span
+                        className={`text-xs px-2 py-1 rounded ${
+                          log.result === "success"
+                            ? "bg-green-100 text-green-800"
+                            : log.result === "failed"
+                              ? "bg-red-100 text-red-800"
+                              : "bg-blue-100 text-blue-800"
+                        }`}
+                      >
+                        {log.result}
+                      </span>
+                      <span className="text-xs font-medium text-stone-700">
+                        {log.eventType?.replace(/_/g, " ")}
+                      </span>
+                    </div>
+                    <div className="text-xs text-stone-600 mt-1">
+                      {log.actorName} •{" "}
+                      {log.details ? JSON.stringify(log.details) : ""}
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {staffLogs.length === 0 && (
+                <div className="text-center py-8 text-stone-500">
+                  No staff access logs found.
+                </div>
+              )}
+            </div>
+          </DataPanel>
+        </div>
+      )}
+      {activeTab === "directory" && view === "form" && (
+        <div className="space-y-8">
+          <div className="flex justify-between items-center bg-stone-900 text-white p-6">
+            <h3 className="text-sm font-bold uppercase tracking-widest">
+              {selectedStaff ? "Modify Staff Node" : "Initialize Staff Node"}
+            </h3>
+            <div className="flex gap-3">
+              <SecondaryButton
+                onClick={() => setView("list")}
+                className="text-white border-white/20"
+              >
+                Discard
+              </SecondaryButton>
+              <PrimaryButton onClick={saveStaff}>Save Profile</PrimaryButton>
+            </div>
+          </div>
+          <DataPanel title="Staff Profile">
+            {formError && (
+              <div className="mb-4 p-3 bg-red-50 text-red-700 border border-red-200 rounded text-sm">
+                {formError}
+              </div>
+            )}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <FormField label="Full Name *" required>
+                <input
+                  type="text"
+                  value={formData.fullName || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, fullName: e.target.value })
+                  }
+                  className="form-input"
+                  required
+                />
+              </FormField>
+              <FormField label="Display Name *" required>
+                <input
+                  type="text"
+                  value={formData.displayName || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, displayName: e.target.value })
+                  }
+                  className="form-input"
+                  required
+                />
+              </FormField>
+              <FormField label="Role *" required>
+                <select
+                  value={formData.role || ""}
+                  onChange={(e) => {
+                    const role = e.target.value;
+                    setFormData({
+                      ...formData,
+                      role,
+                      desk: staffService.ROLE_TO_DESK_MAP[role] || "",
+                      menuPermissions: ROLE_TEMPLATES[role] || {},
+                    });
+                  }}
+                  className="form-input"
+                  required
+                >
+                  <option value="">Select Role</option>
+                  {Object.keys(ROLE_TEMPLATES).map((role) => (
+                    <option key={role} value={role}>
+                      {role}
+                    </option>
+                  ))}
+                </select>
+              </FormField>
+              <FormField label="Desk *" required>
+                <select
+                  value={formData.desk || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, desk: e.target.value })
+                  }
+                  className="form-input"
+                  required
+                >
+                  <option value="">Select Desk</option>
+                  {DESKS.map((desk) => (
+                    <option key={desk} value={desk}>
+                      {desk}
+                    </option>
+                  ))}
+                </select>
+              </FormField>
+              <FormField label="Email">
+                <input
+                  type="email"
+                  value={formData.email || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, email: e.target.value })
+                  }
+                  className="form-input"
+                />
+              </FormField>
+              <FormField label="Phone">
+                <input
+                  type="tel"
+                  value={formData.phone || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, phone: e.target.value })
+                  }
+                  className="form-input"
+                />
+              </FormField>
+              <FormField label="WhatsApp">
+                <input
+                  type="tel"
+                  value={formData.whatsapp || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, whatsapp: e.target.value })
+                  }
+                  className="form-input"
+                />
+              </FormField>
+              <FormField label="Allowed Google Email">
+                <input
+                  type="email"
+                  value={formData.googleEmailAllowed || ""}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      googleEmailAllowed: e.target.value,
+                    })
+                  }
+                  className="form-input"
+                />
+              </FormField>
+              <FormField label="Status">
+                <select
+                  value={formData.status || "active"}
+                  onChange={(e) =>
+                    setFormData({ ...formData, status: e.target.value })
+                  }
+                  className="form-input"
+                >
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                  <option value="suspended">Suspended</option>
+                </select>
+              </FormField>
+              <FormField label="6-digit Passcode *" required>
+                <div className="relative">
+                  <input
+                    type={showPasscode ? "text" : "password"}
+                    value={
+                      selectedStaff ? formData.passcode || "" : tempPasscode
+                    }
+                    onChange={(e) => {
+                      const value = e.target.value
+                        .replace(/\D/g, "")
+                        .slice(0, 6);
+                      if (selectedStaff) {
+                        setFormData({ ...formData, passcode: value });
+                      } else {
+                        setTempPasscode(value);
+                      }
+                    }}
+                    className="form-input pr-10"
+                    placeholder="123456"
+                    maxLength={6}
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPasscode(!showPasscode)}
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2"
+                  >
+                    {showPasscode ? (
+                      <EyeOff size={16} className="text-stone-400" />
+                    ) : (
+                      <Eye size={16} className="text-stone-400" />
+                    )}
+                  </button>
+                </div>
+              </FormField>
+              {!selectedStaff && (
+                <FormField label="Confirm 6-digit Passcode *" required>
+                  <input
+                    type="password"
+                    value={formData.passcode || ""}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        passcode: e.target.value.replace(/\D/g, "").slice(0, 6),
+                      })
+                    }
+                    className="form-input"
+                    placeholder="123456"
+                    maxLength={6}
+                    required
+                  />
+                </FormField>
+              )}
+              <div className="flex items-center gap-4 md:col-span-2">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={formData.mustChangePasscode || false}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        mustChangePasscode: e.target.checked,
+                      })
+                    }
+                  />
+                  <span className="text-sm">
+                    Must change passcode on next login
+                  </span>
+                </label>
+              </div>
+            </div>
+          </DataPanel>
+        </div>
+      )}
+
+      {activeTab === "directory" && view === "permissions" && (
+        <div className="space-y-8">
+          <div className="flex justify-between items-center bg-stone-900 text-white p-6">
+            <h3 className="text-sm font-bold uppercase tracking-widest">
+              Edit Staff Permissions - {selectedStaff?.displayName}
+            </h3>
+            <div className="flex gap-3">
+              <SecondaryButton
+                onClick={() => setView("list")}
+                className="text-white border-white/20"
+              >
+                Cancel
+              </SecondaryButton>
+              <PrimaryButton
+                onClick={() => {
+                  if (selectedStaff) {
+                    staffService.saveStaff({
+                      ...selectedStaff,
+                      menuPermissions: formData.menuPermissions,
+                      updatedAt: new Date().toISOString(),
+                    });
+                    analyticsService.logEvent({
+                      eventType: "STAFF_PERMISSIONS_UPDATED",
+                      actorType: "admin",
+                      actorName: "SysAdmin",
+                      actorId: selectedStaff.id,
+                      result: "updated",
+                      details: { staffId: selectedStaff.id },
+                    });
+                    loadStaff();
+                    loadLogs();
+                    setView("list");
+                  }
+                }}
+              >
+                Save Permissions
+              </PrimaryButton>
+            </div>
+          </div>
+          <DataPanel title="Menu Permissions">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {MENU_KEYS.map((key) => (
+                <div
+                  key={key}
+                  className="flex items-center justify-between p-3 border border-stone-200 rounded"
+                >
+                  <span className="text-sm font-medium">
+                    {PERMISSIONS.find((p) => p.id === key)?.label || key}
+                  </span>
+                  <select
+                    value={formData.menuPermissions?.[key] || "hidden"}
+                    onChange={(e) =>
+                      handlePermissionChange(
+                        key,
+                        e.target.value as PermissionLevel,
+                      )
+                    }
+                    className="text-xs border border-stone-200 rounded px-2 py-1"
+                  >
+                    <option value="hidden">Hidden</option>
+                    <option value="view">View</option>
+                    <option value="create">Create</option>
+                    <option value="edit">Edit</option>
+                    <option value="approve">Approve</option>
+                    <option value="delete">Delete</option>
+                    <option value="export">Export</option>
+                    <option value="full">Full</option>
+                  </select>
+                </div>
+              ))}
+            </div>
+          </DataPanel>
+        </div>
+      )}
+      {activeTab === "settings" && (
+        <div className="space-y-6">
+          <DataPanel title="Security Settings">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <FormField label="Failed Login Limit">
+                <input
+                  type="number"
+                  defaultValue={5}
+                  className="form-input"
+                  min="1"
+                  max="10"
+                />
+              </FormField>
+              <FormField label="Passcode Length">
+                <input
+                  type="number"
+                  defaultValue={6}
+                  className="form-input"
+                  disabled
+                />
+              </FormField>
+              <FormField label="Session Timeout (minutes)">
+                <input
+                  type="number"
+                  defaultValue={480}
+                  className="form-input"
+                  min="60"
+                  max="1440"
+                />
+              </FormField>
+              <FormField label="Default Role for New Staff">
+                <select className="form-input">
+                  <option value="Backoffice Operator">
+                    Backoffice Operator
+                  </option>
+                  <option value="Product Data Clerk">Product Data Clerk</option>
+                  <option value="Catalogue Officer">Catalogue Officer</option>
+                  <option value="Collections Officer">
+                    Collections Officer
+                  </option>
+                  <option value="RPN Manager">RPN Manager</option>
+                  <option value="CAH Officer">CAH Officer</option>
+                  <option value="BI Analyst">BI Analyst</option>
+                  <option value="Viewer">Viewer</option>
+                </select>
+              </FormField>
+              <FormField label="Default Desk for New Staff">
+                <select className="form-input">
+                  <option value="Backoffice Desk">Backoffice Desk</option>
+                  <option value="Product Data Desk">Product Data Desk</option>
+                  <option value="Catalogue Deployment Desk">
+                    Catalogue Deployment Desk
+                  </option>
+                  <option value="Collections Desk">Collections Desk</option>
+                  <option value="RPN Management Desk">
+                    RPN Management Desk
+                  </option>
+                  <option value="CAH Operations Desk">
+                    CAH Operations Desk
+                  </option>
+                  <option value="BI & Analytics Desk">
+                    BI & Analytics Desk
+                  </option>
+                  <option value="Viewer Desk">Viewer Desk</option>
+                </select>
+              </FormField>
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" defaultChecked />
+                  <span className="text-sm">Require numbers only</span>
+                </label>
+              </div>
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" defaultChecked />
+                  <span className="text-sm">
+                    Require passcode change after reset
+                  </span>
+                </label>
+              </div>
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" />
+                  <span className="text-sm">
+                    Allow first SysAdmin setup mode
+                  </span>
+                </label>
+              </div>
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" />
+                  <span className="text-sm">Privacy mode for reports</span>
+                </label>
+              </div>
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" />
+                  <span className="text-sm">
+                    Show phone numbers in admin-only views
+                  </span>
+                </label>
+              </div>
+            </div>
+            <div className="flex gap-4 mt-6">
+              <PrimaryButton>Save Settings</PrimaryButton>
+              <SecondaryButton>Reset to Defaults</SecondaryButton>
+            </div>
+          </DataPanel>
+        </div>
+      )}
+
+      <ConfirmDialog
+        isOpen={isConfirmOpen}
+        title={confirmConfig?.title || ""}
+        message={confirmConfig?.message || ""}
+        variant={confirmConfig?.variant}
+        onConfirm={() => {
+          confirmConfig?.action();
+          setIsConfirmOpen(false);
+        }}
+        onCancel={() => setIsConfirmOpen(false)}
+      />
+
+      <ConfirmDialog
+        isOpen={isPasscodeModalOpen}
+        title={
+          passcodeModalConfig?.isOverride
+            ? "Reset Passcode"
+            : "Reset Passcode (Force Change)"
+        }
+        message={`Enter new 6-digit passcode for ${passcodeModalConfig?.staff.displayName}:`}
+        variant="warning"
+        onConfirm={() => {
+          if (tempPasscode !== confirmTempPasscode) {
+            alert("Passcodes do not match.");
+            return;
+          }
+          if (passcodeModalConfig) {
+            handlePasscodeAction(
+              passcodeModalConfig.staff,
+              tempPasscode,
+              passcodeModalConfig.isOverride,
+            );
+          }
+        }}
+        onCancel={() => {
+          setIsPasscodeModalOpen(false);
+          setTempPasscode("");
+          setConfirmTempPasscode("");
+        }}
+      >
+        <div className="mt-4 space-y-4">
+          <input
+            type="password"
+            value={tempPasscode}
+            onChange={(e) =>
+              setTempPasscode(e.target.value.replace(/\D/g, "").slice(0, 6))
+            }
+            placeholder="New 6-digit Passcode"
+            className="form-input w-full"
+            maxLength={6}
+            required
+            autoFocus
+          />
+          <input
+            type="password"
+            value={confirmTempPasscode}
+            onChange={(e) =>
+              setConfirmTempPasscode(
+                e.target.value.replace(/\D/g, "").slice(0, 6),
+              )
+            }
+            placeholder="Confirm 6-digit Passcode"
+            className="form-input w-full"
+            maxLength={6}
+            required
+          />
+        </div>
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        isOpen={isApplyRoleModalOpen}
+        title={`Apply Role: ${applyRoleConfig?.role}`}
+        message="Enter the ID of the staff member to apply this role to:"
+        variant="warning"
+        onConfirm={() => {
+          if (applyRoleStaffId && applyRoleConfig) {
+            const staff = staffService.getStaffById(applyRoleStaffId);
+            if (staff) {
+              staffService.saveStaff({
+                ...staff,
+                role: applyRoleConfig.role,
+                desk: staffService.getDefaultDesk(applyRoleConfig.role),
+                menuPermissions: ROLE_TEMPLATES[applyRoleConfig.role],
+                updatedAt: new Date().toISOString(),
+              });
+              analyticsService.logEvent({
+                eventType: "STAFF_ROLE_CHANGED",
+                actorType: "admin",
+                actorName: "SysAdmin",
+                actorId: staff.id,
+                result: "updated",
+                details: { newRole: applyRoleConfig.role, staffId: staff.id },
+              });
+              loadStaff();
+              loadLogs();
+              setIsApplyRoleModalOpen(false);
+            } else {
+              alert("Staff not found.");
+            }
+          }
+        }}
+        onCancel={() => setIsApplyRoleModalOpen(false)}
+      >
+        <div className="mt-4">
+          <input
+            type="text"
+            value={applyRoleStaffId}
+            onChange={(e) => setApplyRoleStaffId(e.target.value)}
+            placeholder="Enter Staff ID"
+            className="form-input w-full"
+            required
+            autoFocus
+          />
+        </div>
+      </ConfirmDialog>
+    </div>
+  );
+};

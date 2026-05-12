@@ -1,0 +1,1436 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useState, useEffect, useMemo } from "react";
+import {
+  Wallet,
+  DollarSign,
+  Download,
+  MessageSquare,
+  User,
+  AlertTriangle,
+  CheckCircle2,
+  Calendar,
+  Ban,
+  Activity,
+} from "lucide-react";
+import {
+  TablePanel,
+  StatusBadge,
+  SearchInput,
+  StatCard,
+  DataPanel,
+  SecondaryButton,
+  ConfirmDialog,
+  EmptyState,
+} from "../components/CommonUI.tsx";
+import { subscriptionService } from "../services/subscriptionService.ts";
+import { vendorService } from "../services/vendorService.ts";
+import { rpnService } from "../services/rpnService.ts";
+import { pricingPlanService } from "../services/pricingPlanService.ts";
+import { analyticsService } from "../services/analyticsService.ts";
+import { pdfService, ReportType } from "../services/pdfService.ts";
+import { permissionService } from "../services/permissionService.ts";
+import {
+  Subscription,
+  Vendor,
+  RPN,
+  PricingPlan,
+  CollectionRecord,
+  SubscriptionStatus,
+  FollowUpStatus,
+  CollectionMethod,
+} from "../types.ts";
+import { asArray } from "../utils/safeData.ts";
+
+export const SubscriptionManagement: React.FC = () => {
+  const [subs, setSubs] = useState<Subscription[]>([]);
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [rpns, setRpns] = useState<RPN[]>([]);
+  const [plans, setPlans] = useState<PricingPlan[]>([]);
+  const [collections, setCollections] = useState<CollectionRecord[]>([]);
+
+  const [search, setSearch] = useState("");
+  const [activeTab, setActiveTab] = useState<
+    "subscriptions" | "collections" | "follow-ups" | "calendar"
+  >("subscriptions");
+  const [calendarView, setCalendarView] = useState<"month" | "week" | "today">(
+    "month",
+  );
+  const [calendarDate, setCalendarDate] = useState(new Date());
+  const [rpnFilter, setRpnFilter] = useState("");
+  const [planFilter, setPlanFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [timeFilter, setTimeFilter] = useState("all");
+
+  const [showCollectionModal, setShowCollectionModal] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportConfig, setReportConfig] = useState<{
+    type: ReportType;
+    title: string;
+  }>({
+    type: "due",
+    title: "Due Collections Report",
+  });
+
+  const [selectedSub, setSelectedSub] = useState<Subscription | null>(null);
+  const [collectionForm, setCollectionForm] = useState({
+    amount: 0,
+    method: "cash" as CollectionMethod,
+    ref: "",
+    notes: "",
+  });
+
+  const safeSubs = asArray<Subscription>(subs);
+  const safeVendors = asArray<Vendor>(vendors);
+  const safeRpns = asArray<RPN>(rpns);
+  const safePlans = asArray<PricingPlan>(plans);
+  const safeCollections = asArray<CollectionRecord>(collections);
+
+  const loadData = async () => {
+    try {
+      const [rawSubs, rawVendors, rawRpns, rawPlans, rawCollections] =
+        await Promise.all([
+          Promise.resolve(subscriptionService.getAllSubscriptions()),
+          Promise.resolve(vendorService.getVendors()),
+          Promise.resolve(rpnService.getAll()),
+          Promise.resolve(pricingPlanService.getPlans()),
+          Promise.resolve(subscriptionService.getAllCollections()),
+        ]);
+
+      setSubs(asArray<Subscription>(rawSubs));
+      setVendors(asArray<Vendor>(rawVendors));
+      setRpns(asArray<RPN>(rawRpns));
+      setPlans(asArray<PricingPlan>(rawPlans));
+      setCollections(asArray<CollectionRecord>(rawCollections));
+    } catch (error) {
+      console.warn(
+        "Subscription Management data failed to load. Using empty arrays.",
+        error,
+      );
+
+      setSubs([]);
+      setVendors([]);
+      setRpns([]);
+      setPlans([]);
+      setCollections([]);
+    }
+  };
+
+  useEffect(() => {
+    void loadData();
+  }, []);
+
+  const getVendor = (vendorId: string) => {
+    return safeVendors.find((vendor) => vendor.id === vendorId);
+  };
+
+  const getRpn = (rpnId?: string) => {
+    return safeRpns.find((rpn) => rpn.id === rpnId);
+  };
+
+  const getPlan = (planId?: string) => {
+    return safePlans.find((plan) => plan.id === planId);
+  };
+
+  const calendarData = useMemo(() => {
+    return safeSubs.filter((subscription) => {
+      const vendor = safeVendors.find((v) => v.id === subscription.vendorId);
+
+      const matchesRPN = !rpnFilter || subscription.assignedRPNId === rpnFilter;
+
+      const matchesPlan = !planFilter || subscription.planId === planFilter;
+
+      let matchesTime = true;
+      const now = new Date();
+      const todayString = now.toISOString().split("T")[0];
+      const weekFromNow = new Date();
+      weekFromNow.setDate(now.getDate() + 7);
+      const weekString = weekFromNow.toISOString().split("T")[0];
+
+      if (timeFilter === "this-week") {
+        matchesTime =
+          subscription.dueDate >= todayString &&
+          subscription.dueDate <= weekString;
+      } else if (timeFilter === "overdue") {
+        matchesTime = subscription.status === "overdue";
+      } else if (timeFilter === "ptp") {
+        matchesTime = subscription.followUpStatus === "promised to pay";
+      } else if (timeFilter === "escalated") {
+        matchesTime = subscription.followUpStatus === "escalated";
+      }
+
+      const matchesStatus =
+        !statusFilter || subscription.status === statusFilter;
+
+      const loweredSearch = search.toLowerCase();
+
+      const matchesSearch =
+        !search ||
+        vendor?.name?.toLowerCase().includes(loweredSearch) ||
+        vendor?.systemCode?.toLowerCase().includes(loweredSearch) ||
+        subscription.id.toLowerCase().includes(loweredSearch);
+
+      return (
+        matchesRPN &&
+        matchesPlan &&
+        matchesTime &&
+        matchesStatus &&
+        matchesSearch
+      );
+    });
+  }, [
+    safeSubs,
+    safeVendors,
+    rpnFilter,
+    planFilter,
+    timeFilter,
+    statusFilter,
+    search,
+  ]);
+
+  const generateWhatsAppReminderLink = (vendor: Vendor, sub: Subscription) => {
+    if (!vendor.whatsappNumber) return null;
+
+    const plan = getPlan(sub.planId);
+    const dueDate = new Date(sub.dueDate).toLocaleDateString();
+    const cleanPhone = vendor.whatsappNumber.replace(/[\s+()-]/g, "");
+
+    const message = `Hello ${vendor.name}, this is a subscription reminder from iTred powered by seiGEN Commerce.
+
+Vendor Code: ${vendor.systemCode}
+Plan: ${plan?.name || sub.planId}
+Amount Due: ${sub.currency} ${Number(sub.amountDue || 0).toLocaleString()}
+Due Date: ${dueDate}
+
+Please arrange payment or contact your assigned RPN/backoffice support.
+
+Thank you.`;
+
+    return `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
+  };
+
+  const handleWhatsAppReminder = (
+    vendor: Vendor | undefined,
+    sub: Subscription,
+  ) => {
+    if (!vendor) {
+      alert("Vendor record missing for this subscription.");
+      return;
+    }
+
+    const link = generateWhatsAppReminderLink(vendor, sub);
+
+    if (!link) {
+      alert("WhatsApp number missing for this vendor.");
+      return;
+    }
+
+    analyticsService.logEvent({
+      eventType: "WHATSAPP_COLLECTION_REMINDER_OPENED",
+      actorType: "admin",
+      actorName: "System Admin",
+      vendorId: vendor.id,
+      subscriptionId: sub.id,
+      details: {
+        systemCode: vendor.systemCode,
+        plan: sub.planId,
+        amount: sub.amountDue,
+      },
+    });
+
+    window.open(link, "_blank");
+  };
+
+  const calendarStats = useMemo(() => {
+    const now = new Date();
+    const today = now.toISOString().split("T")[0];
+    const startOfMonth = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      1,
+    ).toISOString();
+
+    const weekFromNow = new Date();
+    weekFromNow.setDate(now.getDate() + 7);
+    const weekString = weekFromNow.toISOString().split("T")[0];
+
+    return {
+      dueToday: safeSubs.filter(
+        (s) => s.dueDate?.startsWith(today) && s.status !== "paid",
+      ).length,
+      dueThisWeek: safeSubs.filter(
+        (s) =>
+          s.dueDate >= today && s.dueDate <= weekString && s.status !== "paid",
+      ).length,
+      overdue: safeSubs.filter((s) => s.status === "overdue").length,
+      ptp: safeSubs.filter((s) => s.followUpStatus === "promised to pay")
+        .length,
+      paidMonth: safeCollections.filter(
+        (c) => c.createdAt >= startOfMonth && c.status === "approved",
+      ).length,
+      suspended: safeVendors.filter((v) => v.status === "suspended").length,
+    };
+  }, [safeSubs, safeCollections, safeVendors]);
+
+  const stats = useMemo(() => {
+    const now = new Date();
+    const today = now.toISOString().split("T")[0];
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    return {
+      dueToday: safeSubs.filter(
+        (s) => s.dueDate?.split("T")[0] === today && s.status !== "paid",
+      ).length,
+      overdue: safeSubs.filter((s) => s.status === "overdue").length,
+      paidMonth: safeSubs.filter(
+        (s) =>
+          s.status === "paid" &&
+          s.lastPaymentDate &&
+          new Date(s.lastPaymentDate) >= startOfMonth,
+      ).length,
+      collectionTotal: safeCollections.reduce(
+        (sum, collection) => sum + Number(collection.amountCollected || 0),
+        0,
+      ),
+    };
+  }, [safeSubs, safeCollections]);
+
+  const filteredSubs = useMemo(() => {
+    const loweredSearch = search.toLowerCase();
+
+    return safeSubs.filter((subscription) => {
+      const vendor = safeVendors.find((v) => v.id === subscription.vendorId);
+
+      const matchesSearch =
+        !search ||
+        vendor?.name?.toLowerCase().includes(loweredSearch) ||
+        subscription.id.toLowerCase().includes(loweredSearch);
+
+      const matchesRPN = !rpnFilter || subscription.assignedRPNId === rpnFilter;
+
+      const matchesPlan = !planFilter || subscription.planId === planFilter;
+
+      const matchesStatus =
+        !statusFilter || subscription.status === statusFilter;
+
+      return matchesSearch && matchesRPN && matchesPlan && matchesStatus;
+    });
+  }, [safeSubs, safeVendors, search, rpnFilter, planFilter, statusFilter]);
+
+  const followUpQueue = useMemo(() => {
+    return safeSubs
+      .filter((subscription) => {
+        const plan = safePlans.find((p) => p.id === subscription.planId);
+        const isOverdue =
+          subscription.status === "due" || subscription.status === "overdue";
+
+        const hasFollowUpPermission = plan
+          ? plan.isCollectionReminderEnabled
+          : true;
+
+        const isFollowUpStarted = subscription.followUpStatus !== "not started";
+
+        return (isOverdue && hasFollowUpPermission) || isFollowUpStarted;
+      })
+      .sort(
+        (a, b) =>
+          new Date(a.nextFollowUpDate || "").getTime() -
+          new Date(b.nextFollowUpDate || "").getTime(),
+      );
+  }, [safeSubs, safePlans]);
+
+  const handleStatusUpdate = async (
+    sub: Subscription,
+    newStatus: SubscriptionStatus,
+  ) => {
+    const updated: Subscription = {
+      ...sub,
+      status: newStatus,
+      updatedBy: "Admin",
+      updatedAt: new Date().toISOString(),
+    };
+
+    await Promise.resolve(subscriptionService.saveSubscription(updated));
+
+    analyticsService.logEvent({
+      eventType: "SUBSCRIPTION_DUE",
+      actorType: "admin",
+      actorName: "System Admin",
+      vendorId: sub.vendorId,
+      subscriptionId: sub.id,
+      details: { oldStatus: sub.status, newStatus },
+    });
+
+    await loadData();
+  };
+
+  const handleExport = () => {
+    let report = "iTred SUBSCRIPTION COLLECTION REPORT (PRIVACY-SAFE)\n";
+    report += `Generated At: ${new Date().toLocaleString()}\n`;
+    report += "--------------------------------------------------\n";
+    report += "SYSTEM CODE | VENDOR NAME | PLAN | DUE DATE | STATUS | AMOUNT\n";
+
+    filteredSubs.forEach((subscription) => {
+      const vendor = getVendor(subscription.vendorId);
+      const vendorName = vendor?.name?.substring(0, 15) || "---";
+
+      report += `${vendor?.systemCode || "---"} | ${vendorName} | ${
+        subscription.planId
+      } | ${new Date(subscription.dueDate).toLocaleDateString()} | ${
+        subscription.status
+      } | ${subscription.currency} ${subscription.amountDue}\n`;
+    });
+
+    const blob = new Blob([report], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = `itred_collection_report_${
+      new Date().toISOString().split("T")[0]
+    }.txt`;
+    link.click();
+
+    URL.revokeObjectURL(url);
+
+    analyticsService.logEvent({
+      eventType: "CATALOGUE_DOWNLOADED",
+      actorType: "admin",
+      actorName: "System Admin",
+      details: { type: "subscription_report", count: filteredSubs.length },
+    });
+  };
+
+  const handleFollowUpUpdate = async (
+    sub: Subscription,
+    newFollowUp: FollowUpStatus,
+  ) => {
+    const updated: Subscription = {
+      ...sub,
+      followUpStatus: newFollowUp,
+      updatedBy: "Admin",
+      updatedAt: new Date().toISOString(),
+    };
+
+    await Promise.resolve(subscriptionService.saveSubscription(updated));
+
+    analyticsService.logEvent({
+      eventType: "FOLLOW_UP_RECORDED",
+      actorType: "admin",
+      actorName: "System Admin",
+      vendorId: sub.vendorId,
+      subscriptionId: sub.id,
+      details: { status: newFollowUp },
+    });
+
+    await loadData();
+  };
+
+  const handleGeneratePDF = () => {
+    pdfService.generateSubscriptionReport(
+      {
+        ...reportConfig,
+        rpnId: rpnFilter || undefined,
+        planId: planFilter || undefined,
+      },
+      {
+        subs: safeSubs,
+        collections: safeCollections,
+        vendors: safeVendors,
+        plans: safePlans,
+        rpns: safeRpns,
+      },
+    );
+
+    setShowReportModal(false);
+  };
+
+  const handleVendorStatement = (vendor?: Vendor) => {
+    if (!vendor) {
+      alert("Vendor record missing. Cannot generate statement.");
+      return;
+    }
+
+    pdfService.generateVendorStatement(vendor, {
+      subs: safeSubs,
+      collections: safeCollections,
+      plans: safePlans,
+    });
+
+    analyticsService.logEvent({
+      eventType: "CATALOGUE_DOWNLOADED",
+      actorType: "admin",
+      actorName: "System Admin",
+      vendorId: vendor.id,
+      details: { type: "vendor_statement" },
+    });
+  };
+
+  const recordCollection = async () => {
+    if (!selectedSub) return;
+
+    const amountCollected = Number(collectionForm.amount || 0);
+
+    if (amountCollected <= 0) {
+      alert("Enter a valid collection amount.");
+      return;
+    }
+
+    const record: CollectionRecord = {
+      id: `COL-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
+      vendorId: selectedSub.vendorId,
+      vendorNameSnapshot: selectedSub.vendorNameSnapshot,
+      rpnId: selectedSub.assignedRPNId,
+      staffId: "ADMIN-01",
+      amountCollected,
+      currency: selectedSub.currency,
+      collectionDate: new Date().toISOString(),
+      collectionMethod: collectionForm.method,
+      referenceNumber: collectionForm.ref,
+      notes: collectionForm.notes,
+      status: "pending approval",
+      createdAt: new Date().toISOString(),
+    };
+
+    await Promise.resolve(subscriptionService.saveCollection(record));
+
+    analyticsService.logEvent({
+      eventType: "COLLECTION_RECORDED",
+      actorType: "admin",
+      actorName: "System Admin",
+      vendorId: selectedSub.vendorId,
+      subscriptionId: selectedSub.id,
+      details: {
+        amount: record.amountCollected,
+        method: record.collectionMethod,
+      },
+    });
+
+    setShowCollectionModal(false);
+    setSelectedSub(null);
+    setCollectionForm({
+      amount: 0,
+      method: "cash",
+      ref: "",
+      notes: "",
+    });
+
+    await loadData();
+
+    alert("Collection recorded and pending approval.");
+  };
+
+  const whatsappRPN = (phone: string, message: string) => {
+    const cleanPhone = phone.replace(/\D/g, "");
+
+    if (!cleanPhone) {
+      alert("RPN WhatsApp number missing.");
+      return;
+    }
+
+    window.open(
+      `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`,
+      "_blank",
+    );
+  };
+
+  return (
+    <div className="space-y-8 pb-20">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <StatCard
+          label="Due Today"
+          value={stats.dueToday}
+          icon={Calendar}
+          variant={stats.dueToday > 0 ? "warning" : "neutral"}
+        />
+        <StatCard
+          label="Overdue"
+          value={stats.overdue}
+          icon={AlertTriangle}
+          variant={stats.overdue > 0 ? "error" : "neutral"}
+        />
+        <StatCard
+          label="Paid This Month"
+          value={stats.paidMonth}
+          icon={CheckCircle2}
+          variant="neutral"
+        />
+        <StatCard
+          label="Total Collections"
+          value={`$${stats.collectionTotal.toLocaleString()}`}
+          icon={Wallet}
+        />
+      </div>
+
+      <div className="flex flex-col md:flex-row gap-4 items-center justify-between bg-white p-6 border border-stone-200">
+        <div className="flex gap-1 bg-stone-100 p-1">
+          {(
+            ["subscriptions", "collections", "follow-ups", "calendar"] as const
+          ).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`px-4 py-1.5 text-[10px] font-bold uppercase transition-all ${
+                activeTab === tab
+                  ? "bg-white text-brand-orange shadow-sm"
+                  : "text-stone-400 hover:text-stone-600"
+              }`}
+            >
+              {tab.replace("-", " ")}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex flex-wrap gap-2 items-center">
+          <select
+            className="bg-stone-50 border border-stone-200 px-3 py-1.5 text-[10px] font-bold uppercase outline-none focus:border-brand-orange"
+            value={rpnFilter}
+            onChange={(e) => setRpnFilter(e.target.value)}
+          >
+            <option value="">All RPNs</option>
+            {safeRpns.map((rpn) => (
+              <option key={rpn.id} value={rpn.id}>
+                {rpn.name}
+              </option>
+            ))}
+          </select>
+
+          <select
+            className="bg-stone-50 border border-stone-200 px-3 py-1.5 text-[10px] font-bold uppercase outline-none focus:border-brand-orange"
+            value={planFilter}
+            onChange={(e) => setPlanFilter(e.target.value)}
+          >
+            <option value="">All Plans</option>
+            {safePlans.map((plan) => (
+              <option key={plan.id} value={plan.id}>
+                {plan.name}
+              </option>
+            ))}
+          </select>
+
+          <SearchInput
+            placeholder="Search vendor..."
+            className="w-48"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+      </div>
+
+      {activeTab === "subscriptions" && (
+        <TablePanel
+          title="Subscription Matrix"
+          subtitle={`${filteredSubs.length} active records based on filters`}
+          headers={[
+            "Vendor / RPN",
+            "Plan / Amount",
+            "Dates",
+            "Status",
+            "Actions",
+          ]}
+          actions={
+            <div className="flex gap-2">
+              {permissionService.canExport("subscriptionsCollections") && (
+                <SecondaryButton
+                  size="sm"
+                  onClick={() => setShowReportModal(true)}
+                >
+                  <Download size={14} className="mr-2" /> Reports
+                </SecondaryButton>
+              )}
+              {permissionService.canExport("subscriptionsCollections") && (
+                <SecondaryButton size="sm" onClick={handleExport}>
+                  <Download size={14} className="mr-2" /> CSV
+                </SecondaryButton>
+              )}
+            </div>
+          }
+        >
+          {filteredSubs.map((sub) => {
+            const vendor = getVendor(sub.vendorId);
+            const rpn = getRpn(sub.assignedRPNId);
+            const plan = getPlan(sub.planId);
+
+            return (
+              <tr key={sub.id} className="group hover:bg-stone-50/50">
+                <td className="px-6 py-4">
+                  <div className="flex items-center gap-3">
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[9px] font-mono font-black text-brand-charcoal bg-stone-100 px-1 border border-stone-200">
+                        {vendor?.systemCode || "---"}
+                      </span>
+                      <div className="w-8 h-8 bg-stone-100 flex items-center justify-center text-stone-400 font-bold italic text-[9px]">
+                        {vendor?.name?.charAt(0) || "?"}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold uppercase text-brand-charcoal">
+                        {vendor?.name ||
+                          sub.vendorNameSnapshot ||
+                          "Unknown Vendor"}
+                      </p>
+                      <p
+                        className="text-[9px] font-mono text-stone-400 flex items-center gap-1 group-hover:text-brand-orange transition-colors cursor-pointer"
+                        onClick={() =>
+                          whatsappRPN(
+                            rpn?.whatsapp || "",
+                            `Hello ${rpn?.name || "RPN"}, checking on collection status for ${vendor?.name || sub.vendorNameSnapshot}.`,
+                          )
+                        }
+                      >
+                        <User size={10} /> {rpn?.name || "Unassigned"}
+                      </p>
+                    </div>
+                  </div>
+                </td>
+
+                <td className="px-6 py-4">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[9px] font-extrabold text-stone-400 uppercase tracking-tighter">
+                      {plan?.name || sub.planId}
+                    </span>
+                    <p className="text-sm font-bold font-mono">
+                      {sub.currency}{" "}
+                      {Number(sub.amountDue || 0).toLocaleString()}
+                    </p>
+                    <span className="text-[8px] font-bold uppercase text-stone-300">
+                      {sub.billingPeriod}
+                    </span>
+                  </div>
+                </td>
+
+                <td className="px-6 py-4">
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-bold text-stone-500 uppercase flex items-center gap-2">
+                      <Calendar size={10} /> Due:{" "}
+                      {new Date(sub.dueDate).toLocaleDateString()}
+                    </p>
+                    {sub.lastPaymentDate && (
+                      <p className="text-[9px] font-bold text-emerald-500 uppercase flex items-center gap-2">
+                        <CheckCircle2 size={10} /> Paid:{" "}
+                        {new Date(sub.lastPaymentDate).toLocaleDateString()}
+                      </p>
+                    )}
+                  </div>
+                </td>
+
+                <td className="px-6 py-4">
+                  <StatusBadge
+                    status={sub.status}
+                    variant={
+                      sub.status === "active" || sub.status === "paid"
+                        ? "success"
+                        : sub.status === "overdue"
+                          ? "error"
+                          : "warning"
+                    }
+                  />
+                </td>
+
+                <td className="px-6 py-4">
+                  <div className="flex gap-2">
+                    {permissionService.canCreate(
+                      "subscriptionsCollections",
+                    ) && (
+                      <button
+                        onClick={() => {
+                          setSelectedSub(sub);
+                          setShowCollectionModal(true);
+                        }}
+                        className="p-2 hover:bg-emerald-50 text-emerald-600 transition-all rounded"
+                        title="Record Collection"
+                      >
+                        <DollarSign size={14} />
+                      </button>
+                    )}
+
+                    {permissionService.canExport(
+                      "subscriptionsCollections",
+                    ) && (
+                      <button
+                        className="p-2 hover:bg-stone-100 text-stone-400 transition-all rounded"
+                        onClick={() => handleVendorStatement(vendor)}
+                        title="Download Statement"
+                      >
+                        <Download size={14} />
+                      </button>
+                    )}
+
+                    {permissionService.canEdit("subscriptionsCollections") && (
+                      <button
+                        className="p-2 hover:bg-stone-100 text-stone-400 transition-all rounded"
+                        onClick={() => handleWhatsAppReminder(vendor, sub)}
+                        title={
+                          vendor?.whatsappNumber
+                            ? "Send WhatsApp Reminder"
+                            : "WhatsApp number missing"
+                        }
+                      >
+                        <MessageSquare
+                          size={14}
+                          className={
+                            vendor?.whatsappNumber
+                              ? "text-emerald-500"
+                              : "text-stone-300 opacity-50"
+                          }
+                        />
+                      </button>
+                    )}
+
+                    {permissionService.canEdit("subscriptionsCollections") &&
+                    sub.status !== "suspended" ? (
+                      <button
+                        onClick={() => handleStatusUpdate(sub, "suspended")}
+                        className="p-2 hover:bg-red-50 text-red-400 transition-all rounded"
+                        title="Suspend"
+                      >
+                        <Ban size={14} />
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleStatusUpdate(sub, "active")}
+                        className="p-2 hover:bg-blue-50 text-blue-400 transition-all rounded"
+                        title="Activate"
+                      >
+                        <Activity size={14} />
+                      </button>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+
+          {filteredSubs.length === 0 && (
+            <tr>
+              <td colSpan={5} className="py-20 text-center">
+                <EmptyState
+                  title="No Subscription Records"
+                  description="No subscription records match the current filters."
+                />
+              </td>
+            </tr>
+          )}
+        </TablePanel>
+      )}
+
+      {activeTab === "collections" && (
+        <TablePanel
+          title="Collection Ledger"
+          headers={[
+            "Date",
+            "Vendor",
+            "Collector",
+            "Amount",
+            "Method",
+            "Status",
+          ]}
+        >
+          {safeCollections.map((record) => (
+            <tr key={record.id} className="hover:bg-stone-50/50">
+              <td className="px-6 py-4 text-xs font-mono font-bold text-stone-400">
+                {new Date(record.collectionDate).toLocaleDateString()}
+              </td>
+              <td className="px-6 py-4">
+                <p className="text-xs font-bold uppercase">
+                  {record.vendorNameSnapshot}
+                </p>
+                <p className="text-[9px] font-mono text-stone-400">
+                  {record.id}
+                </p>
+              </td>
+              <td className="px-6 py-4 text-xs font-bold text-stone-500 uppercase">
+                {record.staffId}
+              </td>
+              <td className="px-6 py-4 text-sm font-bold font-mono">
+                {record.currency}{" "}
+                {Number(record.amountCollected || 0).toLocaleString()}
+              </td>
+              <td className="px-6 py-4">
+                <span className="text-[10px] font-bold uppercase p-1 bg-stone-100">
+                  {record.collectionMethod}
+                </span>
+              </td>
+              <td className="px-6 py-4">
+                <StatusBadge
+                  status={record.status}
+                  variant={
+                    record.status === "approved"
+                      ? "success"
+                      : record.status === "rejected"
+                        ? "error"
+                        : "warning"
+                  }
+                />
+              </td>
+            </tr>
+          ))}
+
+          {safeCollections.length === 0 && (
+            <tr>
+              <td colSpan={6} className="py-20 text-center">
+                <EmptyState
+                  title="No Collection Records"
+                  description="No collection payments have been recorded yet."
+                />
+              </td>
+            </tr>
+          )}
+        </TablePanel>
+      )}
+
+      {activeTab === "follow-ups" && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <DataPanel
+            title="Arrears Follow-Up Queue"
+            subtitle="Priority sorting by next follow-up date"
+          >
+            <div className="divide-y divide-stone-100">
+              {followUpQueue.map((sub) => {
+                const vendor = getVendor(sub.vendorId);
+
+                return (
+                  <div
+                    key={sub.id}
+                    className="p-6 flex items-center justify-between hover:bg-stone-50 transition-colors"
+                  >
+                    <div className="flex gap-4">
+                      <div
+                        className={`w-10 h-10 flex items-center justify-center font-bold text-lg ${
+                          sub.status === "overdue"
+                            ? "bg-red-50 text-red-500"
+                            : "bg-orange-50 text-brand-orange"
+                        }`}
+                      >
+                        !
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-mono font-black text-stone-500 mb-1">
+                          {vendor?.systemCode || "---"}
+                        </p>
+                        <p className="text-xs font-bold uppercase">
+                          {vendor?.name || sub.vendorNameSnapshot}
+                        </p>
+                        <p className="text-[9px] text-stone-400 font-bold uppercase">
+                          Next:{" "}
+                          {sub.nextFollowUpDate
+                            ? new Date(
+                                sub.nextFollowUpDate,
+                              ).toLocaleDateString()
+                            : "Not scheduled"}
+                        </p>
+                        <div className="mt-2 flex gap-1">
+                          <StatusBadge status={sub.followUpStatus} />
+                          <StatusBadge status={sub.status} variant="error" />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => handleWhatsAppReminder(vendor, sub)}
+                        className={`px-3 py-1 text-[9px] font-bold uppercase transition-colors ${
+                          vendor?.whatsappNumber
+                            ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                            : "bg-stone-100 text-stone-300 cursor-not-allowed"
+                        }`}
+                        disabled={!vendor?.whatsappNumber}
+                      >
+                        {vendor?.whatsappNumber
+                          ? "WhatsApp Reminder"
+                          : "No WhatsApp"}
+                      </button>
+
+                      <button
+                        onClick={() => handleFollowUpUpdate(sub, "contacted")}
+                        className="px-3 py-1 text-[9px] font-bold uppercase bg-stone-900 text-white hover:bg-brand-orange transition-colors"
+                      >
+                        Mark Call
+                      </button>
+
+                      <button
+                        onClick={() =>
+                          handleFollowUpUpdate(sub, "promised to pay")
+                        }
+                        className="px-3 py-1 text-[9px] font-bold uppercase border border-stone-200 text-stone-400 hover:text-stone-900"
+                      >
+                        PTP
+                      </button>
+
+                      <button
+                        onClick={() => handleFollowUpUpdate(sub, "escalated")}
+                        className="px-3 py-1 text-[9px] font-bold uppercase border border-red-100 text-red-300 hover:text-red-600"
+                      >
+                        Escalate
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {followUpQueue.length === 0 && (
+                <EmptyState
+                  title="Queue Empty"
+                  description="All subscriptions are up to date or being followed up correctly."
+                />
+              )}
+            </div>
+          </DataPanel>
+
+          <DataPanel title="Escalations & Alerts">
+            <div className="p-8 text-center bg-stone-50 h-full flex flex-col items-center justify-center">
+              <AlertTriangle size={48} className="text-stone-200 mb-4" />
+              <p className="text-[10px] font-bold uppercase text-stone-400 max-w-xs">
+                High-risk vendors flagged for suspension appear here. No current
+                critical escalations found in the system.
+              </p>
+            </div>
+          </DataPanel>
+        </div>
+      )}
+
+      {activeTab === "calendar" && (
+        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+            <div className="bg-white p-4 border border-stone-200 shadow-sm">
+              <p className="text-[9px] font-black uppercase text-stone-300 mb-1">
+                Due Today
+              </p>
+              <p className="text-xl font-bold text-stone-800">
+                {calendarStats.dueToday}
+              </p>
+            </div>
+            <div className="bg-white p-4 border border-stone-200 shadow-sm">
+              <p className="text-[9px] font-black uppercase text-stone-300 mb-1">
+                This Week
+              </p>
+              <p className="text-xl font-bold text-stone-800">
+                {calendarStats.dueThisWeek}
+              </p>
+            </div>
+            <div className="bg-red-50 p-4 border border-red-100 shadow-sm">
+              <p className="text-[9px] font-black uppercase text-red-300 mb-1">
+                Overdue Arrears
+              </p>
+              <p className="text-xl font-bold text-red-600">
+                {calendarStats.overdue}
+              </p>
+            </div>
+            <div className="bg-amber-50 p-4 border border-amber-100 shadow-sm">
+              <p className="text-[9px] font-black uppercase text-amber-500 mb-1">
+                Promised (PTP)
+              </p>
+              <p className="text-xl font-bold text-amber-600">
+                {calendarStats.ptp}
+              </p>
+            </div>
+            <div className="bg-emerald-50 p-4 border border-emerald-100 shadow-sm">
+              <p className="text-[9px] font-black uppercase text-emerald-500 mb-1">
+                Mo. Collections
+              </p>
+              <p className="text-xl font-bold text-emerald-600">
+                {calendarStats.paidMonth}
+              </p>
+            </div>
+            <div className="bg-stone-900 p-4 border border-stone-800 shadow-sm">
+              <p className="text-[9px] font-black uppercase text-stone-500 mb-1">
+                Suspended
+              </p>
+              <p className="text-xl font-bold text-stone-100">
+                {calendarStats.suspended}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-col xl:flex-row gap-6">
+            <div className="xl:w-64 space-y-6">
+              <DataPanel title="Calendar Filter">
+                <div className="p-4 space-y-4">
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-bold uppercase text-stone-400">
+                      Time Period
+                    </label>
+                    <select
+                      className="w-full bg-stone-50 border border-stone-200 p-2 text-[10px] font-bold uppercase outline-none"
+                      value={timeFilter}
+                      onChange={(e) => setTimeFilter(e.target.value)}
+                    >
+                      <option value="all">Full Cycle View</option>
+                      <option value="this-week">Due This Week</option>
+                      <option value="overdue">Overdue Items</option>
+                      <option value="ptp">Promised to Pay</option>
+                      <option value="escalated">Escalations</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-bold uppercase text-stone-400">
+                      View Range
+                    </label>
+                    <div className="grid grid-cols-1 gap-1">
+                      {(["month", "week", "today"] as const).map((view) => (
+                        <button
+                          key={view}
+                          onClick={() => setCalendarView(view)}
+                          className={`w-full text-left px-3 py-2 text-[9px] font-bold uppercase transition-all ${
+                            calendarView === view
+                              ? "bg-stone-900 text-white"
+                              : "hover:bg-stone-100 text-stone-400"
+                          }`}
+                        >
+                          {view} view
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </DataPanel>
+
+              <div className="hidden xl:block">
+                <DataPanel
+                  title="Quick Reminders"
+                  className="border-t-4 border-t-brand-orange"
+                >
+                  <div className="p-4">
+                    <p className="text-[9px] leading-relaxed text-stone-400 italic">
+                      Privacy mode is active. Phone numbers are hidden in system
+                      logs and reports. Use system-generated WhatsApp prompts
+                      for direct engagement.
+                    </p>
+                  </div>
+                </DataPanel>
+              </div>
+            </div>
+
+            <div className="flex-1">
+              <TablePanel
+                title={`${calendarView.charAt(0).toUpperCase() + calendarView.slice(1)} Collection Ledger`}
+                subtitle={`Projected collections for current cycle: ${calendarData.length} records`}
+                headers={[
+                  "Timeline",
+                  "Entity Identity",
+                  "Financial Data",
+                  "Status / Follow-up",
+                  "Actions",
+                ]}
+              >
+                {calendarData
+                  .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
+                  .map((sub) => {
+                    const vendor = getVendor(sub.vendorId);
+                    const rpn = getRpn(sub.assignedRPNId);
+
+                    return (
+                      <tr key={sub.id} className="hover:bg-stone-50/50">
+                        <td className="px-6 py-4">
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-xs font-bold text-stone-700">
+                              {new Date(sub.dueDate).toLocaleDateString(
+                                undefined,
+                                { day: "numeric", month: "short" },
+                              )}
+                            </span>
+                            <span className="text-[9px] font-mono text-stone-400">
+                              {new Date(sub.dueDate).toLocaleDateString(
+                                undefined,
+                                { weekday: "long" },
+                              )}
+                            </span>
+                          </div>
+                        </td>
+
+                        <td className="px-6 py-4">
+                          <div className="flex flex-col gap-1">
+                            <span className="text-[9px] font-mono font-black text-stone-500 bg-stone-100 px-1 border border-stone-200 w-fit">
+                              {vendor?.systemCode || "---"}
+                            </span>
+                            <p className="text-xs font-bold uppercase text-brand-charcoal truncate max-w-[150px]">
+                              {vendor?.name || sub.vendorNameSnapshot}
+                            </p>
+                            <span className="text-[9px] font-bold text-stone-400 uppercase italic">
+                              RPN: {rpn?.name || "GENERIC"}
+                            </span>
+                          </div>
+                        </td>
+
+                        <td className="px-6 py-4">
+                          <div className="flex flex-col gap-0.5">
+                            <p className="text-sm font-bold font-mono text-brand-charcoal">
+                              {sub.currency}{" "}
+                              {Number(sub.amountDue || 0).toLocaleString()}
+                            </p>
+                            <span className="text-[9px] font-bold uppercase text-stone-300">
+                              {sub.planId}
+                            </span>
+                          </div>
+                        </td>
+
+                        <td className="px-6 py-4">
+                          <div className="flex flex-col gap-1.5">
+                            <StatusBadge
+                              status={sub.status}
+                              variant={
+                                sub.status === "overdue"
+                                  ? "error"
+                                  : sub.status === "paid"
+                                    ? "success"
+                                    : "warning"
+                              }
+                            />
+                            <div className="flex gap-1 flex-wrap">
+                              <StatusBadge status={sub.followUpStatus} />
+                            </div>
+                          </div>
+                        </td>
+
+                        <td className="px-6 py-4">
+                          <div className="flex gap-1">
+                            <button
+                              title={
+                                vendor?.whatsappNumber
+                                  ? "Send WhatsApp Reminder"
+                                  : "WhatsApp number missing"
+                              }
+                              onClick={() =>
+                                handleWhatsAppReminder(vendor, sub)
+                              }
+                              className={`p-1.5 transition-colors ${
+                                vendor?.whatsappNumber
+                                  ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                                  : "bg-stone-100 text-stone-300 cursor-not-allowed"
+                              }`}
+                              disabled={!vendor?.whatsappNumber}
+                            >
+                              <MessageSquare size={12} />
+                            </button>
+                            <button
+                              title="Mark PTP"
+                              onClick={() =>
+                                handleFollowUpUpdate(sub, "promised to pay")
+                              }
+                              className="p-1.5 border border-stone-200 text-stone-400 hover:text-stone-900"
+                            >
+                              <Wallet size={12} />
+                            </button>
+                            <button
+                              title="Mark Contacted"
+                              onClick={() =>
+                                handleFollowUpUpdate(sub, "contacted")
+                              }
+                              className="p-1.5 border border-stone-200 text-stone-400 hover:text-stone-900"
+                            >
+                              <Activity size={12} />
+                            </button>
+                            <button
+                              title="Record Payment"
+                              onClick={() => {
+                                setSelectedSub(sub);
+                                setShowCollectionModal(true);
+                              }}
+                              className="p-1.5 border border-stone-200 text-stone-400 hover:text-emerald-600"
+                            >
+                              <DollarSign size={12} />
+                            </button>
+                            <button
+                              title="Escalate"
+                              onClick={() =>
+                                handleFollowUpUpdate(sub, "escalated")
+                              }
+                              className="p-1.5 border border-red-100 text-red-200 hover:text-red-500"
+                            >
+                              <AlertTriangle size={12} />
+                            </button>
+                            <button
+                              title="Suspend Vendor"
+                              onClick={() => {
+                                if (
+                                  confirm(
+                                    `Are you sure you want to suspend registration for ${vendor?.name || sub.vendorNameSnapshot}? Subscription record will be archived.`,
+                                  )
+                                ) {
+                                  handleStatusUpdate(sub, "suspended");
+                                }
+                              }}
+                              className="p-1.5 border border-stone-200 text-stone-200 hover:text-red-500"
+                            >
+                              <Ban size={12} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+
+                {calendarData.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="py-20 text-center">
+                      <EmptyState
+                        title="No Records Synchronized"
+                        description="Adjust your filters or timeline to view projected collections."
+                      />
+                    </td>
+                  </tr>
+                )}
+              </TablePanel>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ConfirmDialog
+        isOpen={showCollectionModal}
+        title={`Record Payment: ${selectedSub?.vendorNameSnapshot || ""}`}
+        message="Enter the details of the received payment. This will create a pending record for backend approval."
+        confirmLabel="Record Collection"
+        onConfirm={recordCollection}
+        onCancel={() => {
+          setShowCollectionModal(false);
+          setSelectedSub(null);
+        }}
+      >
+        <div className="mt-4 space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-[9px] font-bold uppercase text-stone-400 block mb-1">
+                Amount ({selectedSub?.currency})
+              </label>
+              <input
+                type="number"
+                className="w-full border p-2 text-sm font-bold outline-none focus:border-brand-orange"
+                value={collectionForm.amount}
+                onChange={(e) =>
+                  setCollectionForm({
+                    ...collectionForm,
+                    amount: Number(e.target.value),
+                  })
+                }
+              />
+            </div>
+
+            <div>
+              <label className="text-[9px] font-bold uppercase text-stone-400 block mb-1">
+                Method
+              </label>
+              <select
+                className="w-full border p-2 text-sm font-bold outline-none focus:border-brand-orange bg-white"
+                value={collectionForm.method}
+                onChange={(e) =>
+                  setCollectionForm({
+                    ...collectionForm,
+                    method: e.target.value as CollectionMethod,
+                  })
+                }
+              >
+                {(
+                  [
+                    "cash",
+                    "EcoCash",
+                    "InnBucks",
+                    "Mukuru",
+                    "bank transfer",
+                    "manual",
+                    "other",
+                  ] as CollectionMethod[]
+                ).map((method) => (
+                  <option key={method} value={method}>
+                    {method.toUpperCase()}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-[9px] font-bold uppercase text-stone-400 block mb-1">
+              Reference / POP Note
+            </label>
+            <input
+              type="text"
+              className="w-full border p-2 text-sm font-bold outline-none focus:border-brand-orange"
+              placeholder="Transaction ID or Ref"
+              value={collectionForm.ref}
+              onChange={(e) =>
+                setCollectionForm({ ...collectionForm, ref: e.target.value })
+              }
+            />
+          </div>
+
+          <div>
+            <label className="text-[9px] font-bold uppercase text-stone-400 block mb-1">
+              Notes
+            </label>
+            <textarea
+              rows={3}
+              className="w-full border p-2 text-sm font-bold outline-none focus:border-brand-orange"
+              placeholder="Optional notes"
+              value={collectionForm.notes}
+              onChange={(e) =>
+                setCollectionForm({ ...collectionForm, notes: e.target.value })
+              }
+            />
+          </div>
+        </div>
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        isOpen={showReportModal}
+        title="Intelligence Report Center"
+        message="Select the type of privacy-safe collection report you wish to export as PDF."
+        confirmLabel="Generate PDF"
+        onConfirm={handleGeneratePDF}
+        onCancel={() => setShowReportModal(false)}
+      >
+        <div className="mt-6 space-y-4">
+          <div className="grid grid-cols-1 gap-2">
+            {[
+              { id: "due", title: "Due Collections Report" },
+              { id: "overdue", title: "Overdue Collections Report" },
+              { id: "received", title: "Collections Received" },
+              { id: "rpn_route", title: "RPN Collection Route" },
+            ].map((report) => (
+              <button
+                key={report.id}
+                onClick={() =>
+                  setReportConfig({
+                    type: report.id as ReportType,
+                    title: report.title,
+                  })
+                }
+                className={`w-full text-left p-4 border-2 transition-all ${
+                  reportConfig.type === report.id
+                    ? "border-brand-orange bg-orange-50"
+                    : "border-stone-100 bg-stone-50 hover:border-stone-200"
+                }`}
+              >
+                <p className="text-[10px] font-black uppercase text-stone-400 mb-1">
+                  Module ID: {report.id.toUpperCase()}
+                </p>
+                <p
+                  className={`text-xs font-bold ${
+                    reportConfig.type === report.id
+                      ? "text-brand-orange"
+                      : "text-stone-600"
+                  }`}
+                >
+                  {report.title}
+                </p>
+              </button>
+            ))}
+          </div>
+
+          <div className="p-4 bg-stone-100 border-l-4 border-stone-800">
+            <p className="text-[10px] text-stone-500 font-medium italic">
+              Current active filters (RPN: {rpnFilter || "All"}, Plan:{" "}
+              {planFilter || "All"}) will be applied to the report dataset.
+            </p>
+          </div>
+        </div>
+      </ConfirmDialog>
+    </div>
+  );
+};
+
+export default SubscriptionManagement;

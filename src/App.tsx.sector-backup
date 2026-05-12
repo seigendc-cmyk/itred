@@ -1,0 +1,372 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import {
+  BrowserRouter,
+  Routes,
+  Route,
+  useNavigate,
+  useLocation,
+} from "react-router-dom";
+import { AppShell } from "./components/AppShell.tsx";
+import { Dashboard } from "./pages/Dashboard.tsx";
+import { VendorManagement } from "./pages/VendorManagement.tsx";
+import { RPNManagement } from "./pages/RPNManagement.tsx";
+import { ProductManagement } from "./pages/ProductManagement.tsx";
+import { CAHManagement } from "./pages/CAHManagement.tsx";
+import { PricingPlans } from "./pages/PricingPlans.tsx";
+import { SubscriptionManagement } from "./pages/SubscriptionManagement.tsx";
+import { SectorCatalogueGenerator } from "./pages/SectorCatalogueGenerator.tsx";
+import { VendorStorefrontBuilder } from "./pages/VendorStorefrontBuilder.tsx";
+import { Analytics } from "./pages/Analytics.tsx";
+import { BIMarket } from "./pages/BIMarket.tsx";
+import { ActivityLogs } from "./pages/ActivityLogs.tsx";
+import { InventorySpotChecks } from "./pages/InventorySpotChecks.tsx";
+import { StaffManagement } from "./pages/StaffManagement.tsx";
+import { AdminDashboard } from "./pages/AdminDashboard.tsx";
+import { RoleMenuPermissions } from "./pages/RoleMenuPermissions.tsx";
+import { StaffAccessLogs } from "./pages/StaffAccessLogs.tsx";
+import { SystemSettings } from "./pages/SystemSettings.tsx";
+import { ContactHubSettings } from "./pages/ContactHubSettings.tsx";
+import WelcomePage from "./pages/WelcomePage.tsx";
+import { AppRoute, MenuKey, DeskType } from "./types.ts";
+import { ErrorBoundary, PrimaryButton } from "./components/CommonUI.tsx";
+import { permissionService } from "./services/permissionService.ts";
+import { AlertTriangle } from "lucide-react";
+import { useState, useEffect } from "react";
+import { analyticsService } from "./services/analyticsService.ts";
+
+function RestrictedAccess() {
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const session = JSON.parse(
+      localStorage.getItem("activeStaffSession") || "{}",
+    );
+    if (session.staffId) {
+      analyticsService.logEvent({
+        eventType: "ACCESS_DENIED" as any,
+        actorType: session.role === "Admin" ? "admin" : "backend_staff",
+        actorName: session.staffName || "Unknown",
+        actorId: session.staffId,
+        result: "failed",
+        details: { path: window.location.pathname },
+      });
+    }
+  }, []);
+
+  return (
+    <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-8">
+      <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mb-6">
+        <AlertTriangle size={40} />
+      </div>
+      <h2 className="text-2xl font-bold uppercase tracking-tight text-brand-charcoal mb-4">
+        Access Restricted
+      </h2>
+      <p className="text-stone-500 max-w-md mb-8">
+        You do not have permission to access this desk. Contact SysAdmin if you
+        require elevated privileges.
+      </p>
+      <PrimaryButton onClick={() => navigate("/dashboard")}>
+        Return to Dashboard
+      </PrimaryButton>
+    </div>
+  );
+}
+
+function AppContent({ onLogout }: { onLogout: () => void }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  // Map path to AppRoute enum
+  const getActiveRoute = (): AppRoute => {
+    const path = location.pathname.split("/")[1] as AppRoute;
+    return path || AppRoute.DASHBOARD;
+  };
+
+  const handleNavigate = (route: AppRoute) => {
+    navigate(`/${route}`);
+  };
+
+  const activeRoute = getActiveRoute();
+
+  // Title mapping for the AppShell header
+  const titles: Record<AppRoute, string> = {
+    // These are page titles, not desk names
+    [AppRoute.DASHBOARD]: "Dashboard",
+    [AppRoute.VENDOR_MGMT]: "Vendor Management",
+    [AppRoute.RPN_MGMT]: "RPN Management",
+    [AppRoute.PRODUCT_MGMT]: "Product Management",
+    [AppRoute.CAH]: "Access Hub",
+    [AppRoute.PRICING]: "Pricing",
+    [AppRoute.SUBSCRIPTIONS]: "Subscriptions & Collections",
+    [AppRoute.CATALOGUE_GEN]: "Create Catalogue",
+    [AppRoute.VENDOR_STOREFRONT]: "Create Storefront",
+    [AppRoute.ANALYTICS]: "Performance Metrics",
+    [AppRoute.BI_MARKET]: "BI Market Analytics",
+    [AppRoute.PERFORMANCE_METRICS]: "Performance Metrics",
+    [AppRoute.ACTIVITY_LOGS]: "Activity Logs",
+    [AppRoute.SPOT_CHECKS]: "Inventory Spot Checks",
+    [AppRoute.STAFF_MGMT]: "Staff Management",
+    [AppRoute.ADMIN_DASHBOARD]: "Admin Dashboard",
+    [AppRoute.ROLE_MENU_PERMISSIONS]: "Role & Menu Permissions",
+    [AppRoute.STAFF_ACCESS_LOGS]: "Staff Access Logs",
+    [AppRoute.SYSTEM_SETTINGS]: "System Settings",
+    [AppRoute.CONTACT_HUB_SETTINGS]: "Catalogue Contact Hub",
+  };
+
+  const checkAccess = (route: string) => {
+    const menuKeyMap: Partial<Record<string, MenuKey>> = {
+      "vendor-management": "vendorManagement",
+      "add-new-vendor": "addNewVendor", // Assuming a separate route for add new vendor
+      "rpn-management": "rpnManagement",
+      "product-management": "productManagement",
+      "commerce-access-hub": "accessHub",
+      pricing: "pricing",
+      subscriptions: "subscriptionsCollections",
+      "catalogue-generator": "createCatalogue",
+      "vendor-storefront-builder": "createStorefront",
+      analytics: "analytics",
+      "bi-market": "biMarketAnalytics",
+      "activity-logs": "activityLogs",
+      "inventory-spot-checks": "inventorySpotChecks",
+      "staff-management": "staffManagement",
+      "admin-dashboard": "adminDashboard",
+      "role-menu-permissions": "roleMenuPermissions",
+      "staff-access-logs": "staffAccessLogs",
+      "system-settings": "systemSettings",
+      "contact-hub-settings": "systemSettings", // Treated as a system setting globally
+      dashboard: "dashboard",
+      // Add other specific mappings if routes don't directly match MenuKey
+    };
+    const key = menuKeyMap[route] || (route as MenuKey);
+    return permissionService.hasMenuAccess(key);
+  };
+
+  const staffSession = JSON.parse(
+    localStorage.getItem("activeStaffSession") || "{}",
+  );
+  const staffName = staffSession.staffName || "Guest";
+  const staffRole = staffSession.role || "Viewer";
+  const staffDesk = staffSession.desk || "Viewer Desk";
+
+  return (
+    <AppShell
+      activeRoute={activeRoute}
+      onNavigate={handleNavigate}
+      title={titles[activeRoute] || "iTred Operating System"}
+      staffName={staffName}
+      staffRole={staffRole}
+      staffDesk={staffDesk}
+      onLogout={onLogout}
+    >
+      <Routes>
+        <Route
+          path="/"
+          element={
+            checkAccess("dashboard") ? <Dashboard /> : <RestrictedAccess />
+          }
+        />
+        <Route
+          path="/dashboard"
+          element={
+            checkAccess("dashboard") ? <Dashboard /> : <RestrictedAccess />
+          }
+        />
+        <Route
+          path="/vendor-management"
+          element={
+            checkAccess("vendor-management") ? (
+              <VendorManagement />
+            ) : (
+              <RestrictedAccess />
+            )
+          }
+        />
+        <Route
+          path="/rpn-management"
+          element={
+            checkAccess("rpn-management") ? (
+              <RPNManagement />
+            ) : (
+              <RestrictedAccess />
+            )
+          }
+        />
+        <Route
+          path="/product-management"
+          element={
+            checkAccess("product-management") ? (
+              <ProductManagement />
+            ) : (
+              <RestrictedAccess />
+            )
+          }
+        />
+        <Route
+          path="/commerce-access-hub"
+          element={
+            checkAccess("commerce-access-hub") ? (
+              <CAHManagement />
+            ) : (
+              <RestrictedAccess />
+            )
+          }
+        />
+        <Route
+          path="/pricing"
+          element={
+            checkAccess("pricing") ? <PricingPlans /> : <RestrictedAccess />
+          }
+        />
+        <Route
+          path="/subscriptions"
+          element={
+            checkAccess("subscriptions") ? (
+              <SubscriptionManagement />
+            ) : (
+              <RestrictedAccess />
+            )
+          }
+        />
+        <Route
+          path="/catalogue-generator"
+          element={
+            checkAccess("catalogue-generator") ? (
+              <SectorCatalogueGenerator />
+            ) : (
+              <RestrictedAccess />
+            )
+          }
+        />
+        <Route
+          path="/vendor-storefront-builder"
+          element={
+            checkAccess("vendor-storefront-builder") ? (
+              <VendorStorefrontBuilder />
+            ) : (
+              <RestrictedAccess />
+            )
+          }
+        />
+        <Route
+          path="/analytics"
+          element={
+            checkAccess("analytics") ? <Analytics /> : <RestrictedAccess />
+          }
+        />
+        <Route
+          path="/bi-market"
+          element={
+            checkAccess("bi-market") ? <BIMarket /> : <RestrictedAccess />
+          }
+        />
+        <Route
+          path="/activity-logs"
+          element={
+            checkAccess("activity-logs") ? (
+              <ActivityLogs />
+            ) : (
+              <RestrictedAccess />
+            )
+          }
+        />
+        <Route
+          path="/inventory-spot-checks"
+          element={
+            checkAccess("inventory-spot-checks") ? (
+              <InventorySpotChecks />
+            ) : (
+              <RestrictedAccess />
+            )
+          }
+        />
+        <Route path="/staff-management" element={<StaffManagement />} />
+        <Route
+          path="/admin-dashboard"
+          element={
+            checkAccess("admin-dashboard") ? (
+              <AdminDashboard onNavigate={handleNavigate} />
+            ) : (
+              <RestrictedAccess />
+            )
+          }
+        />
+        <Route
+          path="/role-menu-permissions"
+          element={
+            checkAccess("role-menu-permissions") ? (
+              <StaffManagement />
+            ) : (
+              <RestrictedAccess />
+            )
+          }
+        />
+        <Route
+          path="/staff-access-logs"
+          element={
+            checkAccess("staff-access-logs") ? (
+              <StaffManagement />
+            ) : (
+              <RestrictedAccess />
+            )
+          }
+        />
+        <Route
+          path="/system-settings"
+          element={
+            checkAccess("system-settings") ? (
+              <StaffManagement />
+            ) : (
+              <RestrictedAccess />
+            )
+          }
+        />
+        <Route
+          path="/contact-hub-settings"
+          element={
+            checkAccess("contact-hub-settings") ? (
+              <ContactHubSettings />
+            ) : (
+              <RestrictedAccess />
+            )
+          }
+        />
+      </Routes>
+    </AppShell>
+  );
+}
+
+export default function App() {
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+
+  useEffect(() => {
+    const storedSession = localStorage.getItem("activeStaffSession");
+    if (storedSession) {
+      setIsLoggedIn(true);
+    }
+  }, []);
+
+  const handleLoginSuccess = () => {
+    setIsLoggedIn(true);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("activeStaffSession");
+    setIsLoggedIn(false);
+  };
+
+  return (
+    <BrowserRouter>
+      <ErrorBoundary>
+        {!isLoggedIn ? (
+          <WelcomePage onLoginSuccess={handleLoginSuccess} />
+        ) : (
+          <AppContent onLogout={handleLogout} />
+        )}
+      </ErrorBoundary>
+    </BrowserRouter>
+  );
+}

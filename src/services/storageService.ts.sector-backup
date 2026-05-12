@@ -1,0 +1,132 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { db } from "../lib/firebase";
+import {
+  collection,
+  getDocs,
+  doc,
+  setDoc,
+  deleteDoc,
+} from "firebase/firestore";
+import { asArray } from "../utils/safeData";
+
+// Storage Mode Switcher
+export type StorageMode = "local" | "firebase";
+
+export const storageConfig = {
+  mode: (import.meta.env.VITE_STORAGE_MODE as StorageMode) || "firebase",
+};
+
+// Generic storage interface to keep services clean
+export interface StorageAdapter {
+  getItem: <T>(key: string) => Promise<T | null> | T | null;
+  setItem: <T>(key: string, value: T) => Promise<void> | void;
+  removeItem: (key: string) => Promise<void> | void;
+}
+
+export const localStorageAdapter: StorageAdapter = {
+  getItem: <T>(key: string): T | null => {
+    try {
+      const data = localStorage.getItem(key);
+      if (!data) return null;
+      return JSON.parse(data) as T;
+    } catch (err) {
+      console.error(`Storage Error: Failed to parse key "${key}"`, err);
+      return null;
+    }
+  },
+  setItem: <T>(key: string, value: T): void => {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch (err) {
+      console.error(`Storage Error: Failed to set key "${key}"`, err);
+    }
+  },
+  removeItem: (key: string): void => {
+    localStorage.removeItem(key);
+  },
+};
+
+function isListLikeKey(key: string): boolean {
+  return [
+    "itred_activity_logs",
+    "itred_catalogue_history",
+    "itred_vendors",
+    "products",
+    "itred_products",
+    "itred_product_intake",
+    "itred_pricing_plans",
+    "pricing_plans",
+    "plans",
+    "catalogues",
+    "vendors",
+    "subscriptions",
+    "branches",
+    "staff",
+    "notices",
+    "delivery_services",
+    "rpn_agents",
+    "rpn_field_operations",
+    "itred_catalogue_deployments",
+    "itred_leads_center",
+    "vendor_conversion_center",
+    "orders",
+    "audit_logs",
+    "pos_terminals",
+    "pos_shifts",
+    "pos_events",
+    "pos_sales",
+    "biEvents",
+    "staff_invites",
+  ].includes(key);
+}
+
+export const firebaseAdapter: StorageAdapter = {
+  getItem: async <T>(key: string): Promise<T | null> => {
+    try {
+      // Example assuming 'key' maps to a top-level collection.
+      // You will likely need to adjust this to fit your exact Firestore data model.
+      const querySnapshot = await getDocs(collection(db, key));
+      const data = querySnapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      if (isListLikeKey(key)) return asArray(data) as unknown as T;
+      return data.length
+        ? (data as unknown as T)
+        : isListLikeKey(key)
+          ? ([] as unknown as T)
+          : null;
+    } catch (err) {
+      console.warn(`Firebase Error: Failed to get collection "${key}"`, err);
+      if (isListLikeKey(key)) return [] as unknown as T;
+      return null;
+    }
+  },
+  setItem: async <T>(key: string, value: T): Promise<void> => {
+    try {
+      // Example mapping. You will need logic to handle Arrays vs Objects
+      // and specific document IDs.
+      const docRef = doc(db, key, "singleton");
+      await setDoc(docRef, value as any);
+    } catch (err) {
+      console.error(`Firebase Error: Failed to set data for "${key}"`, err);
+    }
+  },
+  removeItem: async (key: string): Promise<void> => {
+    try {
+      await deleteDoc(doc(db, key, "singleton"));
+    } catch (err) {
+      console.error(`Firebase Error: Failed to remove data for "${key}"`, err);
+    }
+  },
+};
+
+// Dynamically return the adapter based on environment variable
+export const getStorageAdapter = (): StorageAdapter => {
+  if (storageConfig.mode === "firebase") return firebaseAdapter;
+  return localStorageAdapter;
+};

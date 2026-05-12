@@ -1,0 +1,1426 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useState, useEffect, useMemo } from "react";
+import {
+  Store,
+  Plus,
+  Search,
+  Filter,
+  Edit2,
+  Trash2,
+  ChevronRight,
+  MapPin,
+  Users,
+  Briefcase,
+  Calendar,
+  DollarSign,
+  Package,
+  FileCode,
+  Save,
+  X,
+  PlusCircle,
+  Clock,
+  User,
+  Info,
+  Layers,
+  Globe,
+} from "lucide-react";
+import {
+  TablePanel,
+  StatusBadge,
+  PrimaryButton,
+  SecondaryButton,
+  EmptyState,
+  SearchInput,
+  ConfirmDialog,
+  DataPanel,
+} from "../components/CommonUI.tsx";
+import { vendorService } from "../services/vendorService.ts";
+import { rpnService } from "../services/rpnService.ts";
+import { productService } from "../services/productService.ts";
+import { catalogueService } from "../services/catalogueService.ts";
+import { logService } from "../services/logService.ts";
+import { analyticsService } from "../services/analyticsService.ts";
+import { pricingPlanService } from "../services/pricingPlanService.ts";
+import { pdfService } from "../services/pdfService.ts";
+import { permissionService } from "../services/permissionService.ts";
+import { staffService } from "../services/staffService.ts";
+import {
+  Vendor,
+  RPN,
+  AppRoute,
+  VendorStatus,
+  SubscriptionStatus,
+  FieldDataSource,
+  Branch,
+  PricingPlan,
+} from "../types.ts";
+import { asArray } from "../utils/safeData.ts";
+
+const SECTORS = [
+  "General Retail",
+  "Motor Spares / Automotive",
+  "Industrial Parts",
+  "Hardware & Tools",
+  "Construction",
+  "Agriculture",
+  "Food & Beverage",
+  "Grocery",
+  "Health / Medical",
+  "Personal Care",
+  "Pharmacy",
+  "Clothing & Fashion",
+  "Phones & Computers",
+  "Education",
+  "Tourism & Hospitality",
+  "Leisure & Resorts",
+  "Property",
+  "Transport & Logistics",
+  "Warehousing",
+  "Engineering",
+  "Plumbing",
+  "Professional Services",
+  "Jobbing Services",
+  "Jewellery",
+  "Perfumes & Cosmetics",
+  "Spices",
+  "Vehicle Dealer",
+  "General Dealer",
+  "Other",
+];
+const BUSINESS_TYPES = [
+  "Wholesaler",
+  "Retailer",
+  "Manufacturer",
+  "Distributor",
+  "Digital Provider",
+];
+const DATA_SOURCES: FieldDataSource[] = [
+  "RPN collected",
+  "vendor submitted",
+  "backend entered",
+  "imported",
+];
+const VENDOR_STATUSES: VendorStatus[] = [
+  "lead",
+  "active",
+  "suspended",
+  "dormant",
+  "cancelled",
+];
+const SUB_STATUSES: SubscriptionStatus[] = [
+  "trial",
+  "active",
+  "due",
+  "overdue",
+  "suspended",
+];
+
+export const VendorManagement: React.FC = () => {
+  // Navigation & View State
+  const [view, setView] = useState<"list" | "form">("list");
+  const [selectedVendor, setSelectedVendor] = useState<Vendor | null>(null);
+
+  // Data State
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [rpns, setRpns] = useState<RPN[]>([]);
+  const [plans, setPlans] = useState<PricingPlan[]>([]);
+
+  // Lists stats (counts)
+  const [productCounts, setProductCounts] = useState<Record<string, number>>(
+    {},
+  );
+  const [catalogueCounts, setCatalogueCounts] = useState<
+    Record<string, number>
+  >({});
+
+  // Filter State
+  const [search, setSearch] = useState("");
+  const [filterSector, setFilterSector] = useState("All");
+  const [filterRPN, setFilterRPN] = useState("All");
+  const [filterSubStatus, setFilterSubStatus] = useState("All");
+  const [filterVendorStatus, setFilterVendorStatus] = useState("All");
+
+  // Deletion State
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [vendorToDelete, setVendorToDelete] = useState<string | null>(null);
+
+  // Form State
+  const [formData, setFormData] = useState<Partial<Vendor>>({
+    branches: [],
+    staff: [],
+    deliveryStaff: [],
+  });
+
+  useEffect(() => {
+    vendorService.migrateVendors();
+    loadData();
+  }, []);
+
+  const loadData = async () => {
+    const v = asArray<Vendor>(
+      await Promise.resolve(vendorService.getVendors()),
+    );
+    const r = asArray<RPN>(await Promise.resolve(rpnService.getAll()));
+    const p = asArray<Product>(
+      await Promise.resolve(productService.getProducts()),
+    );
+    const c = asArray<CatalogueGeneration>(
+      await Promise.resolve(catalogueService.getHistory()),
+    );
+    const pl = asArray<PricingPlan>(
+      await Promise.resolve(pricingPlanService.getPlans()),
+    );
+
+    setVendors(v);
+    setRpns(r);
+    setPlans(pl);
+
+    // Calculate counts
+    const pCounts: Record<string, number> = {};
+    p.forEach((prod) => {
+      pCounts[prod.vendorId] = (pCounts[prod.vendorId] || 0) + 1;
+    });
+    setProductCounts(pCounts);
+
+    const cCounts: Record<string, number> = {};
+    c.forEach((gen) => {
+      (gen.vendorIds || []).forEach((vid) => {
+        cCounts[vid] = (cCounts[vid] || 0) + 1;
+      });
+    });
+    setCatalogueCounts(cCounts);
+  };
+
+  const filtered = vendors.filter((v) => {
+    const matchesSearch =
+      v.name.toLowerCase().includes(search.toLowerCase()) ||
+      (v.systemCode &&
+        v.systemCode.toLowerCase().includes(search.toLowerCase())) ||
+      v.id.toLowerCase().includes(search.toLowerCase());
+    const matchesSector = filterSector === "All" || v.sector === filterSector;
+    const matchesRPN = filterRPN === "All" || v.assignedRPNId === filterRPN;
+    const matchesSub =
+      filterSubStatus === "All" || v.subscriptionStatus === filterSubStatus;
+    const matchesStatus =
+      filterVendorStatus === "All" || v.status === filterVendorStatus;
+
+    return (
+      matchesSearch &&
+      matchesSector &&
+      matchesRPN &&
+      matchesSub &&
+      matchesStatus
+    );
+  });
+
+  const handleDelete = () => {
+    if (vendorToDelete) {
+      vendorService.deleteVendor(vendorToDelete);
+      analyticsService.logEvent({
+        eventType: "VENDOR_DELETED",
+        actorType: "admin",
+        actorName: "System Admin",
+        vendorId: vendorToDelete,
+        details: { action: "purged" },
+      });
+      loadData();
+      setIsDeleteDialogOpen(false);
+      setVendorToDelete(null);
+    }
+  };
+
+  const downloadOnboardingForm = () => {
+    pdfService.generateOnboardingForm(vendors, rpns, plans);
+  };
+
+  const previewOnboardingForm = () => {
+    pdfService.previewOnboardingForm(vendors, rpns, plans);
+  };
+
+  const startNewVendor = () => {
+    const now = new Date().toISOString();
+    setFormData({
+      id: `VEND-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
+      status: "lead",
+      subscriptionStatus: "trial",
+      planId: "standard",
+      dataSource: "backend entered",
+      branches: [],
+      staff: [],
+      deliveryStaff: [],
+      createdAt: now,
+      updatedAt: now,
+      createdBy: "STAFF-ADM",
+      displayName: "", // Initialize displayName
+      updatedBy: "STAFF-ADM",
+      country: "Mozambique",
+    });
+    setSelectedVendor(null);
+    setView("form");
+  };
+
+  const startEditVendor = (vendor: Vendor) => {
+    setFormData({ ...vendor });
+    setFormData((prev) => ({
+      ...prev,
+      branches: vendor.branches || [],
+      staff: vendor.staff || [],
+      deliveryStaff: vendor.deliveryStaff || [],
+    }));
+    setSelectedVendor(vendor);
+    setView("form");
+  };
+
+  const saveVendor = () => {
+    if (!formData.name || !formData.sector) {
+      alert("Name and Sector are required for terminal deployment.");
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const vendorToSave = {
+      ...selectedVendor, // Preserve existing fields if not in formData
+      ...formData,
+      updatedAt: now,
+      updatedBy: "STAFF-ADM",
+    } as Vendor;
+
+    vendorService.updateVendor(vendorToSave);
+
+    analyticsService.logEvent({
+      eventType: selectedVendor ? "VENDOR_UPDATED" : "VENDOR_CREATED",
+      actorType: "admin",
+      actorName: "System Admin",
+      vendorId: vendorToSave.id,
+      vendorName: vendorToSave.name,
+      details: { action: selectedVendor ? "update" : "creation" },
+    });
+
+    loadData();
+    setView("list");
+  };
+
+  const handleBranchAdd = () => {
+    const newBranch: Branch = {
+      id: `BR-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
+      name: "New Branch Location",
+      phone: "",
+      whatsapp: "", // Default to empty string
+      province: formData.province || "",
+      cityTown: formData.cityTown || "",
+      district: "",
+      suburb: "",
+      address: "",
+      managerName: "",
+      openingHours: "08:00 - 17:00",
+      isDefault: formData.branches?.length === 0,
+      status: "active",
+    };
+    setFormData({
+      ...formData,
+      branches: [...(formData.branches || []), newBranch],
+    });
+  };
+
+  const handleBranchUpdate = (branchId: string, updates: Partial<Branch>) => {
+    const updatedBranches = (formData.branches || []).map((b) =>
+      b.id === branchId ? { ...b, ...updates } : b,
+    );
+    setFormData({ ...formData, branches: updatedBranches });
+  };
+
+  const handleBranchDelete = (branchId: string) => {
+    setFormData({
+      ...formData,
+      branches: (formData.branches || []).filter((b) => b.id !== branchId),
+    });
+  };
+
+  if (view === "form") {
+    const currentStaff = staffService.getStaffById(
+      formData.assignedStaffId || "STAFF-ADM",
+    );
+    return (
+      <div className="space-y-8 pb-32">
+        <div className="flex items-center justify-between bg-stone-50 p-6 border border-stone-200">
+          <button
+            onClick={() => setView("list")}
+            className="flex items-center gap-2 text-[10px] font-bold uppercase text-stone-400 hover:text-brand-charcoal transition-colors"
+          >
+            <ChevronRight size={14} className="rotate-180" /> Back to Registry
+          </button>
+          <div className="text-center">
+            <h3 className="text-sm font-bold uppercase tracking-tight text-brand-charcoal">
+              {selectedVendor
+                ? `Edit Vendor: ${formData.id}`
+                : "Add New Vendor"}
+            </h3>
+            <p className="text-[9px] font-mono text-stone-400 uppercase mt-0.5">
+              Backend Management
+            </p>
+          </div>
+          {permissionService.canEdit("vendorManagement") && (
+            <PrimaryButton
+              onClick={saveVendor}
+              className={`flex items-center gap-2 ${!permissionService.canEdit("vendorManagement") ? "opacity-50 cursor-not-allowed" : ""}`}
+            >
+              <Save size={14} /> Save Changes
+            </PrimaryButton>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className="lg:col-span-2 space-y-8">
+            {/* Basic Identity */}
+            <DataPanel title="General Information">
+              <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-1.5 md:col-span-2">
+                  <label className="text-[10px] uppercase font-bold text-stone-400">
+                    Legal Business Name
+                  </label>
+                  <input
+                    value={formData.name || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, name: e.target.value })
+                    }
+                    className="w-full border-2 border-stone-200 p-2.5 text-xs font-bold uppercase focus:border-brand-orange outline-none bg-stone-50/50"
+                    placeholder="IDENTIFY BUSINESS ENTITY"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] uppercase font-bold text-stone-400">
+                    Trading Name / Alias
+                  </label>
+                  <input
+                    value={formData.tradingName || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, tradingName: e.target.value })
+                    }
+                    className="w-full border-2 border-stone-200 p-2.5 text-xs font-bold uppercase focus:border-brand-orange outline-none"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] uppercase font-bold text-stone-400">
+                    Sector Classification
+                  </label>
+                  <select
+                    value={formData.sector || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, sector: e.target.value })
+                    }
+                    className="w-full border-2 border-stone-200 p-2.5 text-xs font-bold uppercase focus:border-brand-orange outline-none bg-white"
+                  >
+                    <option value="">Select Sector...</option>
+                    {SECTORS.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] uppercase font-bold text-stone-400">
+                    Principal Owner
+                  </label>
+                  <input
+                    value={formData.ownerFullName || ""}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        ownerFullName: e.target.value,
+                      })
+                    }
+                    className="w-full border-2 border-stone-200 p-2.5 text-xs font-bold uppercase focus:border-brand-orange outline-none"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] uppercase font-bold text-stone-400">
+                    Business Type
+                  </label>
+                  <select
+                    value={formData.businessType || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, businessType: e.target.value })
+                    }
+                    className="w-full border-2 border-stone-200 p-2.5 text-xs font-bold uppercase focus:border-brand-orange outline-none bg-white"
+                  >
+                    <option value="">Select Type...</option>
+                    {BUSINESS_TYPES.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] uppercase font-bold text-stone-400">
+                    Main Phone (Primary)
+                  </label>
+                  <input
+                    value={formData.mainPhone || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, mainPhone: e.target.value })
+                    }
+                    className="w-full border-2 border-stone-200 p-2.5 text-xs font-bold font-mono focus:border-brand-orange outline-none"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] uppercase font-bold text-stone-400">
+                    WhatsApp (Automated Orders)
+                  </label>
+                  <input
+                    value={formData.whatsappNumber || ""}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        whatsappNumber: e.target.value,
+                      })
+                    }
+                    className="w-full border-2 border-stone-200 p-2.5 text-xs font-bold font-mono focus:border-brand-orange outline-none"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] uppercase font-bold text-stone-400">
+                    Business Email Address
+                  </label>
+                  <input
+                    value={formData.email || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, email: e.target.value })
+                    }
+                    className="w-full border-2 border-stone-200 p-2.5 text-xs font-bold focus:border-brand-orange outline-none"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] uppercase font-bold text-stone-400">
+                    Logo Asset URL
+                  </label>
+                  <input
+                    value={formData.logoUrl || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, logoUrl: e.target.value })
+                    }
+                    className="w-full border-2 border-stone-200 p-2.5 text-xs font-mono focus:border-brand-orange outline-none"
+                  />
+                </div>
+                <div className="space-y-1.5 md:col-span-2">
+                  <label className="text-[10px] uppercase font-bold text-stone-400">
+                    Banner Asset URL
+                  </label>
+                  <input
+                    value={formData.bannerUrl || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, bannerUrl: e.target.value })
+                    }
+                    className="w-full border-2 border-stone-200 p-2.5 text-xs font-mono focus:border-brand-orange outline-none"
+                  />
+                </div>
+                <div className="space-y-1.5 md:col-span-2">
+                  <label className="text-[10px] uppercase font-bold text-stone-400">
+                    Business Summary / Capability
+                  </label>
+                  <textarea
+                    value={formData.businessDescription || ""}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        businessDescription: e.target.value,
+                      })
+                    }
+                    className="w-full border-2 border-stone-200 p-2.5 text-xs font-medium focus:border-brand-orange outline-none h-20 resize-none"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] uppercase font-bold text-stone-400">
+                    WhatsApp Group Link
+                  </label>
+                  <input
+                    value={formData.whatsappGroupLink || ""}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        whatsappGroupLink: e.target.value,
+                      })
+                    }
+                    className="w-full border-2 border-stone-200 p-2.5 text-xs focus:border-brand-orange outline-none font-mono"
+                    placeholder="https://chat.whatsapp.com/..."
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] uppercase font-bold text-stone-400">
+                    WhatsApp Channel Link
+                  </label>
+                  <input
+                    value={formData.whatsappChannelLink || ""}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        whatsappChannelLink: e.target.value,
+                      })
+                    }
+                    className="w-full border-2 border-stone-200 p-2.5 text-xs focus:border-brand-orange outline-none font-mono"
+                    placeholder="https://whatsapp.com/channel/..."
+                  />
+                </div>
+              </div>
+            </DataPanel>
+
+            {/* Geographic Mapping */}
+            <DataPanel title="Locations">
+              <div className="p-6 grid grid-cols-1 md:grid-cols-4 gap-6 font-mono">
+                <div className="md:col-span-1 space-y-1.5">
+                  <label className="text-[10px] uppercase font-bold text-stone-400 font-sans">
+                    Country
+                  </label>
+                  <input
+                    value={formData.country || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, country: e.target.value })
+                    }
+                    className="w-full border-2 border-stone-200 p-2 text-xs font-bold uppercase focus:border-brand-orange outline-none bg-stone-50"
+                  />
+                </div>
+                <div className="md:col-span-1 space-y-1.5">
+                  <label className="text-[10px] uppercase font-bold text-stone-400 font-sans">
+                    Province
+                  </label>
+                  <input
+                    value={formData.province || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, province: e.target.value })
+                    }
+                    className="w-full border-2 border-stone-200 p-2 text-xs font-bold uppercase focus:border-brand-orange outline-none"
+                  />
+                </div>
+                <div className="md:col-span-1 space-y-1.5">
+                  <label className="text-[10px] uppercase font-bold text-stone-400 font-sans">
+                    City / Town
+                  </label>
+                  <input
+                    value={formData.cityTown || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, cityTown: e.target.value })
+                    }
+                    className="w-full border-2 border-stone-200 p-2 text-xs font-bold uppercase focus:border-brand-orange outline-none"
+                  />
+                </div>
+                <div className="md:col-span-1 space-y-1.5">
+                  <label className="text-[10px] uppercase font-bold text-stone-400 font-sans">
+                    District
+                  </label>
+                  <input
+                    value={formData.district || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, district: e.target.value })
+                    }
+                    className="w-full border-2 border-stone-200 p-2 text-xs font-bold uppercase focus:border-brand-orange outline-none"
+                  />
+                </div>
+                <div className="md:col-span-1 space-y-1.5">
+                  <label className="text-[10px] uppercase font-bold text-stone-400 font-sans">
+                    Suburb
+                  </label>
+                  <input
+                    value={formData.suburb || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, suburb: e.target.value })
+                    }
+                    className="w-full border-2 border-stone-200 p-2 text-xs font-bold uppercase focus:border-brand-orange outline-none"
+                  />
+                </div>
+                <div className="md:col-span-3 space-y-1.5">
+                  <label className="text-[10px] uppercase font-bold text-stone-400 font-sans">
+                    GPS / Location Notes
+                  </label>
+                  <input
+                    value={formData.gpsNotes || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, gpsNotes: e.target.value })
+                    }
+                    className="w-full border-2 border-stone-200 p-2 text-xs font-bold uppercase focus:border-brand-orange outline-none"
+                  />
+                </div>
+                <div className="md:col-span-4 space-y-1.5">
+                  <label className="text-[10px] uppercase font-bold text-stone-400 font-sans">
+                    Full Physical Address Specification
+                  </label>
+                  <input
+                    value={formData.streetAddress || ""}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        streetAddress: e.target.value,
+                      })
+                    }
+                    className="w-full border-2 border-stone-200 p-2 text-xs font-bold uppercase focus:border-brand-orange outline-none font-sans"
+                  />
+                </div>
+              </div>
+            </DataPanel>
+
+            {/* Branch Management */}
+            <DataPanel
+              title="Branches"
+              actions={
+                <button
+                  onClick={handleBranchAdd}
+                  className="bg-brand-charcoal text-white px-3 py-1 text-[9px] font-bold uppercase flex items-center gap-1.5 transition-opacity hover:opacity-90"
+                >
+                  <Plus size={10} /> Add Branch
+                </button>
+              }
+            >
+              <div className="p-0 border-t border-stone-100 divide-y divide-stone-100">
+                {(formData.branches || []).map((branch, index) => (
+                  <div key={branch.id} className="p-6 space-y-4 bg-stone-50/30">
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                      <div className="space-y-1.5 md:col-span-2">
+                        <label className="text-[9px] uppercase font-bold text-stone-400">
+                          Branch Identity
+                        </label>
+                        <input
+                          value={branch.name}
+                          onChange={(e) =>
+                            handleBranchUpdate(branch.id, {
+                              name: e.target.value,
+                            })
+                          }
+                          className="w-full border border-stone-300 p-1.5 text-xs font-bold uppercase outline-none focus:border-brand-orange"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] uppercase font-bold text-stone-400">
+                          Branch Status
+                        </label>
+                        <select
+                          value={branch.status}
+                          onChange={(e) =>
+                            handleBranchUpdate(branch.id, {
+                              status: e.target.value as any,
+                            })
+                          }
+                          className="w-full border border-stone-300 p-1.5 text-xs font-bold uppercase outline-none"
+                        >
+                          <option value="active">ACTIVE</option>
+                          <option value="suspended">SUSPENDED</option>
+                        </select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] uppercase font-bold text-stone-400">
+                          Primary Branch
+                        </label>
+                        <button
+                          onClick={() =>
+                            handleBranchUpdate(branch.id, {
+                              isDefault: !branch.isDefault,
+                            })
+                          }
+                          className={`w-full px-3 py-1.5 text-[9px] font-bold uppercase border h-[34px] ${branch.isDefault ? "bg-brand-charcoal text-white border-brand-charcoal" : "bg-white text-stone-400 border-stone-200"}`}
+                        >
+                          {branch.isDefault
+                            ? "SYSTEM DEFAULT"
+                            : "SET AS DEFAULT"}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] uppercase font-bold text-stone-400 font-mono italic">
+                          Province
+                        </label>
+                        <input
+                          value={branch.province}
+                          onChange={(e) =>
+                            handleBranchUpdate(branch.id, {
+                              province: e.target.value,
+                            })
+                          }
+                          className="w-full border border-stone-300 p-1.5 text-xs font-bold uppercase outline-none font-mono"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] uppercase font-bold text-stone-400 font-mono italic">
+                          City / Town
+                        </label>
+                        <input
+                          value={branch.cityTown}
+                          onChange={(e) =>
+                            handleBranchUpdate(branch.id, {
+                              cityTown: e.target.value,
+                            })
+                          }
+                          className="w-full border border-stone-300 p-1.5 text-xs font-bold uppercase outline-none font-mono"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] uppercase font-bold text-stone-400 font-mono italic">
+                          District
+                        </label>
+                        <input
+                          value={branch.district}
+                          onChange={(e) =>
+                            handleBranchUpdate(branch.id, {
+                              district: e.target.value,
+                            })
+                          }
+                          className="w-full border border-stone-300 p-1.5 text-xs font-bold uppercase outline-none font-mono"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] uppercase font-bold text-stone-400 font-mono italic">
+                          Suburb
+                        </label>
+                        <input
+                          value={branch.suburb}
+                          onChange={(e) =>
+                            handleBranchUpdate(branch.id, {
+                              suburb: e.target.value,
+                            })
+                          }
+                          className="w-full border border-stone-300 p-1.5 text-xs font-bold uppercase outline-none font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] uppercase font-bold text-stone-400">
+                          Branch Manager
+                        </label>
+                        <input
+                          value={branch.managerName}
+                          onChange={(e) =>
+                            handleBranchUpdate(branch.id, {
+                              managerName: e.target.value,
+                            })
+                          }
+                          className="w-full border border-stone-300 p-1.5 text-xs font-bold uppercase outline-none"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] uppercase font-bold text-stone-400">
+                          Opening Hours
+                        </label>
+                        <input
+                          value={branch.openingHours}
+                          onChange={(e) =>
+                            handleBranchUpdate(branch.id, {
+                              openingHours: e.target.value,
+                            })
+                          }
+                          className="w-full border border-stone-300 p-1.5 text-xs font-bold uppercase outline-none"
+                          placeholder="e.g. 08:00 - 17:00"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] uppercase font-bold text-stone-400 font-mono italic">
+                          Phone
+                        </label>
+                        <input
+                          value={branch.phone}
+                          onChange={(e) =>
+                            handleBranchUpdate(branch.id, {
+                              phone: e.target.value,
+                            })
+                          }
+                          className="w-full border border-stone-300 p-1.5 text-xs font-bold outline-none font-mono"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] uppercase font-bold text-stone-400 font-mono italic text-green-600">
+                          WhatsApp
+                        </label>
+                        <input
+                          value={branch.whatsapp}
+                          onChange={(e) =>
+                            handleBranchUpdate(branch.id, {
+                              whatsapp: e.target.value,
+                            })
+                          }
+                          className="w-full border border-stone-300 p-1.5 text-xs font-bold outline-none font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="md:col-span-2 space-y-1.5">
+                        <label className="text-[9px] uppercase font-bold text-stone-400">
+                          Physical Address
+                        </label>
+                        <input
+                          value={branch.address}
+                          onChange={(e) =>
+                            handleBranchUpdate(branch.id, {
+                              address: e.target.value,
+                            })
+                          }
+                          className="w-full border border-stone-300 p-1.5 text-xs font-bold uppercase outline-none"
+                        />
+                      </div>
+                      <div className="space-y-1.5 flex justify-end items-end pb-1.5">
+                        <button
+                          onClick={() => handleBranchDelete(branch.id)}
+                          className="text-[9px] font-bold uppercase text-red-400 hover:text-red-700 transition-colors flex items-center gap-1"
+                        >
+                          <Trash2 size={10} /> Delete Branch
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {(formData.branches || []).length === 0 && (
+                  <div className="p-12 text-center text-stone-300">
+                    <Store size={32} className="mx-auto mb-4 opacity-20" />
+                    <p className="text-[10px] font-bold uppercase italic tracking-widest">
+                      No branches configured.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </DataPanel>
+          </div>
+
+          <div className="space-y-8">
+            {/* Lifecycle and Sub */}
+            <DataPanel title="Subscription & Status">
+              <div className="p-6 space-y-6">
+                <div className="space-y-3">
+                  <label className="text-[10px] uppercase font-bold text-stone-400">
+                    Entity Status
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {VENDOR_STATUSES.map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => setFormData({ ...formData, status: s })}
+                        className={`px-2 py-1 text-[9px] font-bold uppercase border transition-all ${formData.status === s ? "bg-brand-orange text-white border-brand-orange shadow-sm" : "bg-white text-stone-400 border-stone-200 hover:border-stone-400"}`}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-3 pt-6 border-t border-stone-100">
+                  <label className="text-[10px] uppercase font-bold text-stone-400">
+                    Subscription Matrix
+                  </label>
+                  <select
+                    value={formData.planId || "starter"}
+                    onChange={(e) =>
+                      setFormData({ ...formData, planId: e.target.value })
+                    }
+                    className="w-full border-2 border-stone-200 p-2.5 text-xs font-bold uppercase focus:border-brand-orange outline-none bg-stone-50 font-mono"
+                  >
+                    {plans.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name.toUpperCase()} TIER
+                      </option>
+                    ))}
+                  </select>
+                  <div className="flex flex-wrap gap-2 pt-2">
+                    {SUB_STATUSES.map((s) => (
+                      <button
+                        key={s}
+                        onClick={() =>
+                          setFormData({ ...formData, subscriptionStatus: s })
+                        }
+                        className={`px-2 py-1 text-[9px] font-bold uppercase border transition-all ${formData.subscriptionStatus === s ? "bg-brand-charcoal text-white border-brand-charcoal" : "bg-white text-stone-400 border-stone-200"}`}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 pt-6 border-t border-stone-100 font-mono">
+                  <div className="space-y-1.5">
+                    <label className="text-[9px] uppercase font-bold text-stone-400 font-sans">
+                      Start Date
+                    </label>
+                    <input
+                      type="date"
+                      value={
+                        formData.subscriptionStartDate?.split("T")[0] || ""
+                      }
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          subscriptionStartDate: new Date(
+                            e.target.value,
+                          ).toISOString(),
+                        })
+                      }
+                      className="w-full border border-stone-300 p-1.5 text-[10px] font-bold outline-none"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[9px] uppercase font-bold text-stone-400 font-sans">
+                      Renewal Cycle
+                    </label>
+                    <input
+                      type="date"
+                      value={formData.subscriptionDueDate?.split("T")[0] || ""}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          subscriptionDueDate: new Date(
+                            e.target.value,
+                          ).toISOString(),
+                        })
+                      }
+                      className="w-full border border-stone-300 p-1.5 text-[10px] font-bold outline-none"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[9px] uppercase font-bold text-stone-400 font-sans">
+                      Last Collection
+                    </label>
+                    <input
+                      type="date"
+                      value={formData.lastCollectionDate?.split("T")[0] || ""}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          lastCollectionDate: new Date(
+                            e.target.value,
+                          ).toISOString(),
+                        })
+                      }
+                      className="w-full border border-stone-300 p-1.5 text-[10px] font-bold outline-none"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[9px] uppercase font-bold text-stone-400 font-sans">
+                      Next Follow-up
+                    </label>
+                    <input
+                      type="date"
+                      value={formData.nextFollowUpDate?.split("T")[0] || ""}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          nextFollowUpDate: new Date(
+                            e.target.value,
+                          ).toISOString(),
+                        })
+                      }
+                      className="w-full border border-stone-300 p-1.5 text-[10px] font-bold outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5 pt-4">
+                  <label className="text-[9px] uppercase font-bold text-stone-400">
+                    Internal Collection Notes
+                  </label>
+                  <textarea
+                    value={formData.collectionNotes || ""}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        collectionNotes: e.target.value,
+                      })
+                    }
+                    className="w-full border border-stone-300 p-2 text-[10px] font-medium outline-none h-16 resize-none focus:border-brand-orange"
+                  />
+                </div>
+              </div>
+            </DataPanel>
+
+            {/* Assignments */}
+            <DataPanel title="Personnel Assignments">
+              <div className="p-6 space-y-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase font-bold text-stone-400">
+                    Assigned RPN Agent
+                  </label>
+                  <select
+                    value={formData.assignedRPNId || ""}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        assignedRPNId: e.target.value,
+                      })
+                    }
+                    className="w-full border-2 border-stone-200 p-3 text-xs font-bold uppercase focus:border-brand-orange outline-none bg-stone-50"
+                  >
+                    <option value="">Unassigned</option>
+                    {rpns.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.name} [{r.id}]
+                      </option>
+                    ))}
+                  </select>
+                  {formData.assignedRPNId &&
+                    rpns.find((r) => r.id === formData.assignedRPNId) && (
+                      <div className="p-3 bg-stone-100 border border-stone-200 flex flex-col gap-1">
+                        <div className="flex items-center gap-2 text-[10px] font-bold uppercase text-stone-500">
+                          <Info size={10} className="text-brand-orange" /> RPN
+                          Contact Info
+                        </div>
+                        <p className="text-[11px] font-bold text-stone-700">
+                          {
+                            rpns.find((r) => r.id === formData.assignedRPNId)
+                              ?.name
+                          }
+                        </p>
+                        <p className="text-[10px] font-mono text-stone-500">
+                          {
+                            rpns.find((r) => r.id === formData.assignedRPNId)
+                              ?.phone
+                          }
+                        </p>
+                      </div>
+                    )}
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase font-bold text-stone-400">
+                    Assigned Staff Member
+                  </label>
+                  <input
+                    value={
+                      formData.assignedStaffId ||
+                      currentStaff?.fullName ||
+                      "STAFF-ADM"
+                    }
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        assignedStaffId: e.target.value, // This should ideally be a dropdown of actual staff
+                      })
+                    }
+                    className="w-full border-2 border-stone-200 p-3 text-xs font-bold uppercase focus:border-brand-orange outline-none bg-stone-50"
+                    placeholder="ASSIGNED STAFF"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase font-bold text-stone-400">
+                    Source
+                  </label>
+                  <select
+                    value={formData.dataSource || "backend entered"}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        dataSource: e.target.value as any,
+                      })
+                    }
+                    className="w-full border-2 border-stone-200 p-3 text-xs font-bold uppercase focus:border-brand-orange outline-none"
+                  >
+                    {DATA_SOURCES.map((d) => (
+                      <option key={d} value={d}>
+                        {d.toUpperCase()}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </DataPanel>
+
+            <DataPanel title="System Information">
+              <div className="p-6 space-y-2 font-mono">
+                <div className="flex justify-between text-[9px] uppercase font-bold">
+                  <span className="text-stone-400">System Code:</span>
+                  <span className="text-stone-600 tracking-wider">
+                    {formData.systemCode || "PENDING ASSIGNMENT"}
+                  </span>
+                </div>
+                <div className="flex justify-between text-[9px] uppercase font-bold">
+                  <span className="text-stone-400">ID Specification:</span>
+                  <span className="text-stone-600">{formData.id}</span>
+                </div>
+                <div className="flex justify-between text-[9px] uppercase font-bold">
+                  <span className="text-stone-400">Created At:</span>
+                  <span className="text-stone-600">
+                    {new Date(formData.createdAt || "").toLocaleString()}
+                  </span>
+                </div>
+                <div className="flex justify-between text-[9px] uppercase font-bold border-t border-stone-100 pt-2 mt-2">
+                  <span className="text-stone-400">Origin Staff:</span>
+                  <span className="text-stone-600">{formData.createdBy}</span>
+                </div>
+              </div>
+            </DataPanel>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-8 pb-20">
+      {/* Console Controls */}
+      <div className="bg-stone-50 border border-stone-200 p-6">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-6">
+          <div>
+            <h3 className="text-sm font-bold uppercase tracking-tight text-brand-charcoal">
+              Vendor Management
+            </h3>
+            <p className="text-[10px] text-stone-400 font-mono mt-1 uppercase italic">
+              Backend System // Vendor Management
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {permissionService.canCreate("addNewVendor") && (
+              <PrimaryButton // Check both addNewVendor and general vendorManagement create
+                onClick={startNewVendor}
+                className="flex items-center gap-2"
+              >
+                <Plus size={14} /> Add New Vendor
+              </PrimaryButton>
+            )}
+            <SecondaryButton
+              onClick={downloadOnboardingForm}
+              className="flex items-center gap-2"
+            >
+              <FileCode size={14} /> Download Onboarding Form
+            </SecondaryButton>
+            <SecondaryButton
+              onClick={previewOnboardingForm}
+              className="flex items-center gap-2"
+            >
+              <Info size={14} /> Preview Onboarding Form
+            </SecondaryButton>
+          </div>
+        </div>
+
+        {/* Advanced Filter Row */}
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4 pt-6 border-t border-stone-200">
+          <SearchInput
+            placeholder="Search Vendor..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="lg:col-span-1 shadow-sm"
+          />
+          <div className="relative">
+            <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 w-3.5 h-3.5" />
+            <select
+              value={filterSector}
+              onChange={(e) => setFilterSector(e.target.value)}
+              className="w-full bg-white border border-stone-200 pl-9 pr-6 py-1.5 text-[10px] font-bold uppercase focus:outline-none appearance-none"
+            >
+              <option value="All">All Sectors</option>
+              {SECTORS.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </div>
+          <select
+            value={filterRPN}
+            onChange={(e) => setFilterRPN(e.target.value)}
+            className="w-full bg-white border border-stone-200 px-6 py-1.5 text-[10px] font-bold uppercase focus:outline-none"
+          >
+            <option value="All">All RPN Agents</option>
+            {rpns.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.name} [{r.id}]
+              </option>
+            ))}
+          </select>
+          <select
+            value={filterSubStatus}
+            onChange={(e) => setFilterSubStatus(e.target.value)}
+            className="w-full bg-white border border-stone-200 px-6 py-1.5 text-[10px] font-bold uppercase focus:outline-none"
+          >
+            <option value="All">Sub Status</option>
+            {SUB_STATUSES.map((s) => (
+              <option key={s} value={s}>
+                {s.toUpperCase()}
+              </option>
+            ))}
+          </select>
+          <select
+            value={filterVendorStatus}
+            onChange={(e) => setFilterVendorStatus(e.target.value)}
+            className="w-full bg-white border border-stone-200 px-6 py-1.5 text-[10px] font-bold uppercase focus:outline-none"
+          >
+            <option value="All">Lifecycle</option>
+            {VENDOR_STATUSES.map((s) => (
+              <option key={s} value={s}>
+                {s.toUpperCase()}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <DataPanel
+        title="Vendors"
+        subtitle={`${filtered.length} active records found`}
+        headers={[
+          "System Code",
+          "Vendor Details",
+          "Location / RPN",
+          "Plan / Status",
+          "Due Date",
+          "Operations",
+        ]}
+      >
+        {filtered.map((vendor) => {
+          const rpn = rpns.find((r) => r.id === vendor.assignedRPNId);
+          return (
+            <tr
+              key={vendor.id}
+              className="group hover:bg-stone-50 transition-colors"
+            >
+              <div className="p-4 border-b border-stone-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div className="flex items-center gap-4">
+                  <div className="w-10 h-10 border border-stone-200 bg-orange-50/50 flex items-center justify-center p-1">
+                    {vendor.logoUrl ? (
+                      <img
+                        src={vendor.logoUrl}
+                        className="w-full h-full object-cover grayscale opacity-80"
+                        alt=""
+                      />
+                    ) : (
+                      <Store size={20} className="text-brand-charcoal" />
+                    )}
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-[10px] font-black uppercase text-brand-charcoal">
+                      {vendor.name}
+                    </p>
+                    <p className="text-[8px] font-mono text-stone-500 mt-0.5">
+                      {vendor.systemCode || "N/A"}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <p className="text-[9px] font-bold uppercase text-stone-500">
+                    Contact
+                  </p>
+                  <p className="text-xs text-brand-charcoal break-words">
+                    {vendor.email}
+                  </p>
+                  <p className="text-xs text-brand-charcoal break-words">
+                    {vendor.mainPhone}
+                  </p>
+                  <p className="text-xs text-brand-charcoal break-words">
+                    {vendor.whatsappNumber}
+                  </p>
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <p className="text-[9px] font-bold uppercase text-stone-500">
+                    Address
+                  </p>
+                  <p className="text-xs text-brand-charcoal break-words">
+                    {vendor.streetAddress}
+                  </p>
+                  <p className="text-xs text-brand-charcoal break-words">
+                    {vendor.cityTown}, {vendor.province}
+                  </p>
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <p className="text-[9px] font-bold uppercase text-stone-500">
+                    Plan / Status
+                  </p>
+                  <p className="text-xs font-bold uppercase text-brand-charcoal">
+                    {plans.find((p) => p.id === vendor.planId)?.name ||
+                      vendor.planId}
+                  </p>
+                  <StatusBadge
+                    status={vendor.subscriptionStatus}
+                    variant={
+                      vendor.subscriptionStatus === "active"
+                        ? "success"
+                        : "warning"
+                    }
+                  />
+                  <StatusBadge
+                    status={vendor.status}
+                    variant={vendor.status === "active" ? "success" : "neutral"}
+                    className="mt-1"
+                  />
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <p className="text-[9px] font-bold uppercase text-stone-500">
+                    Due Date
+                  </p>
+                  <p className="text-xs font-bold text-brand-charcoal">
+                    {vendor.subscriptionDueDate
+                      ? new Date(
+                          vendor.subscriptionDueDate,
+                        ).toLocaleDateString()
+                      : "N/A"}
+                  </p>
+                  <p className="text-[9px] font-bold uppercase text-stone-500 mt-1">
+                    RPN
+                  </p>
+                  <p className="text-xs text-brand-charcoal">
+                    {rpn?.name || "Unassigned"}
+                  </p>
+                </div>
+
+                <div className="flex-shrink-0 flex gap-2">
+                  {permissionService.canEdit("vendorManagement") && (
+                    <button
+                      onClick={() => startEditVendor(vendor)}
+                      className="p-2 border border-stone-200 text-stone-400 hover:border-brand-charcoal hover:text-brand-charcoal transition-all bg-white"
+                    >
+                      <Edit2 size={12} />
+                    </button>
+                  )}
+                  {permissionService.canDelete("vendorManagement") && (
+                    <button
+                      onClick={() => {
+                        setVendorToDelete(vendor.id);
+                        setIsDeleteDialogOpen(true);
+                      }}
+                      className="p-2 border border-stone-200 text-stone-400 hover:border-red-600 hover:text-red-600 transition-all bg-white"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            </tr>
+          );
+        })}
+        {filtered.length === 0 && (
+          <div className="p-6">
+            <EmptyState
+              title="No Vendors Found"
+              description="No vendors match the current filters. Clear filters to see more."
+              icon={Layers}
+              action={
+                <SecondaryButton
+                  onClick={() => {
+                    setSearch("");
+                    setFilterSector("All");
+                    setFilterRPN("All");
+                    setFilterSubStatus("All");
+                    setFilterVendorStatus("All");
+                  }}
+                >
+                  Clear Filters
+                </SecondaryButton>
+              }
+            />
+          </div>
+        )}
+      </DataPanel>
+
+      <ConfirmDialog
+        isOpen={isDeleteDialogOpen}
+        title="Confirm Vendor Deletion"
+        message="Deleting this vendor will result in immediate loss of all branch data and product mappings."
+        confirmLabel="Delete Vendor"
+        variant="danger"
+        onConfirm={handleDelete}
+        onCancel={() => setIsDeleteDialogOpen(false)}
+      />
+    </div>
+  );
+};
