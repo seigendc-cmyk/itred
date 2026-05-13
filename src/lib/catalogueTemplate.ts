@@ -169,17 +169,33 @@ export const generateCatalogueHtml = (
             position: relative;
             min-height: 138px;
             padding: 18px 88px 16px 18px;
-            color: #fff;
-            background: \${bgImage};
+            color: #ffffff;
             display: flex;
             flex-direction: column;
             justify-content: flex-end;
+            background: linear-gradient(135deg, rgba(255, 107, 0, 0.92), rgba(255, 132, 32, 0.78));
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-bottom-left-radius: 28px;
+            border-bottom-right-radius: 28px;
+            box-shadow: 0 14px 34px rgba(255, 107, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.32), inset 0 -1px 0 rgba(46, 46, 46, 0.12);
             overflow: hidden;
+        }
+        .sector-header::after {
+            content: "";
+            position: absolute;
+            left: 14px;
+            right: 14px;
+            top: 10px;
+            height: 1px;
+            background: rgba(255, 255, 255, 0.45);
+            z-index: 1;
         }
         .header-overlay {
             position: absolute;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(46, 46, 46, 0.7);
+            inset: 0;
+            background: radial-gradient(circle at top left, rgba(255, 255, 255, 0.35), transparent 34%), linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.02));
+            pointer-events: none;
         }
         .header-content {
             position: relative;
@@ -192,29 +208,30 @@ export const generateCatalogueHtml = (
             margin-bottom: 8px;
             line-height: 1;
         }
-        .itred-i { color: #fff; }
-        .itred-tred { color: var(--brand-orange); }
+        .itred-i { color: #ffffff; }
+        .itred-tred { color: var(--brand-charcoal); }
         .seigen-logo-badge {
             position: absolute;
-            bottom: 14px;
+            bottom: 18px;
             right: 16px;
-            width: 52px;
-            height: 52px;
+            width: 54px;
+            height: 54px;
             border-radius: 50%;
-            background: #ffffff;
-            border: 2px solid #ffffff;
+            background: rgba(255, 255, 255, 0.96);
+            border: 2px solid rgba(255, 255, 255, 0.85);
             overflow: hidden;
             z-index: 10;
             display: flex;
             align-items: center;
             justify-content: center;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+            box-shadow: 0 8px 18px rgba(46, 46, 46, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.8);
         }
         .seigen-logo-badge img {
             width: 100%;
             height: 100%;
             object-fit: contain;
             display: block;
+            padding: 4px;
         }
         .seigen-logo-fallback {
             color: var(--brand-orange);
@@ -225,6 +242,10 @@ export const generateCatalogueHtml = (
         .catalogue-subtitle {
             font-size: 9px; font-weight: 700; color: #ddd; line-height: 1.2;
         }
+        .powered-by, .powered-by-text {
+            color: var(--brand-charcoal);
+            font-weight: 900;
+        }
 
         /* Search */
         .search-area {
@@ -232,6 +253,7 @@ export const generateCatalogueHtml = (
             top: 0;
             z-index: 902;
             padding: 10px 14px;
+            margin-top: 8px;
             background: rgba(255, 255, 255, 0.96);
             backdrop-filter: blur(10px);
             -webkit-backdrop-filter: blur(10px);
@@ -360,7 +382,7 @@ export const generateCatalogueHtml = (
                     </div>
                     <div class="catalogue-subtitle" style="margin-bottom: 8px;">Vendor Product Discovery</div>
                     <div class="catalogue-subtitle">${escapeHtml(metadata.serialNumber)} // ${jsonData.products.length} Products</div>
-                    <div class="catalogue-subtitle" style="color: var(--brand-orange);">Powered by seiGEN Commerce</div>
+                    <div class="catalogue-subtitle powered-by">Powered by seiGEN Commerce</div>
                 </div>
                 <div class="seigen-logo-badge">
                     ${logoUrl ? `<img src="${logoUrl}" alt="seiGEN Commerce" onerror="this.outerHTML='<span class=\\'seigen-logo-fallback\\'>SCI</span>'"/>` : `<span class="seigen-logo-fallback">SCI</span>`}
@@ -387,8 +409,8 @@ export const generateCatalogueHtml = (
 
             <!-- COMMUNITY HUB TAB -->
             <div id="tab-hub" class="tab-content">
-                <h2 style="font-size: 16px; font-weight: 900; text-transform: uppercase; margin-bottom: 16px;">Community Hub</h2>
-                <p style="font-size: 12px; margin-bottom: 24px; color: #666;">Connect with our sector network.</p>
+                <h2 style="font-size: 16px; font-weight: 900; text-transform: uppercase; margin-bottom: 4px;">Commerce Access Hub</h2>
+                <p style="font-size: 12px; margin-bottom: 24px; color: #666;">Sector WhatsApp Groups</p>
                 <div id="hubGrid"></div>
             </div>
 
@@ -527,8 +549,15 @@ export const generateCatalogueHtml = (
                 const url = l.whatsappCommunityLink || l.whatsappChannelLink || l.whatsappGroupLink || l.supportNumber;
                 if(!url) return '';
                 const href = url.startsWith('http') ? url : 'https://wa.me/' + url.replace(/[^0-9]/g, '');
+                
+                let typeLabel = escapeHtml(l.type);
+                if (typeLabel.toLowerCase().includes('community')) typeLabel = 'Community';
+                else if (typeLabel.toLowerCase().includes('group')) typeLabel = 'Group';
+                else if (typeLabel.toLowerCase().includes('channel')) typeLabel = 'Channel';
+                else if (typeLabel.toLowerCase().includes('support')) typeLabel = 'Support';
+                
                 return '<a href="' + href + '" class="hub-link" target="_blank">' +
-                       '<div class="hub-type">' + escapeHtml(l.type) + '</div>' +
+                       '<div class="hub-type">' + typeLabel + '</div>' +
                        '<div class="hub-name">' + escapeHtml(l.name) + '</div>' +
                        '<div style="font-size:11px; margin-top:4px; color:#666;">' + escapeHtml(l.description || '') + '</div>' +
                        '</a>';

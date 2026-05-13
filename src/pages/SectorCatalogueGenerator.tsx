@@ -399,6 +399,53 @@ export const SectorCatalogueGenerator: React.FC = () => {
     [safeHistory],
   );
 
+  const handleAutoSelectCAHLinks = () => {
+    const s = config.sector?.toLowerCase().trim() || "";
+    const c = config.category?.toLowerCase().trim() || "";
+
+    if (!s && !c) {
+      alert("Please enter a Sector or Category first to auto-select links.");
+      return;
+    }
+
+    const matchingIds = safeCahLinks
+      .filter((link) => {
+        if (link.status !== "active" || link.showInCatalogue === false)
+          return false;
+
+        const linkSector = (link.sector || "").toLowerCase();
+        const linkCategory = (link.category || "").toLowerCase();
+        const linkName = (link.name || "").toLowerCase();
+        const linkDesc = (link.description || "").toLowerCase();
+
+        const matchesSector =
+          s &&
+          (linkSector.includes(s) ||
+            linkName.includes(s) ||
+            linkDesc.includes(s));
+        const matchesCategory =
+          c &&
+          (linkCategory.includes(c) ||
+            linkName.includes(c) ||
+            linkDesc.includes(c));
+
+        return matchesSector || matchesCategory;
+      })
+      .map((l) => l.id);
+
+    if (matchingIds.length === 0) {
+      alert(
+        "No active matching WhatsApp/CAH links found for this sector/category.",
+      );
+      return;
+    }
+
+    setConfig((prev) => ({
+      ...prev,
+      cahLinkIds: Array.from(new Set([...prev.cahLinkIds, ...matchingIds])),
+    }));
+  };
+
   const handleGenerate = async (mode: "new" | "update" | "replace" = "new") => {
     if (config.vendorIds.length === 0 || !config.sector || !config.category) {
       alert("Please provide Sector, Category and select at least one vendor.");
@@ -952,6 +999,18 @@ export const SectorCatalogueGenerator: React.FC = () => {
               <div className="text-[10px] font-bold text-emerald-600">
                 {config.cahLinkIds.length} Selected
               </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2 mb-4">
+              <SecondaryButton size="sm" onClick={handleAutoSelectCAHLinks}>
+                Auto-select Sector Links
+              </SecondaryButton>
+              <SecondaryButton
+                size="sm"
+                onClick={() => setConfig({ ...config, cahLinkIds: [] })}
+              >
+                Clear Selected Links
+              </SecondaryButton>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
