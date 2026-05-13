@@ -28,21 +28,46 @@ import {
   X,
   MapPin,
   Clock,
+  Edit,
+  UserCheck,
+  Check,
+  XCircle,
+  TrendingUp as TrendingUpIcon,
+  AlertCircle,
+  Save,
 } from "lucide-react";
 import { whatsappActivityService } from "../services/whatsappActivityService.ts";
-import { WhatsAppActivityLog } from "../types.ts";
+import { rpnService } from "../services/rpnService.ts";
+import {
+  RPN,
+  WhatsAppActivityLog,
+  WhatsAppLeadStatus,
+  WhatsAppActivityType,
+} from "../types.ts";
+import { staffService } from "../services/staffService.ts";
+import { Staff } from "../types.ts";
+import { notificationService } from "../services/notificationService.ts";
 
 type TabMode = "vendor" | "rpn" | "product" | "followup";
 
 export const WhatsAppPerformanceReports: React.FC = () => {
   const [rawLogs, setRawLogs] = useState<WhatsAppActivityLog[]>([]);
   const [activeTab, setActiveTab] = useState<TabMode>("vendor");
+  const [rpns, setRpns] = useState<RPN[]>([]);
+  const [staffList, setStaffList] = useState<Staff[]>([]);
 
   // Detail View State
   const [selectedVendorDetail, setSelectedVendorDetail] = useState<any | null>(
     null,
   );
   const [selectedRpnDetail, setSelectedRpnDetail] = useState<any | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedLog, setSelectedLog] = useState<WhatsAppActivityLog | null>(
+    null,
+  );
+  const [updateFormData, setUpdateFormData] = useState<
+    Partial<WhatsAppActivityLog>
+  >({});
 
   // Filters
   const [search, setSearch] = useState("");
@@ -54,6 +79,8 @@ export const WhatsAppPerformanceReports: React.FC = () => {
 
   useEffect(() => {
     loadData();
+    setRpns(rpnService.getAll());
+    setStaffList(staffService.getAllStaff());
   }, []);
 
   const loadData = () => {
@@ -77,6 +104,7 @@ export const WhatsAppPerformanceReports: React.FC = () => {
         log.sector,
         log.category,
         log.sourceName,
+        log.communityName,
         log.province,
         log.cityTown,
         log.district,
@@ -84,6 +112,8 @@ export const WhatsAppPerformanceReports: React.FC = () => {
         log.activityType,
         log.leadStatus,
         log.responseStatus,
+        log.capturedByStaffName,
+        log.assignedStaffName,
       ]
         .filter(Boolean)
         .join(" ")
@@ -129,6 +159,11 @@ export const WhatsAppPerformanceReports: React.FC = () => {
       missedResponses: 0,
       followUpsDue: 0,
       highPriority: 0,
+      overdueFollowUps: 0,
+      followUpsDueToday: 0,
+      completedFollowUps: 0,
+      vendorNonResponseCount: 0,
+      conversionsAfterFollowUp: 0,
     };
 
     filteredLogs.forEach((log) => {
@@ -152,10 +187,57 @@ export const WhatsAppPerformanceReports: React.FC = () => {
       if (log.priority === "HIGH" || log.priority === "CRITICAL") {
         summary.highPriority++;
       }
+
+      const today = new Date().toISOString().split("T")[0];
+      if (log.followUpRequired && log.followUpDate) {
+        if (log.followUpDate < today) summary.overdueFollowUps++;
+        if (log.followUpDate === today) summary.followUpsDueToday++;
+      }
+      if (log.activityType === "FOLLOW_UP_DONE") summary.completedFollowUps++;
+      if (log.activityType === "VENDOR_DID_NOT_RESPOND")
+        summary.vendorNonResponseCount++;
+      if (log.leadStatus === "CONVERTED" && log.followUpDate) {
+        summary.conversionsAfterFollowUp++;
+      }
     });
 
     return summary;
   }, [filteredLogs]);
+
+  useEffect(() => {
+    if (execSummary.overdueFollowUps > 0) {
+      notificationService.addNotification({
+        type: "WHATSAPP",
+        severity: "CRITICAL",
+        title: "Overdue Follow-ups Detected",
+        message: `${execSummary.overdueFollowUps} follow-ups are currently overdue across the network.`,
+        relatedModule: "WhatsApp Reports",
+        relatedRecordId: "bi-overdue-followups",
+      });
+    }
+    if (execSummary.highPriority > 0) {
+      notificationService.addNotification({
+        type: "WHATSAPP",
+        severity: "CRITICAL",
+        title: "High Priority Issues Pending",
+        message: `${execSummary.highPriority} critical priority items remain unresolved.`,
+        relatedModule: "WhatsApp Reports",
+        relatedRecordId: "bi-high-priority",
+      });
+    }
+    vendorReports.forEach((v) => {
+      if (v.missedResponses >= 2) {
+        notificationService.addNotification({
+          type: "VENDOR",
+          severity: "WARNING",
+          title: "Repeated Missed Responses",
+          message: `${v.vendorName} has missed ${v.missedResponses} responses.`,
+          relatedModule: "WhatsApp Reports",
+          relatedRecordId: `vendor-missed-${v.vendorId}`,
+        });
+      }
+    });
+  }, [execSummary, vendorReports]);
 
   // Vendor Reports
   const vendorReports = useMemo(() => {
@@ -227,7 +309,8 @@ export const WhatsAppPerformanceReports: React.FC = () => {
       }
 
       if (log.productName) v.productsRequested.add(log.productName);
-      if (log.sourceName) v.sourceGroups.add(log.sourceName);
+      const sKey = log.sourceId || log.sourceName;
+      if (sKey) v.sourceGroups.add(log.sourceName || sKey);
       if (log.catalogueId) v.catalogueIds.add(log.catalogueId);
       if (log.storefrontId) v.storefrontIds.add(log.storefrontId);
 
@@ -324,7 +407,8 @@ export const WhatsAppPerformanceReports: React.FC = () => {
       if (log.activityType === "COMPLAINT_RECEIVED") r.complaintsHandled++;
 
       if (log.sector) r.sectors.add(log.sector);
-      if (log.sourceName) r.sourceGroups.add(log.sourceName);
+      const sKey = log.sourceId || log.sourceName;
+      if (sKey) r.sourceGroups.add(log.sourceName || sKey);
 
       if (log.activityDate > r.lastActivityDate)
         r.lastActivityDate = log.activityDate;
@@ -382,7 +466,8 @@ export const WhatsAppPerformanceReports: React.FC = () => {
 
       if (log.cityTown) p.locations.add(log.cityTown);
       if (log.vendorName) p.vendorsMentioned.add(log.vendorName);
-      if (log.sourceName) p.sources.add(log.sourceName);
+      const sKey = log.sourceId || log.sourceName;
+      if (sKey) p.sources.add(log.sourceName || sKey);
 
       if (log.leadStatus === "CONVERTED") p.conversions++;
       if (log.responseStatus === "MISSED") p.missedResponses++;
@@ -459,6 +544,119 @@ export const WhatsAppPerformanceReports: React.FC = () => {
     loadData();
   };
 
+  const handleOpenUpdateModal = (log: WhatsAppActivityLog) => {
+    setSelectedLog(log);
+    setUpdateFormData(log);
+    setIsModalOpen(true);
+  };
+
+  const handleModalClose = () => {
+    setIsModalOpen(false);
+    setSelectedLog(null);
+    setUpdateFormData({});
+  };
+
+  const handleModalSave = () => {
+    if (!selectedLog) return;
+    whatsappActivityService.updateLog(selectedLog.id, {
+      ...updateFormData,
+      notes: updateFormData.notes,
+      assignedRpnId: updateFormData.assignedRpnId,
+      assignedRpnName: rpns.find((r) => r.id === updateFormData.assignedRpnId)
+        ?.name,
+      assignedToType: updateFormData.assignedToType,
+      assignedStaffId: updateFormData.assignedStaffId,
+      assignedStaffName:
+        staffList.find((s) => s.id === updateFormData.assignedStaffId)
+          ?.displayName ||
+        staffList.find((s) => s.id === updateFormData.assignedStaffId)
+          ?.fullName,
+      leadStatus: updateFormData.leadStatus,
+      followUpDate: updateFormData.followUpDate,
+      priority: updateFormData.priority,
+    });
+    handleModalClose();
+    loadData();
+  };
+
+  const handleModalAction = (
+    type:
+      | "converted"
+      | "lost"
+      | "vendorResponded"
+      | "vendorDidNotRespond"
+      | "contacted"
+      | "escalate",
+  ) => {
+    if (!selectedLog) return;
+
+    const createNewActivity = (
+      activityType: WhatsAppActivityType,
+      notes: string,
+    ) => {
+      const newLog: WhatsAppActivityLog = {
+        ...selectedLog,
+        id: `WA-${Date.now()}`,
+        activityDate: new Date().toISOString().split("T")[0],
+        activityType,
+        notes,
+        followUpRequired: false,
+        followUpDate: undefined,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      whatsappActivityService.saveLog(newLog);
+    };
+
+    if (type === "converted" || type === "lost") {
+      whatsappActivityService.updateLog(selectedLog.id, {
+        leadStatus: type === "converted" ? "CONVERTED" : "LOST",
+        followUpRequired: false,
+      });
+      createNewActivity(
+        "FOLLOW_UP_DONE",
+        `Follow-up resulted in ${type} lead for original log: ${selectedLog.id}`,
+      );
+    } else if (type === "vendorResponded") {
+      whatsappActivityService.updateLog(selectedLog.id, {
+        responseStatus: "RESPONDED",
+      });
+      createNewActivity(
+        "VENDOR_RESPONDED",
+        `Vendor responded to enquiry from log: ${selectedLog.id}`,
+      );
+    } else if (type === "vendorDidNotRespond") {
+      whatsappActivityService.updateLog(selectedLog.id, {
+        responseStatus: "MISSED",
+        priority: "HIGH",
+      });
+      createNewActivity(
+        "VENDOR_DID_NOT_RESPOND",
+        `Vendor did not respond to enquiry from log: ${selectedLog.id}. Escalating.`,
+      );
+    } else if (type === "contacted") {
+      whatsappActivityService.updateLog(selectedLog.id, {
+        leadStatus: "CONTACTED",
+      });
+      createNewActivity(
+        "FOLLOW_UP_DONE",
+        `Follow-up contacted for log: ${selectedLog.id}`,
+      );
+    } else if (type === "escalate") {
+      whatsappActivityService.updateLog(selectedLog.id, {
+        responseStatus: "ESCALATED",
+        priority: "CRITICAL",
+      });
+      createNewActivity(
+        "OTHER",
+        `Issue escalated for original log: ${selectedLog.id}`,
+      );
+    }
+
+    handleModalClose();
+    loadData();
+  };
+
   const inputClass =
     "w-full border-2 border-stone-200 p-2 text-[10px] font-bold outline-none focus:border-brand-orange bg-white rounded-none uppercase";
 
@@ -519,6 +717,30 @@ export const WhatsAppPerformanceReports: React.FC = () => {
           value={execSummary.highPriority}
           icon={AlertTriangle}
           variant={execSummary.highPriority > 0 ? "error" : "neutral"}
+        />
+        <StatCard
+          label="Overdue F/Ups"
+          value={execSummary.overdueFollowUps}
+          icon={AlertCircle}
+          variant={execSummary.overdueFollowUps > 0 ? "error" : "neutral"}
+        />
+        <StatCard
+          label="F/Ups Today"
+          value={execSummary.followUpsDueToday}
+          icon={Clock}
+          variant={execSummary.followUpsDueToday > 0 ? "warning" : "neutral"}
+        />
+        <StatCard
+          label="F/Ups Done"
+          value={execSummary.completedFollowUps}
+          icon={CheckCircle2}
+          variant="success"
+        />
+        <StatCard
+          label="Conversions (F/Up)"
+          value={execSummary.conversionsAfterFollowUp}
+          icon={TrendingUpIcon}
+          variant="success"
         />
       </div>
 
@@ -1094,9 +1316,10 @@ export const WhatsAppPerformanceReports: React.FC = () => {
             headers={[
               "Due Date",
               "Source",
-              "Sector",
               "Vendor / Product",
               "Customer Need",
+              "Captured By",
+              "Assigned To",
               "Priority",
               "Status",
               "Action",
@@ -1119,10 +1342,8 @@ export const WhatsAppPerformanceReports: React.FC = () => {
                   </p>
                   <p className="text-[9px] text-stone-400 uppercase mt-0.5">
                     {log.sourceType?.replace(/_/g, " ")}
+                    {log.communityName ? ` • ${log.communityName}` : ""}
                   </p>
-                </td>
-                <td className="px-6 py-4 text-[10px] font-bold text-stone-500 uppercase">
-                  {log.sector || "-"}
                 </td>
                 <td className="px-6 py-4">
                   {log.vendorName && (
@@ -1144,6 +1365,25 @@ export const WhatsAppPerformanceReports: React.FC = () => {
                   {log.customerNeed || "-"}
                 </td>
                 <td className="px-6 py-4">
+                  <p className="text-[10px] font-bold text-stone-500 uppercase">
+                    {log.capturedByStaffName || "Unknown"}
+                  </p>
+                </td>
+                <td className="px-6 py-4">
+                  <p className="text-[10px] font-bold text-brand-charcoal uppercase">
+                    {log.assignedStaffName ||
+                      log.assignedRpnName ||
+                      "Unassigned"}
+                  </p>
+                  <p className="text-[8px] text-stone-400 uppercase mt-0.5">
+                    {log.assignedStaffName
+                      ? "Staff"
+                      : log.assignedRpnName
+                        ? "RPN"
+                        : ""}
+                  </p>
+                </td>
+                <td className="px-6 py-4">
                   <StatusBadge
                     status={log.priority}
                     variant={
@@ -1156,15 +1396,32 @@ export const WhatsAppPerformanceReports: React.FC = () => {
                   />
                 </td>
                 <td className="px-6 py-4">
-                  <StatusBadge status={log.leadStatus} variant="neutral" />
+                  <div className="flex flex-col gap-1 items-start">
+                    <StatusBadge status={log.leadStatus} variant="neutral" />
+                    {log.responseStatus &&
+                      log.responseStatus !== "NOT_REQUIRED" && (
+                        <StatusBadge
+                          status={log.responseStatus}
+                          variant="neutral"
+                        />
+                      )}
+                  </div>
                 </td>
                 <td className="px-6 py-4 text-right">
-                  <PrimaryButton
-                    size="sm"
-                    onClick={() => handleMarkFollowUpDone(log)}
-                  >
-                    <CheckCircle2 size={12} className="mr-1" /> Mark Done
-                  </PrimaryButton>
+                  <div className="flex gap-2 justify-end">
+                    <SecondaryButton
+                      size="sm"
+                      onClick={() => handleOpenUpdateModal(log)}
+                    >
+                      <Edit size={12} className="mr-1" /> Update
+                    </SecondaryButton>
+                    <PrimaryButton
+                      size="sm"
+                      onClick={() => handleMarkFollowUpDone(log)}
+                    >
+                      <CheckCircle2 size={12} className="mr-1" /> Done
+                    </PrimaryButton>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -1181,6 +1438,213 @@ export const WhatsAppPerformanceReports: React.FC = () => {
           </TablePanel>
         )}
       </div>
+
+      {isModalOpen && selectedLog && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <DataPanel
+            title={`Update Follow-up: ${selectedLog.id}`}
+            className="w-full max-w-3xl bg-white shadow-2xl border-t-4 border-brand-orange"
+          >
+            <div className="p-6 space-y-6 max-h-[80vh] overflow-y-auto">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="col-span-1 md:col-span-2 flex gap-4">
+                  <div className="flex-1">
+                    <label className="text-[10px] font-bold uppercase text-stone-400">
+                      Assign To Type
+                    </label>
+                    <select
+                      className={inputClass}
+                      value={updateFormData.assignedToType || "RPN"}
+                      onChange={(e) =>
+                        setUpdateFormData({
+                          ...updateFormData,
+                          assignedToType: e.target.value as
+                            | "STAFF"
+                            | "RPN"
+                            | "ADMIN",
+                          assignedRpnId: "",
+                          assignedRpnName: "",
+                          assignedStaffId: "",
+                          assignedStaffName: "",
+                        })
+                      }
+                    >
+                      <option value="RPN">RPN</option>
+                      <option value="STAFF">Backend Staff</option>
+                    </select>
+                  </div>
+                  <div className="flex-1">
+                    <label className="text-[10px] font-bold uppercase text-stone-400">
+                      Assignee
+                    </label>
+                    {updateFormData.assignedToType === "STAFF" ? (
+                      <select
+                        className={inputClass}
+                        value={updateFormData.assignedStaffId || ""}
+                        onChange={(e) => {
+                          const s = staffList.find(
+                            (r) => r.id === e.target.value,
+                          );
+                          setUpdateFormData({
+                            ...updateFormData,
+                            assignedStaffId: s?.id,
+                            assignedStaffName: s?.displayName || s?.fullName,
+                          });
+                        }}
+                      >
+                        <option value="">Unassigned</option>
+                        {staffList.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.displayName || s.fullName}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <select
+                        className={inputClass}
+                        value={updateFormData.assignedRpnId || ""}
+                        onChange={(e) => {
+                          const rpn = rpns.find((r) => r.id === e.target.value);
+                          setUpdateFormData({
+                            ...updateFormData,
+                            assignedRpnId: rpn?.id,
+                            assignedRpnName: rpn?.name,
+                          });
+                        }}
+                      >
+                        <option value="">Unassigned</option>
+                        {rpns.map((rpn) => (
+                          <option key={rpn.id} value={rpn.id}>
+                            {rpn.name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-stone-400">
+                    Next Follow-up Date
+                  </label>
+                  <input
+                    type="date"
+                    className={inputClass}
+                    value={updateFormData.followUpDate || ""}
+                    onChange={(e) =>
+                      setUpdateFormData({
+                        ...updateFormData,
+                        followUpDate: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-stone-400">
+                    Lead Status
+                  </label>
+                  <select
+                    className={inputClass}
+                    value={updateFormData.leadStatus || ""}
+                    onChange={(e) =>
+                      setUpdateFormData({
+                        ...updateFormData,
+                        leadStatus: e.target.value as WhatsAppLeadStatus,
+                      })
+                    }
+                  >
+                    <option value="NEW">New</option>
+                    <option value="REFERRED">Referred</option>
+                    <option value="CONTACTED">Contacted</option>
+                    <option value="FOLLOW_UP_REQUIRED">
+                      Follow Up Required
+                    </option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-stone-400">
+                    Priority
+                  </label>
+                  <select
+                    className={inputClass}
+                    value={updateFormData.priority || "LOW"}
+                    onChange={(e) =>
+                      setUpdateFormData({
+                        ...updateFormData,
+                        priority: e.target.value as any,
+                      })
+                    }
+                  >
+                    <option value="LOW">Low</option>
+                    <option value="MEDIUM">Medium</option>
+                    <option value="HIGH">High</option>
+                    <option value="CRITICAL">Critical</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold uppercase text-stone-400">
+                  Follow-up Notes
+                </label>
+                <textarea
+                  className={`${inputClass} min-h-[100px]`}
+                  value={updateFormData.notes || ""}
+                  onChange={(e) =>
+                    setUpdateFormData({
+                      ...updateFormData,
+                      notes: e.target.value,
+                    })
+                  }
+                  placeholder="Add notes about the follow-up..."
+                />
+              </div>
+
+              <div className="pt-4 border-t border-stone-200 space-y-3">
+                <p className="text-[10px] font-bold uppercase text-stone-400">
+                  Quick Actions
+                </p>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                  <SecondaryButton
+                    onClick={() => handleModalAction("converted")}
+                  >
+                    <Check size={14} className="mr-1" /> Converted
+                  </SecondaryButton>
+                  <SecondaryButton onClick={() => handleModalAction("lost")}>
+                    <XCircle size={14} className="mr-1" /> Lost
+                  </SecondaryButton>
+                  <SecondaryButton
+                    onClick={() => handleModalAction("vendorResponded")}
+                  >
+                    Vendor Responded
+                  </SecondaryButton>
+                  <SecondaryButton
+                    onClick={() => handleModalAction("vendorDidNotRespond")}
+                  >
+                    Vendor No-Response
+                  </SecondaryButton>
+                  <SecondaryButton
+                    onClick={() => handleModalAction("contacted")}
+                  >
+                    Contacted
+                  </SecondaryButton>
+                  <SecondaryButton
+                    onClick={() => handleModalAction("escalate")}
+                  >
+                    <AlertTriangle size={14} className="mr-1" /> Escalate
+                  </SecondaryButton>
+                </div>
+              </div>
+            </div>
+            <div className="p-4 bg-stone-50 border-t border-stone-200 flex gap-4">
+              <SecondaryButton className="w-1/3" onClick={handleModalClose}>
+                Cancel
+              </SecondaryButton>
+              <PrimaryButton className="flex-1" onClick={handleModalSave}>
+                <Save size={14} className="mr-2" /> Save Follow-up Details
+              </PrimaryButton>
+            </div>
+          </DataPanel>
+        </div>
+      )}
     </div>
   );
 };

@@ -6,6 +6,10 @@
 import React, { useState, useEffect } from "react";
 import {
   BarChart3,
+  Bell,
+  Check,
+  CheckCircle2,
+  AlertTriangle,
   ChevronDown,
   ChevronRight,
   ClipboardCheck,
@@ -30,9 +34,10 @@ import {
   Wallet,
   X,
 } from "lucide-react";
-import { AppRoute } from "../types.ts";
+import { AppRoute, AppNotification } from "../types.ts";
 import { motion, AnimatePresence } from "motion/react";
 import { permissionService } from "../services/permissionService.ts";
+import { notificationService } from "../services/notificationService.ts";
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -98,6 +103,11 @@ const MENU_GROUPS: {
         id: AppRoute.COMMUNITY_BI,
         label: "Community BI",
         icon: LineChart,
+      },
+      {
+        id: AppRoute.WHATSAPP_REPORTS,
+        label: "WhatsApp Reports",
+        icon: BarChart3,
       },
       { id: AppRoute.SPOT_CHECKS, label: "Spot Checks", icon: ClipboardCheck },
     ],
@@ -168,6 +178,40 @@ export const AppShell: React.FC<AppShellProps> = ({
 }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [openGroupId, setOpenGroupId] = useState<string | null>(null);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [toasts, setToasts] = useState<
+    { id: number; message: string; type: string }[]
+  >([]);
+  const [sessionIgnored, setSessionIgnored] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    const loadNotifs = () =>
+      setNotifications(notificationService.getNotifications());
+    loadNotifs();
+
+    const handleUpdate = () => loadNotifs();
+    const handleToast = (e: any) => {
+      const newToast = {
+        id: Date.now(),
+        message: e.detail.message,
+        type: e.detail.type,
+      };
+      setToasts((prev) => [...prev, newToast]);
+      setTimeout(
+        () => setToasts((prev) => prev.filter((t) => t.id !== newToast.id)),
+        3000,
+      );
+    };
+
+    window.addEventListener("itred_notifications_updated", handleUpdate);
+    window.addEventListener("itred_toast", handleToast);
+
+    return () => {
+      window.removeEventListener("itred_notifications_updated", handleUpdate);
+      window.removeEventListener("itred_toast", handleToast);
+    };
+  }, []);
 
   useEffect(() => {
     const group = MENU_GROUPS.find((g) =>
@@ -186,6 +230,7 @@ export const AppShell: React.FC<AppShellProps> = ({
       [AppRoute.CAH]: "accessHub",
       [AppRoute.WHATSAPP_ACTIVITY]: "whatsappActivity",
       [AppRoute.COMMUNITY_BI]: "whatsappActivity",
+      [AppRoute.WHATSAPP_REPORTS]: "whatsappActivity",
       [AppRoute.PRICING]: "pricing",
       [AppRoute.SUBSCRIPTIONS]: "subscriptionsCollections",
       [AppRoute.CATALOGUE_GEN]: "createCatalogue",
@@ -210,6 +255,21 @@ export const AppShell: React.FC<AppShellProps> = ({
     onNavigate(route);
     setIsMobileMenuOpen(false);
   };
+
+  const openAlertsCount = notifications.filter(
+    (n) =>
+      n.status === "OPEN" &&
+      (n.severity === "CRITICAL" ||
+        n.severity === "WARNING" ||
+        n.severity === "SYSTEM"),
+  ).length;
+
+  const criticalAlert = notifications.find(
+    (n) =>
+      n.status === "OPEN" &&
+      (n.severity === "CRITICAL" || n.severity === "SYSTEM") &&
+      !sessionIgnored.has(n.id),
+  );
 
   return (
     <div className="min-h-screen bg-white flex flex-col md:flex-row">
@@ -428,6 +488,19 @@ export const AppShell: React.FC<AppShellProps> = ({
               </div>
             </div>
             <div className="relative group">
+              <div
+                className="w-8 h-8 bg-gray-100 flex items-center justify-center text-stone-400 group-hover:bg-brand-orange group-hover:text-white transition-colors cursor-pointer"
+                onClick={() => setIsDrawerOpen(true)}
+              >
+                <Bell size={16} />
+                {openAlertsCount > 0 && (
+                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-brand-orange text-white text-[8px] font-bold rounded-full flex items-center justify-center">
+                    {openAlertsCount}
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="relative group">
               <div className="w-8 h-8 bg-gray-100 flex items-center justify-center text-stone-400 group-hover:bg-brand-orange group-hover:text-white transition-colors cursor-pointer">
                 <Search size={16} />
               </div>
@@ -439,16 +512,173 @@ export const AppShell: React.FC<AppShellProps> = ({
 
         <div
           id="main-scroll-container"
-          className="flex-1 overflow-y-auto p-8 pt-24 flex flex-col"
+          className="flex-1 overflow-y-auto p-8 pt-24 pb-32 flex flex-col"
         >
-          <div className="max-w-[1400px] flex-1 shrink-0">{children}</div>
-
-          <footer className="mt-20 pt-8 shrink-0 border-t border-gray-200 flex justify-between items-center text-[9px] uppercase font-bold tracking-widest text-stone-400">
-            <p>© 2026 iTred Operating System</p>
-            <p className="md:hidden">seiGEN Commerce</p>
-          </footer>
+          <div className="max-w-[1400px] w-full flex-1 shrink-0">
+            {children}
+          </div>
         </div>
+
+        <footer className="absolute left-0 right-0 bottom-[5mm] z-30 border-t border-gray-200 bg-white/95 px-8 py-3 flex justify-between items-center text-[9px] uppercase font-bold tracking-widest text-brand-orange">
+          <p>© 2026 iTred Operating System</p>
+          <p className="md:hidden">seiGEN Commerce</p>
+        </footer>
       </main>
+
+      {/* Notification Toast Stream */}
+      <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 z-[100] flex flex-col gap-2 pointer-events-none">
+        {toasts.map((t) => (
+          <div
+            key={t.id}
+            className="bg-brand-charcoal text-white px-6 py-3 text-xs font-bold uppercase tracking-widest shadow-xl flex items-center gap-3 border-l-4 border-brand-orange animate-in slide-in-from-bottom-5"
+          >
+            <Check size={14} className="text-brand-orange" />
+            {t.message}
+          </div>
+        ))}
+      </div>
+
+      {/* Critical Modal */}
+      {criticalAlert && (
+        <div className="fixed inset-0 z-[80] bg-brand-charcoal/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-md border-t-8 border-brand-orange shadow-2xl p-6 animate-in zoom-in-95">
+            <div className="flex items-center gap-4 mb-4">
+              <div className="w-12 h-12 bg-red-50 text-red-600 flex items-center justify-center shrink-0">
+                <AlertTriangle size={24} />
+              </div>
+              <div>
+                <h3 className="text-lg font-black uppercase text-brand-charcoal leading-tight pr-4">
+                  {criticalAlert.title}
+                </h3>
+                <p className="text-[10px] font-bold text-stone-400 uppercase tracking-widest mt-1">
+                  Severity: {criticalAlert.severity}
+                </p>
+              </div>
+            </div>
+            <p className="text-sm font-medium text-stone-600 mb-8">
+              {criticalAlert.message}
+            </p>
+            <div className="flex gap-3">
+              <button
+                className="flex-1 p-3 bg-stone-100 text-stone-600 text-[10px] tracking-wider font-bold uppercase hover:bg-stone-200 transition-colors"
+                onClick={() =>
+                  setSessionIgnored((prev) =>
+                    new Set(prev).add(criticalAlert.id),
+                  )
+                }
+              >
+                Dismiss For Now
+              </button>
+              <button
+                className="flex-1 p-3 bg-brand-orange text-white text-[10px] tracking-wider font-bold uppercase hover:bg-brand-orange/90 transition-colors"
+                onClick={() =>
+                  notificationService.updateStatus(
+                    criticalAlert.id,
+                    "ACKNOWLEDGED",
+                  )
+                }
+              >
+                Acknowledge
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Notification Drawer */}
+      {isDrawerOpen && (
+        <div
+          className="fixed inset-0 z-[70] flex justify-end bg-brand-charcoal/20 backdrop-blur-sm"
+          onClick={() => setIsDrawerOpen(false)}
+        >
+          <div
+            className="w-full max-w-sm bg-stone-50 h-full shadow-2xl flex flex-col animate-in slide-in-from-right"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-6 border-b border-stone-200 flex justify-between items-center bg-white shrink-0">
+              <h3 className="text-sm font-black uppercase text-brand-charcoal flex items-center gap-2">
+                <Bell size={16} className="text-brand-orange" /> Operational
+                Alerts
+              </h3>
+              <button
+                onClick={() => setIsDrawerOpen(false)}
+                className="text-stone-400 hover:text-brand-charcoal transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+              {notifications.filter(
+                (n) => n.status === "OPEN" || n.status === "ACKNOWLEDGED",
+              ).length === 0 ? (
+                <div className="text-center p-10">
+                  <CheckCircle2
+                    size={40}
+                    className="mx-auto text-stone-200 mb-3"
+                  />
+                  <p className="text-[10px] font-bold uppercase text-stone-400 tracking-widest">
+                    All systems clear.
+                  </p>
+                </div>
+              ) : (
+                notifications
+                  .filter(
+                    (n) => n.status === "OPEN" || n.status === "ACKNOWLEDGED",
+                  )
+                  .sort(
+                    (a, b) =>
+                      new Date(b.createdAt).getTime() -
+                      new Date(a.createdAt).getTime(),
+                  )
+                  .map((n) => (
+                    <div
+                      key={n.id}
+                      className={`p-4 bg-white border-l-4 shadow-sm ${n.severity === "CRITICAL" || n.severity === "SYSTEM" ? "border-red-500" : n.severity === "WARNING" ? "border-brand-orange" : "border-blue-500"}`}
+                    >
+                      <div className="flex justify-between items-start mb-2">
+                        <h4 className="text-[11px] font-bold uppercase text-brand-charcoal leading-tight pr-2">
+                          {n.title}
+                        </h4>
+                        <span className="text-[8px] font-bold text-stone-400 uppercase shrink-0">
+                          {new Date(n.createdAt).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </span>
+                      </div>
+                      <p className="text-[10px] font-medium text-stone-500 mb-4">
+                        {n.message}
+                      </p>
+                      <div className="flex gap-2">
+                        {n.status === "OPEN" && (
+                          <button
+                            onClick={() =>
+                              notificationService.updateStatus(
+                                n.id,
+                                "ACKNOWLEDGED",
+                              )
+                            }
+                            className="text-[9px] font-bold uppercase tracking-wider bg-stone-100 text-stone-600 px-3 py-1.5 hover:bg-stone-200 transition-colors"
+                          >
+                            Acknowledge
+                          </button>
+                        )}
+                        <button
+                          onClick={() =>
+                            notificationService.updateStatus(n.id, "RESOLVED")
+                          }
+                          className="text-[9px] font-bold uppercase tracking-wider bg-orange-50 text-brand-orange border border-orange-200 px-3 py-1.5 hover:bg-brand-orange hover:text-white transition-colors"
+                        >
+                          Resolve
+                        </button>
+                      </div>
+                    </div>
+                  ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

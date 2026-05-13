@@ -18,6 +18,7 @@ import { ProductManagement } from "./pages/ProductManagement.tsx";
 import { CAHManagement } from "./pages/CAHManagement.tsx";
 import { WhatsAppActivityLogs } from "./pages/WhatsAppActivityLogs.tsx";
 import { WhatsAppCommunityBI } from "./pages/WhatsAppCommunityBI.tsx";
+import { WhatsAppPerformanceReports } from "./pages/WhatsAppPerformanceReports.tsx";
 import { PricingPlans } from "./pages/PricingPlans.tsx";
 import { SubscriptionManagement } from "./pages/SubscriptionManagement.tsx";
 import { SectorCatalogueGenerator } from "./pages/SectorCatalogueGenerator.tsx";
@@ -111,6 +112,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     [AppRoute.CAH]: "Access Hub",
     [AppRoute.WHATSAPP_ACTIVITY]: "WhatsApp Activity",
     [AppRoute.COMMUNITY_BI]: "Community BI",
+    [AppRoute.WHATSAPP_REPORTS]: "WhatsApp Reports",
     [AppRoute.PRICING]: "Pricing",
     [AppRoute.SUBSCRIPTIONS]: "Subscriptions & Collections",
     [AppRoute.CATALOGUE_GEN]: "Create Catalogue",
@@ -138,6 +140,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       "commerce-access-hub": "accessHub",
       "whatsapp-activity": "whatsappActivity",
       "whatsapp-community-bi": "whatsappActivity",
+      "whatsapp-performance-reports": "whatsappActivity",
       pricing: "pricing",
       subscriptions: "subscriptionsCollections",
       "catalogue-generator": "createCatalogue",
@@ -251,6 +254,16 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           element={
             checkAccess("whatsapp-community-bi") ? (
               <WhatsAppCommunityBI />
+            ) : (
+              <RestrictedAccess />
+            )
+          }
+        />
+        <Route
+          path="/whatsapp-performance-reports"
+          element={
+            checkAccess("whatsapp-performance-reports") ? (
+              <WhatsAppPerformanceReports />
             ) : (
               <RestrictedAccess />
             )

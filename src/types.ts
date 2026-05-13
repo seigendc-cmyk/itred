@@ -78,8 +78,7 @@ export type MenuKey =
   | "systemSettings"
   | "howTo"
   | "whatsappActivity"
-  | "whatsappCommunityBI"
-  | "whatsappReports";
+  | "whatsappCommunityBI";
 
 export type MenuPermissions = Partial<Record<MenuKey, PermissionLevel>>;
 
@@ -161,6 +160,26 @@ export type WhatsAppSourceType =
   | "BROADCAST_LIST"
   | "OTHER";
 
+export interface WhatsAppSource {
+  id: string;
+  sourceType: WhatsAppSourceType;
+  communityId?: string;
+  communityName?: string;
+  sourceName: string;
+  whatsappUrl?: string;
+  sector?: string;
+  category?: string;
+  province?: string;
+  cityTown?: string;
+  district?: string;
+  memberCount?: number;
+  status: "active" | "inactive" | "dormant";
+  createdBy?: string;
+  updatedBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type WhatsAppLeadStatus =
   | "NEW"
   | "REFERRED"
@@ -183,6 +202,9 @@ export interface WhatsAppActivityLog {
   activityType: WhatsAppActivityType;
   sourceType: WhatsAppSourceType;
   sourceName: string;
+  sourceId?: string;
+  communityId?: string;
+  communityName?: string;
   whatsappUrl?: string;
   sector?: string;
   category?: string;
@@ -210,6 +232,13 @@ export interface WhatsAppActivityLog {
   followUpDate?: string;
   createdAt: string;
   updatedAt: string;
+  capturedByStaffId?: string;
+  capturedByStaffName?: string;
+  capturedByRole?: string;
+  capturedAt?: string;
+  assignedToType?: "STAFF" | "RPN" | "ADMIN";
+  assignedStaffId?: string;
+  assignedStaffName?: string;
 }
 
 export interface DeliveryStaff {
@@ -957,4 +986,33 @@ export interface CAHBoothAsset {
   updatedBy: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export type NotificationType =
+  | "WHATSAPP"
+  | "VENDOR"
+  | "CATALOGUE"
+  | "STOREFRONT"
+  | "RPN"
+  | "SYSTEM"
+  | "SUBSCRIPTION";
+export type NotificationSeverity = "INFO" | "WARNING" | "CRITICAL" | "SYSTEM";
+export type NotificationStatus =
+  | "OPEN"
+  | "ACKNOWLEDGED"
+  | "RESOLVED"
+  | "DISMISSED";
+
+export interface AppNotification {
+  id: string;
+  type: NotificationType;
+  severity: NotificationSeverity;
+  title: string;
+  message: string;
+  relatedModule?: string;
+  relatedRecordId?: string;
+  actionPath?: string;
+  status: NotificationStatus;
+  createdAt: string;
+  resolvedAt?: string;
 }

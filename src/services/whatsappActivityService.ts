@@ -4,6 +4,7 @@
  */
 
 import { WhatsAppActivityLog } from "../types.ts";
+import { notificationService } from "./notificationService.ts";
 
 const STORAGE_KEY = "itred_whatsapp_activity_logs";
 
@@ -28,6 +29,7 @@ export const whatsappActivityService = {
       logs.push(log);
     }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(logs));
+    this.evaluateLogRules(log);
   },
 
   deleteLog(id: string): void {
@@ -46,6 +48,7 @@ export const whatsappActivityService = {
         updatedAt: new Date().toISOString(),
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(logs));
+      this.evaluateLogRules(logs[existingIndex]);
     }
   },
 
@@ -59,6 +62,11 @@ export const whatsappActivityService = {
     let memberGrowthTotal = 0;
     let activeSectorsSet = new Set<string>();
     let activeSourcesSet = new Set<string>();
+    let overdueFollowUps = 0;
+    let followUpsDueToday = 0;
+    let completedFollowUps = 0;
+    let vendorNonResponseCount = 0;
+    let conversionsAfterFollowUp = 0;
 
     const today = new Date().toISOString().split("T")[0];
 
@@ -67,6 +75,17 @@ export const whatsappActivityService = {
       if (log.leadStatus === "CONVERTED") convertedLeads++;
       if (log.followUpRequired && log.followUpDate && log.followUpDate <= today)
         followUpsDue++;
+
+      if (log.followUpRequired && log.followUpDate && log.followUpDate < today)
+        overdueFollowUps++;
+      if (log.followUpRequired && log.followUpDate === today)
+        followUpsDueToday++;
+      if (log.activityType === "FOLLOW_UP_DONE") completedFollowUps++;
+      if (log.activityType === "VENDOR_DID_NOT_RESPOND")
+        vendorNonResponseCount++;
+      if (log.leadStatus === "CONVERTED" && log.followUpDate)
+        conversionsAfterFollowUp++;
+
       if (log.priority === "HIGH" || log.priority === "CRITICAL")
         highPriorityCount++;
       if (
@@ -93,6 +112,59 @@ export const whatsappActivityService = {
       activeSectorsCount: activeSectorsSet.size,
       activeSourcesCount: activeSourcesSet.size,
       memberGrowthTotal,
+      overdueFollowUps,
+      followUpsDueToday,
+      completedFollowUps,
+      vendorNonResponseCount,
+      conversionsAfterFollowUp,
     };
+  },
+
+  evaluateLogRules(log: WhatsAppActivityLog): void {
+    if (log.priority === "HIGH" || log.priority === "CRITICAL") {
+      notificationService.addNotification({
+        type: "WHATSAPP",
+        severity: "CRITICAL",
+        title: `Priority Activity: ${log.priority}`,
+        message: `Activity log ${log.id} requires immediate attention.`,
+        relatedModule: "WhatsApp Activity",
+        relatedRecordId: `priority-${log.id}`,
+      });
+    }
+
+    if (log.followUpRequired && log.followUpDate) {
+      const today = new Date().toISOString().split("T")[0];
+      if (log.followUpDate <= today) {
+        notificationService.addNotification({
+          type: "WHATSAPP",
+          severity: log.followUpDate < today ? "CRITICAL" : "WARNING",
+          title:
+            log.followUpDate < today
+              ? "Overdue Follow-up"
+              : "Follow-up Due Today",
+          message: `Follow-up is required for task ${log.id}.`,
+          relatedModule: "WhatsApp Activity",
+          relatedRecordId: `followup-${log.id}`,
+        });
+      }
+    }
+
+    if (
+      log.responseStatus === "MISSED" ||
+      log.responseStatus === "ESCALATED" ||
+      log.activityType === "VENDOR_DID_NOT_RESPOND"
+    ) {
+      notificationService.addNotification({
+        type: "WHATSAPP",
+        severity: "CRITICAL",
+        title:
+          log.activityType === "VENDOR_DID_NOT_RESPOND"
+            ? "Vendor Did Not Respond"
+            : `Vendor Response: ${log.responseStatus}`,
+        message: `Vendor engagement failure requires escalation.`,
+        relatedModule: "WhatsApp Activity",
+        relatedRecordId: `response-${log.id}`,
+      });
+    }
   },
 };

@@ -35,14 +35,36 @@ import {
   WhatsAppLeadStatus,
   WhatsAppPriority,
   WhatsAppResponseStatus,
+  WhatsAppSource,
 } from "../types.ts";
 import { whatsappActivityService } from "../services/whatsappActivityService.ts";
+import { rpnService } from "../services/rpnService.ts";
+import { staffService } from "../services/staffService.ts";
+import { RPN } from "../types.ts";
 import { focusMainContent } from "../utils/uiHelpers.ts";
+import { whatsappSourceService } from "../services/whatsappSourceService.ts";
 
 export const WhatsAppActivityLogs: React.FC = () => {
   const [logs, setLogs] = useState<WhatsAppActivityLog[]>([]);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [formData, setFormData] = useState<Partial<WhatsAppActivityLog>>({});
+  const [rpns, setRpns] = useState<RPN[]>([]);
+  const [staffList, setStaffList] = useState<Staff[]>([]);
+  const [sources, setSources] = useState<WhatsAppSource[]>([]);
+  const [sourceSearch, setSourceSearch] = useState("");
+  const [showSourceDropdown, setShowSourceDropdown] = useState(false);
+  const [isSourceModalOpen, setIsSourceModalOpen] = useState(false);
+  const [newSourceData, setNewSourceData] = useState<Partial<WhatsAppSource>>(
+    {},
+  );
+
+  const sessionStr = localStorage.getItem("activeStaffSession");
+  let session: any = {};
+  if (sessionStr) {
+    try {
+      session = JSON.parse(sessionStr);
+    } catch (e) {}
+  }
 
   const [search, setSearch] = useState("");
   const [filterActivityType, setFilterActivityType] = useState("all");
@@ -53,6 +75,9 @@ export const WhatsAppActivityLogs: React.FC = () => {
 
   useEffect(() => {
     loadData();
+    setRpns(rpnService.getAll());
+    setStaffList(staffService.getAllStaff());
+    setSources(whatsappSourceService.getSources());
   }, []);
 
   const loadData = () => {
@@ -73,6 +98,7 @@ export const WhatsAppActivityLogs: React.FC = () => {
           log.activityType,
           log.sourceType,
           log.sourceName,
+          log.communityName,
           log.sector,
           log.category,
           log.province,
@@ -85,6 +111,8 @@ export const WhatsAppActivityLogs: React.FC = () => {
           log.priority,
           log.notes,
           log.assignedRpnName,
+          log.capturedByStaffName,
+          log.assignedStaffName,
         ]
           .filter(Boolean)
           .join(" ")
@@ -143,12 +171,14 @@ export const WhatsAppActivityLogs: React.FC = () => {
       responseStatus: "NOT_REQUIRED" as WhatsAppResponseStatus,
       followUpRequired: false,
     });
+    setSourceSearch("");
     setIsFormOpen(true);
     focusMainContent();
   };
 
   const handleEditLog = (log: WhatsAppActivityLog) => {
     setFormData({ ...log });
+    setSourceSearch(log.sourceName || "");
     setIsFormOpen(true);
     focusMainContent();
   };
@@ -197,15 +227,32 @@ export const WhatsAppActivityLogs: React.FC = () => {
       return;
     }
 
+    const cleanObj = (obj: any) => {
+      const cleaned = { ...obj };
+      Object.keys(cleaned).forEach((key) => {
+        if (cleaned[key] === undefined) delete cleaned[key];
+      });
+      return cleaned;
+    };
+
     const logToSave: WhatsAppActivityLog = {
       ...(formData as WhatsAppActivityLog),
       id: formData.id || `WA-${Date.now()}`,
       createdAt: formData.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       loggedBy: formData.loggedBy || "Staff",
+      capturedByStaffId:
+        formData.capturedByStaffId || session.staffId || "unknown",
+      capturedByStaffName:
+        formData.capturedByStaffName || session.staffName || "Unknown Staff",
+      capturedByRole: formData.capturedByRole || session.role || "Unknown Role",
+      capturedAt: formData.capturedAt || new Date().toISOString(),
+      assignedToType: formData.assignedToType || "RPN",
+      assignedStaffId: formData.assignedStaffId || "",
+      assignedStaffName: formData.assignedStaffName || "",
     };
 
-    whatsappActivityService.saveLog(logToSave);
+    whatsappActivityService.saveLog(cleanObj(logToSave));
     loadData();
     setIsFormOpen(false);
     setFormData({});
@@ -213,6 +260,54 @@ export const WhatsAppActivityLogs: React.FC = () => {
 
   const inputClass =
     "w-full border-2 border-stone-200 p-3 text-xs font-bold outline-none focus:border-brand-orange bg-white rounded-none uppercase";
+
+  const matchingSources = useMemo(() => {
+    const terms = sourceSearch
+      .toLowerCase()
+      .split(" ")
+      .filter((t) => t.length > 0);
+    return sources.filter((s) => {
+      const text = [
+        s.communityName,
+        s.sourceName,
+        s.sector,
+        s.category,
+        s.province,
+        s.cityTown,
+        s.district,
+        s.whatsappUrl,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return terms.every((term) => text.includes(term));
+    });
+  }, [sources, sourceSearch]);
+
+  const handleSelectSource = (s: WhatsAppSource) => {
+    setSourceSearch(s.sourceName);
+    setFormData({
+      ...formData,
+      sourceId: s.id,
+      sourceName: s.sourceName,
+      sourceType: s.sourceType,
+      whatsappUrl: s.whatsappUrl || formData.whatsappUrl,
+      communityId: s.communityId || formData.communityId,
+      communityName: s.communityName || formData.communityName,
+      sector: s.sector || formData.sector,
+      category: s.category || formData.category,
+      province: s.province || formData.province,
+      cityTown: s.cityTown || formData.cityTown,
+      district: s.district || formData.district,
+    });
+    setShowSourceDropdown(false);
+  };
+
+  const uniqueCommunities = useMemo(() => {
+    return Array.from(
+      new Set(sources.map((s) => s.communityName).filter(Boolean)),
+    ) as string[];
+  }, [sources]);
 
   return (
     <div className="pb-20">
@@ -356,7 +451,8 @@ export const WhatsAppActivityLogs: React.FC = () => {
                   <td className="px-6 py-4">
                     <p className="text-xs font-bold">{log.sourceName}</p>
                     <p className="text-[10px] text-stone-400 uppercase">
-                      {log.sourceType.replace(/_/g, " ")}
+                      {log.sourceType.replace(/_/g, " ")}{" "}
+                      {log.communityName ? `• ${log.communityName}` : ""}
                     </p>
                   </td>
                   <td className="px-6 py-4 text-xs font-medium uppercase text-stone-600">
@@ -520,23 +616,105 @@ export const WhatsAppActivityLogs: React.FC = () => {
                   <option value="OTHER">Other</option>
                 </select>
               </div>
-              <div className="space-y-2 md:col-span-2">
+              <div className="space-y-2 md:col-span-2 relative">
                 <label className="text-[10px] font-bold uppercase text-stone-400">
-                  Source Name (Group/Community Name) *
+                  WhatsApp Group / Channel *
                 </label>
-                <input
-                  type="text"
-                  className={inputClass}
-                  value={formData.sourceName || ""}
-                  onChange={(e) =>
-                    setFormData({ ...formData, sourceName: e.target.value })
-                  }
-                  placeholder="e.g. Harare Auto Parts Group"
-                />
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      type="text"
+                      className={inputClass}
+                      value={sourceSearch}
+                      onChange={(e) => {
+                        setSourceSearch(e.target.value);
+                        setShowSourceDropdown(true);
+                        setFormData({
+                          ...formData,
+                          sourceName: e.target.value,
+                          sourceId: undefined,
+                        });
+                      }}
+                      onFocus={() => setShowSourceDropdown(true)}
+                      onBlur={() =>
+                        setTimeout(() => setShowSourceDropdown(false), 200)
+                      }
+                      placeholder="Search or type new group..."
+                    />
+                    {showSourceDropdown && sourceSearch && (
+                      <div className="absolute top-full left-0 right-0 mt-1 bg-white border-2 border-brand-charcoal shadow-2xl max-h-60 overflow-y-auto z-50">
+                        {matchingSources.map((s) => (
+                          <div
+                            key={s.id}
+                            className="p-3 border-b border-stone-100 cursor-pointer hover:bg-orange-50 transition-colors"
+                            onMouseDown={() => handleSelectSource(s)}
+                          >
+                            <p className="text-xs font-bold uppercase">
+                              {s.sourceName}
+                            </p>
+                            <p className="text-[10px] text-stone-400 font-bold uppercase truncate">
+                              {[
+                                s.sourceType,
+                                s.communityName,
+                                s.sector,
+                                s.cityTown,
+                              ]
+                                .filter(Boolean)
+                                .join(" • ")}
+                            </p>
+                          </div>
+                        ))}
+                        <div
+                          className="p-3 bg-stone-50 cursor-pointer hover:bg-stone-100 transition-colors border-t border-stone-200"
+                          onMouseDown={() => {
+                            setNewSourceData({
+                              sourceName: sourceSearch,
+                              sourceType:
+                                formData.sourceType || "WHATSAPP_GROUP",
+                              status: "active",
+                              communityName: formData.communityName || "",
+                              sector: formData.sector || "",
+                              category: formData.category || "",
+                              province: formData.province || "",
+                              cityTown: formData.cityTown || "",
+                              district: formData.district || "",
+                              whatsappUrl: formData.whatsappUrl || "",
+                            });
+                            setIsSourceModalOpen(true);
+                          }}
+                        >
+                          <p className="text-xs font-bold uppercase text-brand-orange flex items-center gap-2">
+                            <Plus size={14} /> Add "{sourceSearch}" as New Group
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold uppercase text-stone-400">
+                  Community Name
+                </label>
+                <input
+                  list="community-names-list"
+                  type="text"
+                  className={inputClass}
+                  value={formData.communityName || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, communityName: e.target.value })
+                  }
+                  placeholder="Search or type community..."
+                />
+                <datalist id="community-names-list">
+                  {uniqueCommunities.map((c) => (
+                    <option key={c} value={c} />
+                  ))}
+                </datalist>
+              </div>
               <div className="space-y-2">
                 <label className="text-[10px] font-bold uppercase text-stone-400">
                   Sector
@@ -735,6 +913,94 @@ export const WhatsAppActivityLogs: React.FC = () => {
               />
             </div>
 
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold uppercase text-stone-400">
+                  Assign Follow-up to RPN
+                </label>
+                <div className="flex gap-2">
+                  <select
+                    className={inputClass}
+                    value={formData.assignedToType || "RPN"}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        assignedToType: e.target.value as
+                          | "STAFF"
+                          | "RPN"
+                          | "ADMIN",
+                        assignedRpnId: "",
+                        assignedRpnName: "",
+                        assignedStaffId: "",
+                        assignedStaffName: "",
+                      })
+                    }
+                  >
+                    <option value="RPN">RPN</option>
+                    <option value="STAFF">Backend Staff</option>
+                  </select>
+                  {formData.assignedToType === "STAFF" ? (
+                    <select
+                      className={inputClass}
+                      value={formData.assignedStaffId || ""}
+                      onChange={(e) => {
+                        const s = staffList.find(
+                          (r) => r.id === e.target.value,
+                        );
+                        setFormData({
+                          ...formData,
+                          assignedStaffId: s?.id,
+                          assignedStaffName: s?.displayName || s?.fullName,
+                        });
+                      }}
+                    >
+                      <option value="">Unassigned</option>
+                      {staffList.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.displayName || s.fullName}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <select
+                      className={inputClass}
+                      value={formData.assignedRpnId || ""}
+                      onChange={(e) => {
+                        const rpn = rpns.find((r) => r.id === e.target.value);
+                        setFormData({
+                          ...formData,
+                          assignedRpnId: rpn?.id,
+                          assignedRpnName: rpn?.name,
+                        });
+                      }}
+                    >
+                      <option value="">Unassigned</option>
+                      {rpns.map((rpn) => (
+                        <option key={rpn.id} value={rpn.id}>
+                          {rpn.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold uppercase text-stone-400">
+                  Captured By (System)
+                </label>
+                <input
+                  type="text"
+                  className={`${inputClass} bg-stone-50 text-stone-500 border-dashed cursor-not-allowed`}
+                  disabled
+                  value={
+                    formData.capturedByStaffName ||
+                    session.staffName ||
+                    "Unknown Staff"
+                  }
+                />
+              </div>
+            </div>
+
             <div className="flex gap-4 pt-6 border-t border-stone-100">
               <SecondaryButton
                 className="flex-1 py-4"
@@ -748,6 +1014,209 @@ export const WhatsAppActivityLogs: React.FC = () => {
             </div>
           </div>
         </DataPanel>
+      )}
+
+      {isSourceModalOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-brand-charcoal/40 backdrop-blur-sm p-4">
+          <DataPanel
+            title="Add WhatsApp Group / Channel"
+            className="max-w-2xl w-full shadow-2xl border-t-4 border-t-brand-orange bg-white"
+          >
+            <div className="p-6 overflow-y-auto space-y-6 max-h-[80vh]">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase text-stone-400">
+                    Source Name / Group *
+                  </label>
+                  <input
+                    className={inputClass}
+                    value={newSourceData.sourceName || ""}
+                    onChange={(e) =>
+                      setNewSourceData({
+                        ...newSourceData,
+                        sourceName: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase text-stone-400">
+                    Source Type
+                  </label>
+                  <select
+                    className={inputClass}
+                    value={newSourceData.sourceType || "WHATSAPP_GROUP"}
+                    onChange={(e) =>
+                      setNewSourceData({
+                        ...newSourceData,
+                        sourceType: e.target.value as any,
+                      })
+                    }
+                  >
+                    <option value="WHATSAPP_COMMUNITY">
+                      WhatsApp Community
+                    </option>
+                    <option value="WHATSAPP_GROUP">WhatsApp Group</option>
+                    <option value="WHATSAPP_CHANNEL">WhatsApp Channel</option>
+                    <option value="BROADCAST_LIST">Broadcast List</option>
+                    <option value="OTHER">Other</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase text-stone-400">
+                    Community Name
+                  </label>
+                  <input
+                    className={inputClass}
+                    value={newSourceData.communityName || ""}
+                    onChange={(e) =>
+                      setNewSourceData({
+                        ...newSourceData,
+                        communityName: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase text-stone-400">
+                    WhatsApp URL
+                  </label>
+                  <input
+                    className={inputClass}
+                    value={newSourceData.whatsappUrl || ""}
+                    onChange={(e) =>
+                      setNewSourceData({
+                        ...newSourceData,
+                        whatsappUrl: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase text-stone-400">
+                    Sector
+                  </label>
+                  <input
+                    className={inputClass}
+                    value={newSourceData.sector || ""}
+                    onChange={(e) =>
+                      setNewSourceData({
+                        ...newSourceData,
+                        sector: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase text-stone-400">
+                    Category
+                  </label>
+                  <input
+                    className={inputClass}
+                    value={newSourceData.category || ""}
+                    onChange={(e) =>
+                      setNewSourceData({
+                        ...newSourceData,
+                        category: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase text-stone-400">
+                    Province
+                  </label>
+                  <input
+                    className={inputClass}
+                    value={newSourceData.province || ""}
+                    onChange={(e) =>
+                      setNewSourceData({
+                        ...newSourceData,
+                        province: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase text-stone-400">
+                    City / Town
+                  </label>
+                  <input
+                    className={inputClass}
+                    value={newSourceData.cityTown || ""}
+                    onChange={(e) =>
+                      setNewSourceData({
+                        ...newSourceData,
+                        cityTown: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase text-stone-400">
+                    District
+                  </label>
+                  <input
+                    className={inputClass}
+                    value={newSourceData.district || ""}
+                    onChange={(e) =>
+                      setNewSourceData({
+                        ...newSourceData,
+                        district: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase text-stone-400">
+                    Member Count
+                  </label>
+                  <input
+                    type="number"
+                    className={inputClass}
+                    value={newSourceData.memberCount || 0}
+                    onChange={(e) =>
+                      setNewSourceData({
+                        ...newSourceData,
+                        memberCount: parseInt(e.target.value) || 0,
+                      })
+                    }
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="p-6 bg-stone-50 border-t border-stone-100 flex gap-4 shrink-0">
+              <SecondaryButton
+                onClick={() => setIsSourceModalOpen(false)}
+                className="flex-1"
+              >
+                Cancel
+              </SecondaryButton>
+              <PrimaryButton
+                className="flex-1"
+                onClick={() => {
+                  if (!newSourceData.sourceName)
+                    return alert("Source name required");
+                  const sourceToSave: WhatsAppSource = {
+                    ...newSourceData,
+                    id: `WS-${Date.now()}`,
+                    sourceType: newSourceData.sourceType || "WHATSAPP_GROUP",
+                    status: newSourceData.status || "active",
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
+                  } as WhatsAppSource;
+                  whatsappSourceService.saveSource(sourceToSave);
+                  setSources(whatsappSourceService.getSources());
+                  handleSelectSource(sourceToSave);
+                  setIsSourceModalOpen(false);
+                  alert("WhatsApp source saved.");
+                }}
+              >
+                Save Source & Select
+              </PrimaryButton>
+            </div>
+          </DataPanel>
+        </div>
       )}
     </div>
   );

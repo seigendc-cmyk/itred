@@ -17,6 +17,8 @@ import {
   Package,
   TrendingDown,
   Info,
+  X,
+  AlertTriangle,
 } from "lucide-react";
 import { inventorySpotCheckService } from "../services/inventorySpotCheckService.ts";
 import { vendorService } from "../services/vendorService.ts";
@@ -780,212 +782,282 @@ export const InventorySpotChecks: React.FC = () => {
       </div>
 
       {/* Schedule / Entry Modal */}
-      <ConfirmDialog
-        isOpen={showScheduleModal}
-        title={
-          selectedCheck ? "Manage Integrity Record" : "Schedule Integrity Audit"
-        }
-        message={
-          selectedCheck
-            ? "Updating existing audit node. Changes will be persisted to history."
-            : "Create a new scheduled audit record for a vendor node."
-        }
-        confirmLabel="Persist Record"
-        onConfirm={handleSave}
-        onCancel={() => setShowScheduleModal(false)}
-      >
-        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="space-y-4">
-            <div className="space-y-1">
-              <label className="text-[9px] font-bold uppercase text-stone-400">
-                Target Vendor Node
-              </label>
-              <select
-                className="w-full bg-stone-50 border border-stone-200 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange"
-                value={formData.vendorId || ""}
-                onChange={(e) =>
-                  setFormData({ ...formData, vendorId: e.target.value })
-                }
-                disabled={!!selectedCheck}
+      {showScheduleModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-brand-charcoal/40 backdrop-blur-sm p-2 md:p-4">
+          <div className="bg-white w-[96vw] md:w-[80vw] max-w-[1200px] md:min-h-[70vh] max-h-[92vh] flex flex-col shadow-2xl animate-in zoom-in-95 duration-200 border-t-4 border-t-brand-orange rounded-none">
+            {/* Header */}
+            <div className="p-4 md:p-6 border-b border-stone-100 flex justify-between items-center bg-stone-50 shrink-0">
+              <div>
+                <h2 className="text-sm md:text-base font-bold uppercase tracking-tight text-brand-charcoal">
+                  {selectedCheck
+                    ? "Manage Integrity Record"
+                    : "Schedule Integrity Audit"}
+                </h2>
+                <p className="text-[10px] text-stone-400 font-bold uppercase mt-1">
+                  {selectedCheck
+                    ? "Updating existing audit node"
+                    : "Create a new scheduled audit record"}
+                </p>
+              </div>
+              <button
+                onClick={() => setShowScheduleModal(false)}
+                className="p-2 hover:bg-stone-200 text-stone-400 transition-colors"
               >
-                <option value="">Select Vendor</option>
-                {safeVendors.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.name} ({v.systemCode})
-                  </option>
-                ))}
-              </select>
+                <X size={20} />
+              </button>
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <label className="text-[9px] font-bold uppercase text-stone-400">
-                  Check Type
-                </label>
-                <select
-                  className="w-full bg-stone-50 border border-stone-200 p-2 text-xs font-bold uppercase outline-none"
-                  value={formData.type}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      type: e.target.value as SpotCheckType,
-                    })
-                  }
-                >
-                  <option value="random">Random</option>
-                  <option value="scheduled">Scheduled</option>
-                  <option value="complaint-based">Complaint</option>
-                  <option value="renewal-based">Renewal</option>
-                  <option value="BI-recommended">BI Forecast</option>
-                </select>
-              </div>
-              <div className="space-y-1">
-                <label className="text-[9px] font-bold uppercase text-stone-400">
-                  Status Node
-                </label>
-                <select
-                  className="w-full bg-stone-50 border border-stone-200 p-2 text-xs font-bold uppercase outline-none"
-                  value={formData.status}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      status: e.target.value as SpotCheckStatus,
-                    })
-                  }
-                >
-                  <option value="scheduled">Scheduled</option>
-                  <option value="completed">Completed</option>
-                  <option value="escalated">Escalated</option>
-                  <option value="cancelled">Cancelled</option>
-                </select>
-              </div>
-            </div>
-            <div className="space-y-1">
-              <label className="text-[9px] font-bold uppercase text-stone-400">
-                Audit Date
-              </label>
-              <input
-                type="date"
-                className="w-full bg-stone-50 border border-stone-200 p-2 text-xs font-bold outline-none"
-                value={formData.checkDate}
-                onChange={(e) =>
-                  setFormData({ ...formData, checkDate: e.target.value })
-                }
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[9px] font-bold uppercase text-stone-400">
-                Audit Observations
-              </label>
-              <textarea
-                className="w-full bg-stone-50 border border-stone-200 p-3 text-xs outline-none h-24"
-                placeholder="Detail physical vs digital variances..."
-                value={formData.notes || ""}
-                onChange={(e) =>
-                  setFormData({ ...formData, notes: e.target.value })
-                }
-              />
-            </div>
-          </div>
 
-          <div className="space-y-4 bg-stone-50 p-4 border border-stone-100">
-            <p className="text-[10px] font-black uppercase text-stone-800 mb-4 flex items-center gap-2">
-              <Info size={14} className="text-brand-orange" /> Precision Metrics
-            </p>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <label className="text-[8px] font-bold uppercase text-stone-400">
-                  SKUs Screened
-                </label>
-                <input
-                  type="number"
-                  className="w-full bg-white border border-stone-200 p-2 text-xs font-bold outline-none"
-                  value={formData.productsCheckedCount}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      productsCheckedCount: toNumber(e.target.value),
-                    })
-                  }
-                />
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-10 custom-scrollbar">
+              {/* Section A: Audit Header */}
+              <div className="space-y-6">
+                <h3 className="text-xs font-bold uppercase tracking-widest text-brand-orange border-b border-orange-100 pb-2 flex items-center gap-2">
+                  <Info size={14} /> Audit Header
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                  <div className="space-y-1.5 lg:col-span-2">
+                    <label className="text-[10px] font-bold uppercase text-stone-400">
+                      Target Vendor Node
+                    </label>
+                    <select
+                      className="w-full bg-stone-50 border-2 border-stone-100 p-3 md:p-4 text-xs font-bold uppercase outline-none focus:border-brand-orange"
+                      value={formData.vendorId || ""}
+                      onChange={(e) =>
+                        setFormData({ ...formData, vendorId: e.target.value })
+                      }
+                      disabled={!!selectedCheck}
+                    >
+                      <option value="">Select Vendor</option>
+                      {safeVendors.map((v) => (
+                        <option key={v.id} value={v.id}>
+                          {v.name} ({v.systemCode})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold uppercase text-stone-400">
+                      Audit Date
+                    </label>
+                    <input
+                      type="date"
+                      className="w-full bg-stone-50 border-2 border-stone-100 p-3 md:p-4 text-xs font-bold outline-none focus:border-brand-orange"
+                      value={formData.checkDate}
+                      onChange={(e) =>
+                        setFormData({ ...formData, checkDate: e.target.value })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold uppercase text-stone-400">
+                      Check Type
+                    </label>
+                    <select
+                      className="w-full bg-stone-50 border-2 border-stone-100 p-3 md:p-4 text-xs font-bold uppercase outline-none focus:border-brand-orange"
+                      value={formData.type}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          type: e.target.value as SpotCheckType,
+                        })
+                      }
+                    >
+                      <option value="random">Random</option>
+                      <option value="scheduled">Scheduled</option>
+                      <option value="complaint-based">Complaint</option>
+                      <option value="renewal-based">Renewal</option>
+                      <option value="BI-recommended">BI Forecast</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1.5 lg:col-start-4">
+                    <label className="text-[10px] font-bold uppercase text-stone-400">
+                      Status Node
+                    </label>
+                    <select
+                      className="w-full bg-stone-50 border-2 border-stone-100 p-3 md:p-4 text-xs font-bold uppercase outline-none focus:border-brand-orange"
+                      value={formData.status}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          status: e.target.value as SpotCheckStatus,
+                        })
+                      }
+                    >
+                      <option value="scheduled">Scheduled</option>
+                      <option value="completed">Completed</option>
+                      <option value="escalated">Escalated</option>
+                      <option value="cancelled">Cancelled</option>
+                    </select>
+                  </div>
+                </div>
               </div>
-              <div className="space-y-1">
-                <label className="text-[8px] font-bold uppercase text-stone-400">
-                  Quantity Accuracy
-                </label>
-                <input
-                  type="number"
-                  className="w-full bg-white border border-stone-200 p-2 text-xs font-bold outline-none"
-                  value={formData.productsCorrectCount}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      productsCorrectCount: toNumber(e.target.value),
-                    })
-                  }
-                />
+
+              {/* Section B: Precision Metrics */}
+              <div className="space-y-6">
+                <h3 className="text-xs font-bold uppercase tracking-widest text-brand-orange border-b border-orange-100 pb-2 flex items-center gap-2">
+                  <ClipboardCheck size={14} /> Precision Metrics
+                </h3>
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold uppercase text-stone-400">
+                      SKUs Screened
+                    </label>
+                    <input
+                      type="number"
+                      className="w-full bg-white border-2 border-stone-100 p-3 md:p-4 text-xs font-bold outline-none focus:border-brand-orange"
+                      value={formData.productsCheckedCount}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          productsCheckedCount: toNumber(e.target.value),
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold uppercase text-stone-400">
+                      Quantity Accuracy
+                    </label>
+                    <input
+                      type="number"
+                      className="w-full bg-white border-2 border-stone-100 p-3 md:p-4 text-xs font-bold outline-none focus:border-brand-orange"
+                      value={formData.productsCorrectCount}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          productsCorrectCount: toNumber(e.target.value),
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold uppercase text-stone-400">
+                      Image Gaps
+                    </label>
+                    <input
+                      type="number"
+                      className="w-full bg-white border-2 border-stone-100 p-3 md:p-4 text-xs font-bold outline-none focus:border-brand-orange"
+                      value={formData.productsMissingImagesCount}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          productsMissingImagesCount: toNumber(e.target.value),
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold uppercase text-stone-400">
+                      Pricing Gaps
+                    </label>
+                    <input
+                      type="number"
+                      className="w-full bg-white border-2 border-stone-100 p-3 md:p-4 text-xs font-bold outline-none focus:border-brand-orange"
+                      value={formData.productsNeedingPriceUpdateCount}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          productsNeedingPriceUpdateCount: toNumber(
+                            e.target.value,
+                          ),
+                        })
+                      }
+                    />
+                  </div>
+                </div>
               </div>
-              <div className="space-y-1">
-                <label className="text-[8px] font-bold uppercase text-stone-400">
-                  Image Gaps
-                </label>
-                <input
-                  type="number"
-                  className="w-full bg-white border border-stone-200 p-2 text-xs font-bold outline-none"
-                  value={formData.productsMissingImagesCount}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      productsMissingImagesCount: toNumber(e.target.value),
-                    })
-                  }
-                />
+
+              {/* Section C: Observations */}
+              <div className="space-y-6">
+                <h3 className="text-xs font-bold uppercase tracking-widest text-brand-orange border-b border-orange-100 pb-2 flex items-center gap-2">
+                  <AlertCircle size={14} /> Observations
+                </h3>
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  <div className="lg:col-span-2 space-y-1.5">
+                    <label className="text-[10px] font-bold uppercase text-stone-400">
+                      Audit Observations
+                    </label>
+                    <textarea
+                      className="w-full bg-stone-50 border-2 border-stone-100 p-4 text-xs font-medium outline-none h-24 focus:border-brand-orange resize-none"
+                      placeholder="Detail physical vs digital variances..."
+                      value={formData.notes || ""}
+                      onChange={(e) =>
+                        setFormData({ ...formData, notes: e.target.value })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold uppercase text-stone-400">
+                      Final Verdict
+                    </label>
+                    <select
+                      className="w-full bg-white border-2 border-stone-100 p-4 text-xs font-bold uppercase outline-none focus:border-brand-orange h-[6rem] lg:h-24"
+                      value={formData.result}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          result: e.target.value as SpotCheckResult,
+                        })
+                      }
+                    >
+                      <option value="passed">Integrity Passed</option>
+                      <option value="minor issues">Minor Discrepancies</option>
+                      <option value="major issues">Major Failure</option>
+                      <option value="follow-up required">
+                        Pending Follow-up
+                      </option>
+                    </select>
+                  </div>
+                </div>
               </div>
-              <div className="space-y-1">
-                <label className="text-[8px] font-bold uppercase text-stone-400">
-                  Pricing Gaps
-                </label>
-                <input
-                  type="number"
-                  className="w-full bg-white border border-stone-200 p-2 text-xs font-bold outline-none"
-                  value={formData.productsNeedingPriceUpdateCount}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      productsNeedingPriceUpdateCount: toNumber(e.target.value),
-                    })
-                  }
-                />
-              </div>
-            </div>
-            <div className="space-y-1 pt-4">
-              <label className="text-[9px] font-bold uppercase text-stone-400">
-                Final Verdict
-              </label>
-              <select
-                className="w-full bg-white border border-stone-200 p-2 text-xs font-bold uppercase outline-none"
-                value={formData.result}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    result: e.target.value as SpotCheckResult,
-                  })
-                }
+
+              {/* Section D: Follow-up Result */}
+              <div
+                className={`p-4 md:p-6 border-2 flex items-center gap-4 ${formData.result === "passed" ? "bg-emerald-50 border-emerald-100" : "bg-orange-50 border-orange-100"}`}
               >
-                <option value="passed">Integrity Passed</option>
-                <option value="minor issues">Minor Discrepancies</option>
-                <option value="major issues">Major Failure</option>
-                <option value="follow-up required">Pending Follow-up</option>
-              </select>
-            </div>
-            <div className="pt-4 mt-4 border-t border-stone-200">
-              <div className="flex items-center gap-2 text-[9px] text-stone-400 font-bold uppercase">
-                <CheckCircle2 size={12} className="text-emerald-500" />
-                Audit will trigger follow-up tasks if result is not 'passed'.
+                {formData.result === "passed" ? (
+                  <>
+                    <CheckCircle2
+                      size={24}
+                      className="text-emerald-500 shrink-0"
+                    />
+                    <span className="text-xs font-bold uppercase text-emerald-700 tracking-wider">
+                      Integrity Passed. No follow-up tasks will be triggered.
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <AlertTriangle
+                      size={24}
+                      className="text-brand-orange shrink-0"
+                    />
+                    <span className="text-xs font-bold uppercase text-orange-800 tracking-wider">
+                      Discrepancies detected. Follow-up tasks will be triggered
+                      automatically.
+                    </span>
+                  </>
+                )}
               </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 md:p-6 border-t border-stone-100 bg-stone-50 flex justify-end gap-3 shrink-0">
+              <SecondaryButton
+                onClick={() => setShowScheduleModal(false)}
+                className="px-6 md:px-8 py-3 text-xs"
+              >
+                Cancel
+              </SecondaryButton>
+              <PrimaryButton
+                onClick={handleSave}
+                className="px-6 md:px-8 py-3 text-xs"
+              >
+                Persist Record
+              </PrimaryButton>
             </div>
           </div>
         </div>
-      </ConfirmDialog>
+      )}
     </div>
   );
 };

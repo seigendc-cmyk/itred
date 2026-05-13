@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { WhatsAppActivityLog } from "../types.ts";
 import { whatsappActivityService } from "../services/whatsappActivityService.ts";
+import { notificationService } from "../services/notificationService.ts";
 
 export const WhatsAppCommunityBI: React.FC = () => {
   const [rawLogs, setRawLogs] = useState<WhatsAppActivityLog[]>([]);
@@ -60,9 +61,10 @@ export const WhatsAppCommunityBI: React.FC = () => {
   const baseCommunityHealth = useMemo(() => {
     const comms = new Map<string, any>();
     rawLogs.forEach((log) => {
-      if (!log.sourceName) return;
-      const c = comms.get(log.sourceName) || {
-        sourceName: log.sourceName,
+      const sourceKey = log.sourceId || log.sourceName;
+      if (!sourceKey) return;
+      const c = comms.get(sourceKey) || {
+        sourceName: log.sourceName || "Unknown Source",
         sourceType: log.sourceType,
         lastActivityDate: "1970-01-01",
         complaints: 0,
@@ -74,17 +76,17 @@ export const WhatsAppCommunityBI: React.FC = () => {
         log.priority === "CRITICAL"
       )
         c.complaints++;
-      comms.set(log.sourceName, c);
+      comms.set(sourceKey, c);
     });
 
     const healthMap = new Map<string, string>();
-    comms.forEach((c) => {
+    comms.forEach((c, key) => {
       const days = getDaysSince(c.lastActivityDate);
       let health = "Active";
       if (days > 30 || c.complaints > 2) health = "Critical";
       else if (days >= 15) health = "Dormant";
       else if (days >= 8) health = "Watch";
-      healthMap.set(c.sourceName, health);
+      healthMap.set(key, health);
     });
     return healthMap;
   }, [rawLogs]);
@@ -99,6 +101,7 @@ export const WhatsAppCommunityBI: React.FC = () => {
         .filter((t) => t.length > 0);
       const logText = [
         log.sourceName,
+        log.communityName,
         log.sector,
         log.category,
         log.province,
@@ -110,6 +113,8 @@ export const WhatsAppCommunityBI: React.FC = () => {
         log.activityType,
         log.sourceType,
         log.assignedRpnName,
+        log.capturedByStaffName,
+        log.assignedStaffName,
       ]
         .filter(Boolean)
         .join(" ")
@@ -125,7 +130,8 @@ export const WhatsAppCommunityBI: React.FC = () => {
         activityType === "all" || log.activityType === activityType;
       const matchesHealth =
         healthFilter === "all" ||
-        baseCommunityHealth.get(log.sourceName || "") === healthFilter;
+        baseCommunityHealth.get(log.sourceId || log.sourceName || "") ===
+          healthFilter;
 
       return (
         matchesSearch &&
@@ -166,6 +172,8 @@ export const WhatsAppCommunityBI: React.FC = () => {
     const communityMap = new Map<string, any>();
     const vendorMap = new Map<string, any>();
     const rpnMap = new Map<string, any>();
+    const staffCaptureMap = new Map<string, any>();
+    const commAggMap = new Map<string, any>();
 
     filteredLogs.forEach((log) => {
       // Exec
@@ -184,7 +192,23 @@ export const WhatsAppCommunityBI: React.FC = () => {
       ) {
         exec.memberGrowth += log.memberCount - log.previousMemberCount;
       }
-      if (log.sourceName) exec.activeComms.add(log.sourceName);
+      const sourceKey = log.sourceId || log.sourceName;
+      if (sourceKey) exec.activeComms.add(sourceKey);
+
+      // Community Aggregates
+      const commName = log.communityName || "Unassigned Community";
+      const ca = commAggMap.get(commName) || {
+        name: commName,
+        activities: 0,
+        enquiries: 0,
+        conversions: 0,
+        groups: new Set<string>(),
+      };
+      ca.activities++;
+      if (isEnq) ca.enquiries += log.enquiryCount || 1;
+      if (log.leadStatus === "CONVERTED") ca.conversions++;
+      if (sourceKey) ca.groups.add(sourceKey);
+      commAggMap.set(commName, ca);
 
       // Sector Demand
       const secName = log.sector || "Uncategorized";
@@ -219,9 +243,9 @@ export const WhatsAppCommunityBI: React.FC = () => {
       }
 
       // Community Health
-      if (log.sourceName) {
-        const c = communityMap.get(log.sourceName) || {
-          sourceName: log.sourceName,
+      if (sourceKey) {
+        const c = communityMap.get(sourceKey) || {
+          sourceName: log.sourceName || "Unknown Source",
           sourceType: log.sourceType,
           activities: 0,
           enquiries: 0,
@@ -245,7 +269,7 @@ export const WhatsAppCommunityBI: React.FC = () => {
         if (log.followUpRequired) c.followUpsDue++;
         if (log.activityDate > c.lastActivityDate)
           c.lastActivityDate = log.activityDate;
-        communityMap.set(log.sourceName, c);
+        communityMap.set(sourceKey, c);
       }
 
       // Vendor Response
@@ -294,6 +318,33 @@ export const WhatsAppCommunityBI: React.FC = () => {
           r.highPriority++;
         rpnMap.set(log.assignedRpnName, r);
       }
+
+      // Staff Capture Map
+      if (log.capturedByStaffName) {
+        const sc = staffCaptureMap.get(log.capturedByStaffName) || {
+          name: log.capturedByStaffName,
+          logs: 0,
+          enquiries: 0,
+          followUps: 0,
+        };
+        sc.logs++;
+        if (isEnq) sc.enquiries += log.enquiryCount || 1;
+        if (log.followUpRequired) sc.followUps++;
+        staffCaptureMap.set(log.capturedByStaffName, sc);
+      }
+
+      // Assigned Staff Map integration
+      if (log.assignedStaffName && log.assignedToType === "STAFF") {
+        const sc = staffCaptureMap.get(log.assignedStaffName) || {
+          name: log.assignedStaffName,
+          logs: 0,
+          enquiries: 0,
+          followUps: 0,
+          assigned: 0,
+        };
+        if (log.followUpRequired) sc.assigned = (sc.assigned || 0) + 1;
+        staffCaptureMap.set(log.assignedStaffName, sc);
+      }
     });
 
     // Calculations & Sorting
@@ -320,7 +371,8 @@ export const WhatsAppCommunityBI: React.FC = () => {
       .map((c) => ({
         ...c,
         daysSinceLast: getDaysSince(c.lastActivityDate),
-        healthStatus: baseCommunityHealth.get(c.sourceName) || "Active",
+        healthStatus:
+          baseCommunityHealth.get(c.sourceId || c.sourceName) || "Active",
       }))
       .sort((a, b) => b.activities - a.activities);
 
@@ -358,16 +410,41 @@ export const WhatsAppCommunityBI: React.FC = () => {
       }))
       .sort((a, b) => b.logs - a.logs);
 
+    const staffCaptures = Array.from(staffCaptureMap.values()).sort(
+      (a, b) => b.logs - a.logs,
+    );
+
+    const communityAggregates = Array.from(commAggMap.values())
+      .map((c) => ({ ...c, groupCount: c.groups.size }))
+      .sort((a, b) => b.activities - a.activities);
+
     return {
       exec,
       conversionRate,
       sectors,
       products,
       communities,
+      communityAggregates,
       vendors,
       rpns,
+      staffCaptures,
     };
   }, [filteredLogs, baseCommunityHealth]);
+
+  useEffect(() => {
+    bi.communities.forEach((c) => {
+      if (c.healthStatus === "Critical") {
+        notificationService.addNotification({
+          type: "WHATSAPP",
+          severity: "CRITICAL",
+          title: "Community Health Critical",
+          message: `Source "${c.sourceName}" requires immediate operational attention.`,
+          relatedModule: "Community BI",
+          relatedRecordId: `comm-critical-${c.sourceId || c.sourceName}`,
+        });
+      }
+    });
+  }, [bi.communities]);
 
   const pendingFollowUps = useMemo(() => {
     return filteredLogs
@@ -635,6 +712,89 @@ export const WhatsAppCommunityBI: React.FC = () => {
                 className="p-8 text-center text-stone-400 text-xs"
               >
                 No product demand data available.
+              </td>
+            </tr>
+          )}
+        </TablePanel>
+      </div>
+
+      <div className="grid grid-cols-1 gap-8">
+        {/* Staff Capture BI */}
+
+        {/* Community Aggregates BI */}
+        <TablePanel
+          title="Community Performance (Aggregated)"
+          subtitle="High-level metrics across entire WhatsApp communities."
+          headers={[
+            "Community Name",
+            "Groups/Channels",
+            "Total Activities",
+            "Enquiries",
+            "Conversions",
+          ]}
+        >
+          {bi.communityAggregates.map((c, i) => (
+            <tr key={i} className="hover:bg-stone-50">
+              <td className="px-6 py-4 font-bold text-xs uppercase">
+                {c.name}
+              </td>
+              <td className="px-6 py-4 font-mono text-xs">{c.groupCount}</td>
+              <td className="px-6 py-4 font-mono text-xs text-brand-charcoal font-bold">
+                {c.activities}
+              </td>
+              <td className="px-6 py-4 font-mono text-xs">{c.enquiries}</td>
+              <td className="px-6 py-4 font-mono text-xs text-emerald-600 font-bold">
+                {c.conversions}
+              </td>
+            </tr>
+          ))}
+          {bi.communityAggregates.length === 0 && (
+            <tr>
+              <td
+                colSpan={5}
+                className="p-8 text-center text-stone-400 text-xs"
+              >
+                No community aggregate metrics available.
+              </td>
+            </tr>
+          )}
+        </TablePanel>
+
+        <TablePanel
+          title="Internal Staff Capture Analytics"
+          subtitle="Measuring team contributions for WhatsApp data entry and digitization."
+          headers={[
+            "Staff Member",
+            "Total Logs Captured",
+            "Enquiries Captured",
+            "Follow-ups Created",
+            "Assigned Active",
+          ]}
+        >
+          {bi.staffCaptures.map((s, i) => (
+            <tr key={i} className="hover:bg-stone-50">
+              <td className="px-6 py-4 font-bold text-xs uppercase">
+                {s.name}
+              </td>
+              <td className="px-6 py-4 font-mono text-xs text-brand-charcoal font-bold">
+                {s.logs}
+              </td>
+              <td className="px-6 py-4 font-mono text-xs">{s.enquiries}</td>
+              <td className="px-6 py-4 font-mono text-xs text-brand-orange">
+                {s.followUps > 0 ? s.followUps : "-"}
+              </td>
+              <td className="px-6 py-4 font-mono text-xs text-blue-600 font-bold">
+                {s.assigned > 0 ? s.assigned : "-"}
+              </td>
+            </tr>
+          ))}
+          {bi.staffCaptures.length === 0 && (
+            <tr>
+              <td
+                colSpan={5}
+                className="p-8 text-center text-stone-400 text-xs"
+              >
+                No internal staff capture metrics available.
               </td>
             </tr>
           )}
