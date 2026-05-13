@@ -57,6 +57,7 @@ async function safeSetHistory(history: CatalogueGeneration[]): Promise<void> {
     );
   } catch (error) {
     console.warn("Catalogue history could not be saved.", error);
+    throw error;
   }
 }
 
@@ -145,6 +146,7 @@ export const catalogueService = {
 
     if (index >= 0) {
       history[index].status = "archived";
+      history[index].archivedAt = new Date().toISOString();
 
       await safeSetHistory(history);
 
@@ -179,6 +181,58 @@ export const catalogueService = {
         details: {
           replacementId: newId,
         },
+      });
+    }
+  },
+
+  deleteCatalogue: async (id: string): Promise<void> => {
+    const history = await safeGetHistory();
+    const filtered = history.filter((h) => h.id !== id);
+
+    await safeSetHistory(filtered);
+
+    analyticsService.logEvent({
+      eventType: "CATALOGUE_DELETED",
+      actorType: "admin",
+      actorName: "System Admin",
+      catalogueId: id,
+      details: { action: "purged" },
+    });
+  },
+
+  updateCatalogue: async (
+    id: string,
+    patch: Partial<CatalogueGeneration>,
+  ): Promise<void> => {
+    const history = await safeGetHistory();
+    const index = history.findIndex((h) => h.id === id);
+
+    if (index >= 0) {
+      history[index] = { ...history[index], ...patch };
+      await safeSetHistory(history);
+    }
+  },
+
+  redeployCatalogue: async (id: string): Promise<void> => {
+    const history = await safeGetHistory();
+    const index = history.findIndex((h) => h.id === id);
+
+    if (index >= 0) {
+      const now = new Date();
+      const expiry = new Date();
+      expiry.setDate(now.getDate() + history[index].expiryPeriodDays);
+
+      history[index].status = "deployed";
+      history[index].deployedAt = now.toISOString();
+      history[index].expiryDate = expiry.toISOString();
+
+      await safeSetHistory(history);
+
+      analyticsService.logEvent({
+        eventType: "CATALOGUE_REDEPLOYED",
+        actorType: "admin",
+        actorName: "System Admin",
+        catalogueId: id,
       });
     }
   },

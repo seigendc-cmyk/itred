@@ -464,6 +464,9 @@ export type EventType =
   | "CATALOGUE_EXPIRED"
   | "CATALOGUE_REPLACED"
   | "CATALOGUE_ARCHIVED"
+  | "CATALOGUE_REDEPLOYED"
+  | "CATALOGUE_DELETED"
+  | "CATALOGUE_UPDATED"
   | "STOREFRONT_GENERATED"
   | "STOREFRONT_DOWNLOADED"
   | "STOREFRONT_DEPLOYED"
@@ -701,10 +704,29 @@ export interface CatalogueGeneration {
   expiryPeriodDays: number;
   status: DeploymentStatus;
   replacementCatalogueId?: string;
+  previousCatalogueId?: string;
   notes?: string;
   productCount: number;
   htmlSize?: number;
   fileName?: string;
+  htmlContent?: string;
+  archivedAt?: string;
+  deletedAt?: string;
+  configSnapshot?: {
+    vendorIds: string[];
+    cahLinkIds: string[];
+    sector: string;
+    category: string;
+    province?: string;
+    cityTown?: string;
+    notes?: string;
+    expiryPeriodDays: number;
+    onlyActive: boolean;
+    onlyPublished: boolean;
+    includeOutOfStock: boolean;
+    maxProducts: number;
+    maxImages: number;
+  };
 }
 
 export interface Subscription {

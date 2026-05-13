@@ -232,7 +232,8 @@ service cloud.firestore {
     }
 
     match /itred_catalogue_history/{docId} {
-      allow get, list, create, update: if isSignedIn();
+      allow get, list: if true;
+      allow create, update: if true;
       allow delete: if isConsoleAdmin();
     }
 
@@ -341,8 +342,9 @@ service cloud.firestore {
     */
 
     match /itred_activity_logs/{docId} {
-      allow get, list, create: if isSignedIn();
-      allow update, delete: if isConsoleAdmin();
+      allow get, list: if true;
+      allow create, update: if true;
+      allow delete: if isConsoleAdmin();
     }
 
     match /itred_audit_logs/{docId} {

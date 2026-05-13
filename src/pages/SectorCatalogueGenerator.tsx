@@ -26,6 +26,7 @@ import {
   Archive,
   Globe,
   Trash2,
+  Edit3,
   Filter,
   Plus,
   MessageSquare,
@@ -106,6 +107,14 @@ export const SectorCatalogueGenerator: React.FC = () => {
     maxImages: 800,
   });
 
+  // History Management & Editing State
+  const [editingCatalogueId, setEditingCatalogueId] = useState<string | null>(
+    null,
+  );
+  const [historySearch, setHistorySearch] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
+  const [showReplaced, setShowReplaced] = useState(false);
+
   const [lastGenerated, setLastGenerated] = useState<{
     html: string;
     id: string;
@@ -178,11 +187,14 @@ export const SectorCatalogueGenerator: React.FC = () => {
     }));
   }, [config.sector, config.category]);
 
-  const safeVendors = asArray<Vendor>(vendors);
-  const safeProducts = asArray<Product>(products);
-  const safeCahLinks = asArray<CAHLink>(cahLinks);
-  const safePlans = asArray<PricingPlan>(plans);
-  const safeHistory = asArray<CatalogueGeneration>(history);
+  const safeVendors = useMemo(() => asArray<Vendor>(vendors), [vendors]);
+  const safeProducts = useMemo(() => asArray<Product>(products), [products]);
+  const safeCahLinks = useMemo(() => asArray<CAHLink>(cahLinks), [cahLinks]);
+  const safePlans = useMemo(() => asArray<PricingPlan>(plans), [plans]);
+  const safeHistory = useMemo(
+    () => asArray<CatalogueGeneration>(history),
+    [history],
+  );
 
   const selectedVendors = useMemo(
     () => safeVendors.filter((v) => config.vendorIds.includes(v.id)),
@@ -276,8 +288,8 @@ export const SectorCatalogueGenerator: React.FC = () => {
     }
 
     // Plan Enforcement
-    safeSelectedVendors.forEach(async (vendor) => {
-      const plan = await pricingPlanService.getPlan(vendor.planId);
+    safeSelectedVendors.forEach((vendor) => {
+      const plan = safePlans.find((p) => p.id === vendor.planId);
       if (!plan) return;
 
       const vendorProducts = safeProducts.filter(
@@ -332,7 +344,41 @@ export const SectorCatalogueGenerator: React.FC = () => {
     safePlans,
   ]);
 
-  const handleGenerate = () => {
+  const filteredHistory = useMemo(() => {
+    return safeHistory.filter((h) => {
+      if (!showArchived && h.status === "archived") return false;
+      if (!showReplaced && h.status === "replaced") return false;
+
+      const searchBlob =
+        `${h.id} ${h.serialNumber} ${h.sector} ${h.category}`.toLowerCase();
+      if (historySearch && !searchBlob.includes(historySearch.toLowerCase()))
+        return false;
+
+      const matchesSector =
+        !filterSector ||
+        h.sector.toLowerCase().includes(filterSector.toLowerCase());
+      const matchesCategory =
+        !filterCategory ||
+        h.category.toLowerCase().includes(filterCategory.toLowerCase());
+      const matchesStatus = filterStatus === "all" || h.status === filterStatus;
+      return matchesSector && matchesCategory && matchesStatus;
+    });
+  }, [
+    safeHistory,
+    filterSector,
+    filterCategory,
+    filterStatus,
+    showArchived,
+    showReplaced,
+    historySearch,
+  ]);
+
+  const uniqueSectors = useMemo(
+    () => Array.from(new Set(safeHistory.map((h) => h.sector))),
+    [safeHistory],
+  );
+
+  const handleGenerate = async (mode: "new" | "update" | "replace" = "new") => {
     if (config.vendorIds.length === 0 || !config.sector || !config.category) {
       alert("Please provide Sector, Category and select at least one vendor.");
       return;
@@ -353,8 +399,8 @@ export const SectorCatalogueGenerator: React.FC = () => {
     setIsGenerating(true);
     focusMainContent();
 
-    // Simulate generation delay
-    setTimeout(() => {
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 1200));
       const now = new Date();
       const expiry = new Date();
       expiry.setDate(now.getDate() + config.expiryPeriodDays);
@@ -375,7 +421,9 @@ export const SectorCatalogueGenerator: React.FC = () => {
         },
       );
 
-      const newId = `CAT-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
+      const newId = `CAT-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+      const finalId =
+        mode === "update" && editingCatalogueId ? editingCatalogueId : newId;
 
       const displaySector = config.sector
         ? config.sector.trim()
@@ -391,8 +439,24 @@ export const SectorCatalogueGenerator: React.FC = () => {
         .replace(/_+/g, "_");
       const finalFileName = `${safeFileName}.html`;
 
+      const configSnapshot = {
+        vendorIds: config.vendorIds,
+        cahLinkIds: config.cahLinkIds,
+        sector: config.sector,
+        category: config.category,
+        province: config.province,
+        cityTown: config.cityTown,
+        notes: config.notes,
+        expiryPeriodDays: config.expiryPeriodDays,
+        onlyActive: config.onlyActive,
+        onlyPublished: config.onlyPublished,
+        includeOutOfStock: config.includeOutOfStock,
+        maxProducts: config.maxProducts,
+        maxImages: config.maxImages,
+      };
+
       const catalogueData: CatalogueGeneration = {
-        id: newId,
+        id: finalId,
         serialNumber: config.serialNumber,
         sector: config.sector,
         category: config.category,
@@ -408,46 +472,121 @@ export const SectorCatalogueGenerator: React.FC = () => {
         productCount: allSelectedProducts.length,
         htmlSize: html.length,
         fileName: finalFileName,
+        htmlContent: html,
+        configSnapshot: configSnapshot,
       };
 
-      catalogueService.saveCatalogue(catalogueData);
-      setLastGenerated({ html, id: newId, fileName: finalFileName });
-      refreshHistory();
+      if (mode === "replace" && editingCatalogueId) {
+        catalogueData.previousCatalogueId = editingCatalogueId;
+        await catalogueService.saveCatalogue(catalogueData);
+        await catalogueService.replaceCatalogue(editingCatalogueId, finalId);
+      } else {
+        await catalogueService.saveCatalogue(catalogueData);
+      }
+
+      setLastGenerated({ html, id: finalId, fileName: finalFileName });
+      if (mode === "update" || mode === "replace") {
+        setEditingCatalogueId(null);
+      }
+      await refreshHistory();
+      alert(
+        `Catalogue ${mode === "new" ? "created" : mode === "update" ? "updated" : "replaced"} successfully.`,
+      );
+    } catch (err) {
+      console.error(err);
+      alert(
+        "Catalogue generation or save failed. Check permissions and network.",
+      );
+    } finally {
       setIsGenerating(false);
-    }, 1200);
-  };
-
-  const handleMarkDeployed = (id: string) => {
-    catalogueService.markAsDeployed(id);
-    refreshHistory();
-    alert("Catalogue deployed. Lifecycle tracking active.");
-  };
-
-  const handleArchive = (id: string) => {
-    catalogueService.archiveCatalogue(id);
-    refreshHistory();
-  };
-
-  const handleDelete = (id: string) => {
-    if (confirm("Permanently purge this catalogue record?")) {
-      const updated = safeHistory.filter((h) => h.id !== id);
-      setHistory(updated);
-      localStorage.setItem("itred_catalogue_history", JSON.stringify(updated));
     }
   };
 
-  const filteredHistory = useMemo(() => {
-    return safeHistory.filter((h) => {
-      const matchesSector =
-        !filterSector ||
-        h.sector.toLowerCase().includes(filterSector.toLowerCase());
-      const matchesCategory =
-        !filterCategory ||
-        h.category.toLowerCase().includes(filterCategory.toLowerCase());
-      const matchesStatus = filterStatus === "all" || h.status === filterStatus;
-      return matchesSector && matchesCategory && matchesStatus;
-    });
-  }, [safeHistory, filterSector, filterCategory, filterStatus]);
+  const handleMarkDeployed = async (id: string) => {
+    try {
+      await catalogueService.markAsDeployed(id);
+      refreshHistory();
+      alert("Catalogue deployed. Lifecycle tracking active.");
+    } catch (err) {
+      console.error(err);
+      alert("Failed to deploy catalogue.");
+    }
+  };
+
+  const handleRedeploy = async (id: string) => {
+    try {
+      await catalogueService.redeployCatalogue(id);
+      refreshHistory();
+      alert("Catalogue redeployed. Expiry timeline reset.");
+    } catch (err) {
+      console.error(err);
+      alert("Failed to redeploy catalogue.");
+    }
+  };
+
+  const handleArchive = async (id: string) => {
+    try {
+      await catalogueService.archiveCatalogue(id);
+      refreshHistory();
+    } catch (err) {
+      console.error(err);
+      alert("Failed to archive catalogue.");
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (
+      confirm(
+        "Permanently delete this catalogue record? This cannot be undone.",
+      )
+    ) {
+      try {
+        await catalogueService.deleteCatalogue(id);
+        refreshHistory();
+      } catch (err) {
+        console.error(err);
+        alert("Failed to delete catalogue record.");
+      }
+    }
+  };
+
+  const handleEditConfig = (cat: CatalogueGeneration) => {
+    if (cat.configSnapshot) {
+      setConfig({ ...config, ...cat.configSnapshot });
+    } else {
+      setConfig({
+        ...config,
+        sector: cat.sector || "",
+        category: cat.category || "",
+        vendorIds: cat.vendorIds || [],
+        cahLinkIds: cat.cahLinkIds || [],
+        notes: cat.notes || "",
+        expiryPeriodDays: cat.expiryPeriodDays || 7,
+      });
+    }
+    setEditingCatalogueId(cat.id);
+    focusMainContent();
+  };
+
+  const handleViewPreview = (cat: CatalogueGeneration) => {
+    if (cat.htmlContent) {
+      setLastGenerated({
+        html: cat.htmlContent,
+        id: cat.id,
+        fileName: cat.fileName || `${cat.serialNumber}.html`,
+      });
+      focusMainContent();
+    } else {
+      alert(
+        "HTML content not available for this older record. Please regenerate.",
+      );
+    }
+  };
+
+  const handleCopyHtml = async (html: string) => {
+    await navigator.clipboard.writeText(html);
+    alert("Catalogue HTML copied to clipboard.");
+  };
 
   const toggleVendorSelection = (vendorId: string) => {
     setConfig((prev) => ({
@@ -490,15 +629,30 @@ export const SectorCatalogueGenerator: React.FC = () => {
         title="Create Catalogue"
         subtitle="Group multiple vendors into a single digital product catalogue."
         actions={
-          permissionService.canCreate("createCatalogue") && ( // Check permission for creating catalogue
+          permissionService.canCreate("createCatalogue") &&
+          (editingCatalogueId ? (
+            <div className="flex gap-2">
+              <SecondaryButton onClick={() => setEditingCatalogueId(null)}>
+                Cancel Edit
+              </SecondaryButton>
+              <PrimaryButton
+                onClick={() => handleGenerate("update")}
+                disabled={isGenerating || config.vendorIds.length === 0}
+              >
+                {isGenerating ? "Updating..." : "Update Existing"}
+              </PrimaryButton>
+              <PrimaryButton
+                onClick={() => handleGenerate("replace")}
+                disabled={isGenerating || config.vendorIds.length === 0}
+              >
+                {isGenerating ? "Replacing..." : "Save as Replacement"}
+              </PrimaryButton>
+            </div>
+          ) : (
             <PrimaryButton
-              onClick={handleGenerate}
-              disabled={
-                isGenerating ||
-                config.vendorIds.length === 0 ||
-                !permissionService.canCreate("createCatalogue")
-              }
-              className={`${isGenerating ? "opacity-50 cursor-not-allowed" : ""} ${!permissionService.canCreate("createCatalogue") ? "opacity-50 cursor-not-allowed" : ""}`}
+              onClick={() => handleGenerate("new")}
+              disabled={isGenerating || config.vendorIds.length === 0}
+              className={isGenerating ? "opacity-50 cursor-not-allowed" : ""}
             >
               {isGenerating ? (
                 "Creating..."
@@ -509,7 +663,7 @@ export const SectorCatalogueGenerator: React.FC = () => {
                 </>
               )}
             </PrimaryButton>
-          )
+          ))
         }
       />
 
@@ -517,6 +671,23 @@ export const SectorCatalogueGenerator: React.FC = () => {
         <div className="lg:col-span-2 space-y-8">
           {/* Main Config */}
           <section className="card bg-white">
+            {editingCatalogueId && (
+              <div className="mb-6 p-4 bg-orange-50 border-l-4 border-brand-orange flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-bold text-brand-orange uppercase">
+                    Editing Mode Active
+                  </h4>
+                  <p className="text-xs text-stone-600 font-medium mt-1">
+                    Editing catalogue {editingCatalogueId}. Regenerate to apply
+                    changes.
+                  </p>
+                </div>
+                <SecondaryButton onClick={() => setEditingCatalogueId(null)}>
+                  Cancel Edit
+                </SecondaryButton>
+              </div>
+            )}
+
             <div className="flex items-center gap-4 mb-6">
               <div className="w-10 h-10 bg-brand-orange text-white flex items-center justify-center font-bold italic">
                 GEN
@@ -880,9 +1051,9 @@ export const SectorCatalogueGenerator: React.FC = () => {
             </section>
           )}
 
-          {/* Deployment Lifecycle / Archive */}
-          <DataPanel title="Catalogue Management">
-            <div className="px-6 py-4 bg-stone-50 border-b border-stone-100 grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Catalogue Archive / History Manager */}
+          <DataPanel title="Catalogue Archive & History Manager">
+            <div className="px-6 py-4 bg-stone-50 border-b border-stone-100 grid grid-cols-1 md:grid-cols-4 gap-4 items-center">
               <div className="relative">
                 <Search
                   className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400"
@@ -890,24 +1061,25 @@ export const SectorCatalogueGenerator: React.FC = () => {
                 />
                 <input
                   type="text"
-                  placeholder="Sector..."
+                  placeholder="Search Serial, Sector..."
                   className="w-full pl-8 pr-3 py-2 text-[10px] font-bold outline-none border border-stone-200"
-                  value={filterSector}
-                  onChange={(e) => setFilterSector(e.target.value)}
+                  value={historySearch}
+                  onChange={(e) => setHistorySearch(e.target.value)}
                 />
               </div>
               <div className="relative">
-                <Search
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400"
-                  size={12}
-                />
-                <input
-                  type="text"
-                  placeholder="Category..."
-                  className="w-full pl-8 pr-3 py-2 text-[10px] font-bold outline-none border border-stone-200"
-                  value={filterCategory}
-                  onChange={(e) => setFilterCategory(e.target.value)}
-                />
+                <select
+                  className="w-full p-2 text-[10px] font-bold outline-none border border-stone-200 uppercase"
+                  value={filterSector}
+                  onChange={(e) => setFilterSector(e.target.value)}
+                >
+                  <option value="">All Sectors</option>
+                  {uniqueSectors.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
               </div>
               <select
                 className="p-2 text-[10px] font-bold outline-none border border-stone-200"
@@ -924,118 +1096,255 @@ export const SectorCatalogueGenerator: React.FC = () => {
                 <option value="replaced">Replaced</option>
                 <option value="archived">Archived</option>
               </select>
+              <div className="flex gap-4 items-center">
+                <label className="flex items-center gap-2 text-[9px] font-bold uppercase text-stone-500 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={showArchived}
+                    onChange={(e) => setShowArchived(e.target.checked)}
+                    className="accent-brand-orange"
+                  />{" "}
+                  Show Archived
+                </label>
+                <label className="flex items-center gap-2 text-[9px] font-bold uppercase text-stone-500 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={showReplaced}
+                    onChange={(e) => setShowReplaced(e.target.checked)}
+                    className="accent-brand-orange"
+                  />{" "}
+                  Show Replaced
+                </label>
+              </div>
             </div>
 
-            <div className="divide-y divide-stone-100">
-              {filteredHistory.map((cat) => {
-                const isExpiringSoon =
-                  cat.status === "deployed" &&
-                  cat.expiryDate &&
-                  new Date(cat.expiryDate).getTime() - new Date().getTime() <
-                    2 * 24 * 60 * 60 * 1000;
-                const isExpired =
-                  cat.status === "expired" ||
-                  (cat.status === "deployed" &&
-                    cat.expiryDate &&
-                    new Date(cat.expiryDate) < new Date());
+            <div className="overflow-x-auto min-h-[300px]">
+              <table className="w-full text-left text-sm border-collapse">
+                <thead>
+                  <tr className="bg-stone-100 border-b border-stone-200 text-[9px] font-bold uppercase tracking-widest text-stone-400">
+                    <th className="px-4 py-3">Serial / ID</th>
+                    <th className="px-4 py-3">Classification</th>
+                    <th className="px-4 py-3">Entities</th>
+                    <th className="px-4 py-3">Lifecycle</th>
+                    <th className="px-4 py-3">Timeline</th>
+                    <th className="px-4 py-3">Payload</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="text-sm font-medium text-stone-600 divide-y divide-stone-100">
+                  {filteredHistory.map((cat) => {
+                    const isExpiringSoon =
+                      cat.status === "deployed" &&
+                      cat.expiryDate &&
+                      new Date(cat.expiryDate).getTime() -
+                        new Date().getTime() <
+                        2 * 24 * 60 * 60 * 1000;
+                    const isExpired =
+                      cat.status === "expired" ||
+                      (cat.status === "deployed" &&
+                        cat.expiryDate &&
+                        new Date(cat.expiryDate) < new Date());
 
-                return (
-                  <div
-                    key={cat.id}
-                    className="p-5 flex items-center justify-between hover:bg-stone-50 transition-colors"
-                  >
-                    <div className="flex items-center gap-4 flex-1">
-                      <div
-                        className={`p-2 ${cat.status === "deployed" ? "bg-emerald-50 text-emerald-500" : "bg-stone-100 text-stone-400"}`}
+                    return (
+                      <tr
+                        key={cat.id}
+                        className="hover:bg-stone-50 transition-colors"
                       >
-                        <FileCode size={18} />
-                      </div>
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
+                        <td className="px-4 py-3">
                           <p className="text-xs font-black uppercase tracking-tight">
                             {cat.serialNumber}
                           </p>
-                          <CatalogueStatusBadge status={cat.status} />
-                          {isExpiringSoon && !isExpired && (
-                            <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-[8px] font-black uppercase">
-                              Expiring Soon
-                            </span>
-                          )}
-                          {isExpired && (
-                            <span className="px-2 py-0.5 bg-red-100 text-red-700 text-[8px] font-black uppercase">
-                              Expired
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-4 text-[9px] text-stone-400 font-bold uppercase">
+                          <p className="text-[9px] text-stone-400 font-mono mt-0.5">
+                            {cat.id}
+                          </p>
+                        </td>
+                        <td className="px-4 py-3 text-[10px] font-bold uppercase">
+                          <p className="text-brand-charcoal">{cat.sector}</p>
+                          <p className="text-stone-400">{cat.category}</p>
+                        </td>
+                        <td className="px-4 py-3 text-[10px] font-mono">
+                          <p>{cat.productCount} Products</p>
+                          <p>{cat.vendorIds?.length || 0} Vendors</p>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-col items-start gap-1">
+                            <CatalogueStatusBadge status={cat.status} />
+                            {isExpiringSoon && !isExpired && (
+                              <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-[8px] font-black uppercase">
+                                Expiring Soon
+                              </span>
+                            )}
+                            {isExpired && (
+                              <span className="px-2 py-0.5 bg-red-100 text-red-700 text-[8px] font-black uppercase">
+                                Expired
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-[9px] font-bold uppercase text-stone-500 whitespace-nowrap space-y-1">
                           <span>
                             Gen:{" "}
                             {new Date(cat.generatedAt).toLocaleDateString()}
                           </span>
+                          <br />
                           {cat.deployedAt && (
                             <span>
                               Deployed:{" "}
                               {new Date(cat.deployedAt).toLocaleDateString()}
                             </span>
                           )}
+                          <br />
                           {cat.expiryDate && (
                             <span>
                               Expiry:{" "}
                               {new Date(cat.expiryDate).toLocaleDateString()}
                             </span>
                           )}
-                          <span>{cat.productCount} Items</span>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      {cat.status === "generated" && (
-                        <button
-                          onClick={() => {
-                            if (permissionService.canApprove("createCatalogue"))
-                              handleMarkDeployed(cat.id);
-                            else
-                              alert("Permission denied to deploy catalogues.");
-                          }}
-                          className={`p-2 px-3 bg-stone-900 text-white text-[9px] font-black uppercase hover:bg-brand-orange transition-colors ${!permissionService.canApprove("createCatalogue") ? "opacity-50 cursor-not-allowed" : ""}`}
-                        >
-                          Deploy
-                        </button>
-                      )}
-                      <button
-                        onClick={() => {
-                          if (permissionService.canDelete("createCatalogue"))
-                            handleArchive(cat.id);
-                          else
-                            alert("Permission denied to archive catalogues.");
-                        }}
-                        className={`p-2 text-stone-400 hover:text-brand-charcoal transition-colors ${!permissionService.canDelete("createCatalogue") ? "opacity-50 cursor-not-allowed" : ""}`}
-                        title="Archive"
+                        </td>
+                        <td className="px-4 py-3 text-[10px] font-mono text-stone-500">
+                          {cat.htmlSize
+                            ? `${(cat.htmlSize / 1024).toFixed(1)} KB`
+                            : "N/A"}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <div className="flex justify-end gap-1.5 flex-wrap max-w-[140px] ml-auto">
+                            <button
+                              onClick={() => handleViewPreview(cat)}
+                              className="p-1.5 text-stone-400 hover:text-brand-charcoal border border-stone-200 bg-white"
+                              title="View Preview"
+                            >
+                              <Eye size={12} />
+                            </button>
+
+                            {cat.htmlContent &&
+                              permissionService.canExport(
+                                "createCatalogue",
+                              ) && (
+                                <>
+                                  <button
+                                    onClick={() =>
+                                      downloadFile(
+                                        cat.htmlContent!,
+                                        cat.fileName ||
+                                          `${cat.serialNumber}.html`,
+                                      )
+                                    }
+                                    className="p-1.5 text-stone-400 hover:text-brand-charcoal border border-stone-200 bg-white"
+                                    title="Download HTML"
+                                  >
+                                    <Download size={12} />
+                                  </button>
+                                  <button
+                                    onClick={() =>
+                                      handleCopyHtml(cat.htmlContent!)
+                                    }
+                                    className="p-1.5 text-stone-400 hover:text-brand-charcoal border border-stone-200 bg-white"
+                                    title="Copy HTML"
+                                  >
+                                    <Copy size={12} />
+                                  </button>
+                                </>
+                              )}
+
+                            {permissionService.canEdit("createCatalogue") && (
+                              <button
+                                onClick={() => handleEditConfig(cat)}
+                                className="p-1.5 text-brand-orange hover:bg-orange-50 border border-orange-200 bg-white"
+                                title="Edit Configuration"
+                              >
+                                <Edit3 size={12} />
+                              </button>
+                            )}
+
+                            {cat.status === "generated" && (
+                              <button
+                                onClick={() => {
+                                  if (
+                                    permissionService.canApprove(
+                                      "createCatalogue",
+                                    )
+                                  )
+                                    handleMarkDeployed(cat.id);
+                                  else
+                                    alert(
+                                      "Permission denied to deploy catalogues.",
+                                    );
+                                }}
+                                className={`p-1.5 bg-stone-900 text-white hover:bg-brand-orange transition-colors ${!permissionService.canApprove("createCatalogue") ? "opacity-50 cursor-not-allowed" : ""}`}
+                                title="Deploy"
+                              >
+                                <Globe size={12} />
+                              </button>
+                            )}
+
+                            {cat.status === "deployed" &&
+                              permissionService.canApprove(
+                                "createCatalogue",
+                              ) && (
+                                <button
+                                  onClick={() => handleRedeploy(cat.id)}
+                                  className="p-1.5 text-emerald-600 border border-emerald-200 hover:bg-emerald-50 bg-white"
+                                  title="Redeploy / Reset Expiry"
+                                >
+                                  <Globe size={12} />
+                                </button>
+                              )}
+
+                            <button
+                              onClick={() => {
+                                if (
+                                  permissionService.canDelete("createCatalogue")
+                                )
+                                  handleArchive(cat.id);
+                                else
+                                  alert(
+                                    "Permission denied to archive catalogues.",
+                                  );
+                              }}
+                              className={`p-1.5 text-stone-400 border border-stone-200 hover:text-brand-charcoal transition-colors bg-white ${!permissionService.canDelete("createCatalogue") ? "opacity-50 cursor-not-allowed" : ""}`}
+                              title="Archive"
+                            >
+                              <Archive size={12} />
+                            </button>
+                            <button
+                              onClick={() => {
+                                if (
+                                  permissionService.canDelete("createCatalogue")
+                                )
+                                  handleDelete(cat.id);
+                                else
+                                  alert(
+                                    "Permission denied to delete catalogues.",
+                                  );
+                              }}
+                              className={`p-1.5 text-stone-400 border border-stone-200 hover:text-red-500 hover:border-red-200 transition-colors bg-white ${!permissionService.canDelete("createCatalogue") ? "opacity-50 cursor-not-allowed" : ""}`}
+                              title="Delete"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {filteredHistory.length === 0 && (
+                    <tr>
+                      <td
+                        colSpan={7}
+                        className="p-20 text-center text-stone-300"
                       >
-                        <Archive size={14} />
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (permissionService.canDelete("createCatalogue"))
-                            handleDelete(cat.id);
-                          else alert("Permission denied to delete catalogues.");
-                        }}
-                        className={`p-2 text-stone-300 hover:text-red-500 transition-colors ${!permissionService.canDelete("createCatalogue") ? "opacity-50 cursor-not-allowed" : ""}`}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-              {filteredHistory.length === 0 && (
-                <div className="p-20 text-center text-stone-300">
-                  <Package size={48} className="mx-auto mb-4 opacity-20" />
-                  <p className="text-[10px] font-extrabold uppercase">
-                    Repository Empty
-                  </p>
-                </div>
-              )}
+                        <Package
+                          size={48}
+                          className="mx-auto mb-4 opacity-20"
+                        />
+                        <p className="text-[10px] font-extrabold uppercase">
+                          Repository Empty
+                        </p>
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </DataPanel>
         </div>
