@@ -162,56 +162,35 @@ export const generateCatalogueHtml = (
             position: sticky;
             top: 0;
             z-index: 900;
-            background: rgba(255, 255, 255, 0.96);
+            background: #ffffff;
             box-shadow: 0 6px 18px rgba(0,0,0,0.08);
-            transition: background 180ms ease, box-shadow 180ms ease;
-        }
-        .fixed-catalogue-header-wrapper.is-compact {
-            background: rgba(46, 46, 46, 0.78);
-            backdrop-filter: blur(14px);
-            -webkit-backdrop-filter: blur(14px);
-            box-shadow: 0 12px 28px rgba(0,0,0,0.22);
         }
         .sector-header {
             position: relative;
-            min-height: 168px;
-            padding: 22px 88px 20px 20px;
+            min-height: 138px;
+            padding: 18px 88px 16px 18px;
             color: #fff;
             background: \${bgImage};
             display: flex;
             flex-direction: column;
             justify-content: flex-end;
             overflow: hidden;
-            transition: min-height 180ms ease, padding 180ms ease;
-        }
-        .fixed-catalogue-header-wrapper.is-compact .sector-header {
-            min-height: 74px;
-            padding: 10px 76px 10px 16px;
-            background: transparent !important;
         }
         .header-overlay {
             position: absolute;
             top: 0; left: 0; right: 0; bottom: 0;
             background: rgba(46, 46, 46, 0.7);
-            transition: opacity 180ms ease;
-        }
-        .fixed-catalogue-header-wrapper.is-compact .header-overlay {
-            opacity: 0;
         }
         .header-content {
             position: relative;
             z-index: 2;
         }
         .itred-wordmark {
-            font-size: 16px;
+            font-size: 40px;
             font-weight: 900;
             letter-spacing: 0.5px;
             margin-bottom: 8px;
-            transition: all 180ms ease;
-        }
-        .fixed-catalogue-header-wrapper.is-compact .itred-wordmark {
-            font-size: 13px !important;
-            margin-bottom: 2px !important;
+            line-height: 1;
         }
         .itred-i { color: #fff; }
         .itred-tred { color: var(--brand-orange); }
@@ -219,24 +198,17 @@ export const generateCatalogueHtml = (
             position: absolute;
             bottom: 14px;
             right: 16px;
-            width: 58px;
-            height: 58px;
+            width: 52px;
+            height: 52px;
             border-radius: 50%;
-            background: #fff;
-            border: 2px solid #fff;
+            background: #ffffff;
+            border: 2px solid #ffffff;
             overflow: hidden;
             z-index: 10;
             display: flex;
             align-items: center;
             justify-content: center;
             box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-            transition: all 180ms ease;
-        }
-        .fixed-catalogue-header-wrapper.is-compact .seigen-logo-badge {
-            width: 42px;
-            height: 42px;
-            bottom: 14px;
-            right: 16px;
         }
         .seigen-logo-badge img {
             width: 100%;
@@ -250,33 +222,16 @@ export const generateCatalogueHtml = (
             font-size: 16px;
             letter-spacing: 0px;
         }
-        .catalogue-title {
-            font-size: 24px; font-weight: 900; line-height: 1.1; margin-bottom: 4px;
-            text-transform: uppercase;
-            transition: all 180ms ease;
-        }
-        .fixed-catalogue-header-wrapper.is-compact .catalogue-title {
-            font-size: 11px !important;
-            line-height: 1.2 !important;
-            margin: 0 !important;
-            max-height: 28px;
-            overflow: hidden;
-        }
         .catalogue-subtitle {
-            font-size: 12px; font-weight: 700; color: #ddd;
-            transition: all 180ms ease;
-        }
-        .fixed-catalogue-header-wrapper.is-compact .catalogue-subtitle {
-            font-size: 8px !important;
-            line-height: 1.1 !important;
-            margin-top: 2px !important;
+            font-size: 9px; font-weight: 700; color: #ddd; line-height: 1.2;
         }
 
         /* Search */
         .search-area {
-            position: relative;
+            position: sticky;
+            top: 0;
             z-index: 902;
-            padding: 10px 16px;
+            padding: 10px 14px;
             background: rgba(255, 255, 255, 0.96);
             backdrop-filter: blur(10px);
             -webkit-backdrop-filter: blur(10px);
@@ -285,7 +240,7 @@ export const generateCatalogueHtml = (
         .search-input {
             width: 100%;
             padding: 13px 14px;
-            background: rgba(255, 255, 255, 0.92);
+            background: #ffffff;
             border: 1px solid #e0e0e0;
             font-size: 14px;
             font-weight: 800;
@@ -404,9 +359,8 @@ export const generateCatalogueHtml = (
                         <span class="itred-i">i</span><span class="itred-tred">Tred</span>
                     </div>
                     <div class="catalogue-subtitle" style="margin-bottom: 8px;">Vendor Product Discovery</div>
-                    <h1 class="catalogue-title" style="font-size: 18px; line-height: 1.4;">SCI | ${escapeHtml(displaySector)} | ${escapeHtml(displayCategory)} | ${displayDate}</h1>
-                    <div class="catalogue-subtitle" style="margin-top: 8px;">Serial: ${escapeHtml(metadata.serialNumber)} // ${jsonData.products.length} Products</div>
-                    <div class="catalogue-subtitle" style="font-size: 9px; margin-top: 4px; color: var(--brand-orange);">Powered by seiGEN Commerce</div>
+                    <div class="catalogue-subtitle">${escapeHtml(metadata.serialNumber)} // ${jsonData.products.length} Products</div>
+                    <div class="catalogue-subtitle" style="color: var(--brand-orange);">Powered by seiGEN Commerce</div>
                 </div>
                 <div class="seigen-logo-badge">
                     ${logoUrl ? `<img src="${logoUrl}" alt="seiGEN Commerce" onerror="this.outerHTML='<span class=\\'seigen-logo-fallback\\'>SCI</span>'"/>` : `<span class="seigen-logo-fallback">SCI</span>`}
@@ -541,7 +495,6 @@ export const generateCatalogueHtml = (
                     document.getElementById('searchArea').style.display = 'none';
                 }
                 window.scrollTo(0,0);
-                if (typeof applyHeaderState === 'function') applyHeaderState();
             });
         });
 
@@ -756,32 +709,7 @@ export const generateCatalogueHtml = (
 
         document.getElementById('searchInput').addEventListener('input', renderProducts);
         
-        var headerWrapper = null;
-        var ticking = false;
-        var compactThreshold = 70;
-
-        function applyHeaderState() {
-            if (!headerWrapper) return;
-            if (window.scrollY > compactThreshold) {
-                headerWrapper.classList.add("is-compact");
-            } else {
-                headerWrapper.classList.remove("is-compact");
-            }
-            ticking = false;
-        }
-
-        function onCatalogueScroll() {
-            if (!ticking) {
-                window.requestAnimationFrame(applyHeaderState);
-                ticking = true;
-            }
-        }
-
         document.addEventListener("DOMContentLoaded", function () {
-            headerWrapper = document.querySelector(".fixed-catalogue-header-wrapper");
-            applyHeaderState();
-            window.addEventListener("scroll", onCatalogueScroll, { passive: true });
-
             try {
                 renderProducts();
                 renderVendors();
