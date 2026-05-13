@@ -40,6 +40,7 @@ import {
   PricingPlan,
   DeploymentStatus,
   CatalogueContactHubSettings,
+  SystemSettings,
   WhatsAppActivityLog,
 } from "../types.ts";
 import { generateCatalogueHtml } from "../lib/catalogueTemplate.ts";
@@ -51,6 +52,7 @@ import { asArray } from "../utils/safeData.ts";
 import { vendorService } from "../services/vendorService.ts";
 import { productService } from "../services/productService.ts";
 import { contactHubService } from "../services/contactHubService.ts";
+import { settingsService } from "../services/settingsService.ts";
 import { focusMainContent } from "../utils/uiHelpers.ts";
 import { WhatsAppActivityQuickLog } from "../components/WhatsAppActivityQuickLog.tsx";
 
@@ -80,6 +82,9 @@ export const SectorCatalogueGenerator: React.FC = () => {
   const [history, setHistory] = useState<CatalogueGeneration[]>([]);
   const [contactSettings, setContactSettings] =
     useState<CatalogueContactHubSettings | null>(null);
+  const [systemSettings, setSystemSettings] = useState<SystemSettings | null>(
+    null,
+  );
 
   // Filters
   const [filterSector, setFilterSector] = useState("");
@@ -140,6 +145,7 @@ export const SectorCatalogueGenerator: React.FC = () => {
         rawPlans,
         rawHistory,
         rawSettings,
+        rawSystemSettings,
       ] = await Promise.all([
         vendorService.getVendors(),
         productService.getProducts(),
@@ -147,6 +153,7 @@ export const SectorCatalogueGenerator: React.FC = () => {
         pricingPlanService.getPlans(),
         catalogueService.getHistory(),
         contactHubService.getSettings(),
+        settingsService.getSettings(),
       ]);
 
       setVendors(asArray<Vendor>(rawVendors));
@@ -155,6 +162,7 @@ export const SectorCatalogueGenerator: React.FC = () => {
       setPlans(asArray<PricingPlan>(rawPlans));
       setHistory(asArray<CatalogueGeneration>(rawHistory));
       setContactSettings(rawSettings);
+      setSystemSettings(rawSystemSettings);
 
       await catalogueService.checkExpirations();
     } catch (error) {
@@ -415,7 +423,10 @@ export const SectorCatalogueGenerator: React.FC = () => {
           sector: config.sector,
           category: config.category,
           expiryDate: expiry.toISOString(),
-          seigenLogoUrl: contactSettings?.seigenLogoUrl,
+          seigenLogoUrl:
+            systemSettings?.seigenLogoUrl ||
+            contactSettings?.seigenLogoUrl ||
+            "/brand/seigen-commerce-logo.png",
           companyLogoUrl: contactSettings?.companyLogoUrl,
           systemLogoUrl: contactSettings?.systemLogoUrl,
         },

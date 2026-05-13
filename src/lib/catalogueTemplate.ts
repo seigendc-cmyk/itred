@@ -161,23 +161,41 @@ export const generateCatalogueHtml = (
             position: sticky;
             top: 0;
             z-index: 900;
-            background: #fff;
+            background: rgba(255, 255, 255, 0.96);
             box-shadow: 0 6px 18px rgba(0,0,0,0.08);
+            transition: background 180ms ease, box-shadow 180ms ease;
+        }
+        .fixed-catalogue-header-wrapper.is-compact {
+            background: rgba(46, 46, 46, 0.78);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            box-shadow: 0 12px 28px rgba(0,0,0,0.22);
         }
         .sector-header {
             position: relative;
-            min-height: 170px;
-            padding: 24px 88px 24px 20px;
+            min-height: 168px;
+            padding: 22px 88px 20px 20px;
             color: #fff;
             background: \${bgImage};
             display: flex;
             flex-direction: column;
             justify-content: flex-end;
+            overflow: hidden;
+            transition: min-height 180ms ease, padding 180ms ease, opacity 180ms ease;
+        }
+        .fixed-catalogue-header-wrapper.is-compact .sector-header {
+            min-height: 74px;
+            padding: 10px 76px 10px 16px;
+            background: transparent !important;
         }
         .header-overlay {
             position: absolute;
             top: 0; left: 0; right: 0; bottom: 0;
             background: rgba(46, 46, 46, 0.7);
+            transition: opacity 180ms ease;
+        }
+        .fixed-catalogue-header-wrapper.is-compact .header-overlay {
+            opacity: 0;
         }
         .header-content {
             position: relative;
@@ -188,6 +206,11 @@ export const generateCatalogueHtml = (
             font-weight: 900;
             letter-spacing: 0.5px;
             margin-bottom: 8px;
+            transition: all 180ms ease;
+        }
+        .fixed-catalogue-header-wrapper.is-compact .itred-wordmark {
+            font-size: 13px !important;
+            margin-bottom: 2px !important;
         }
         .itred-i { color: #fff; }
         .itred-tred { color: var(--brand-orange); }
@@ -206,6 +229,13 @@ export const generateCatalogueHtml = (
             align-items: center;
             justify-content: center;
             box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+            transition: all 180ms ease;
+        }
+        .fixed-catalogue-header-wrapper.is-compact .seigen-logo-badge {
+            width: 42px;
+            height: 42px;
+            bottom: 14px;
+            right: 16px;
         }
         .seigen-logo-badge img {
             width: 100%;
@@ -221,22 +251,43 @@ export const generateCatalogueHtml = (
         .catalogue-title {
             font-size: 24px; font-weight: 900; line-height: 1.1; margin-bottom: 4px;
             text-transform: uppercase;
+            transition: all 180ms ease;
+        }
+        .fixed-catalogue-header-wrapper.is-compact .catalogue-title {
+            font-size: 11px !important;
+            line-height: 1.2 !important;
+            margin: 0 !important;
+            max-height: 28px;
+            overflow: hidden;
         }
         .catalogue-subtitle {
             font-size: 12px; font-weight: 700; color: #ddd;
+            transition: all 180ms ease;
+        }
+        .fixed-catalogue-header-wrapper.is-compact .catalogue-subtitle {
+            font-size: 8px !important;
+            line-height: 1.1 !important;
+            margin-top: 2px !important;
         }
 
         /* Search */
         .search-area {
-            padding: 12px 16px;
-            background: #fff;
-            border-bottom: 1px solid #eee;
+            position: relative;
+            z-index: 902;
+            padding: 10px 16px;
+            background: rgba(255, 255, 255, 0.96);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(0, 0, 0, 0.08);
         }
         .search-input {
-            width: 100%; padding: 14px 16px;
-            background: #f4f4f4; border: 1px solid #e0e0e0;
-            font-size: 14px; font-weight: 700; outline: none;
-            transition: all 0.2s;
+            width: 100%;
+            padding: 13px 14px;
+            background: rgba(255, 255, 255, 0.92);
+            border: 1px solid #e0e0e0;
+            font-size: 14px;
+            font-weight: 800;
+            outline: none;
         }
         .search-input:focus {
             background: #fff; border-color: var(--brand-orange);
@@ -332,6 +383,12 @@ export const generateCatalogueHtml = (
         .hub-link:hover { border-color: var(--brand-orange); }
         .hub-type { font-size: 9px; font-weight: 900; color: var(--brand-orange); text-transform: uppercase; }
         .hub-name { font-size: 14px; font-weight: 800; margin-top: 4px; }
+
+        main {
+            position: relative;
+            z-index: 1;
+            background: #fff;
+        }
     </style>
 </head>
 <body>
@@ -462,7 +519,7 @@ export const generateCatalogueHtml = (
     </div>
 
     <script>
-        const db = \${JSON.stringify(jsonData)};
+        const db = ${JSON.stringify(jsonData)};
 
         const products = Array.isArray(db.products) ? db.products : [];
         const vendors = Array.isArray(db.vendors) ? db.vendors : [];
@@ -482,6 +539,7 @@ export const generateCatalogueHtml = (
                     document.getElementById('searchArea').style.display = 'none';
                 }
                 window.scrollTo(0,0);
+                if (typeof applyHeaderState === 'function') applyHeaderState();
             });
         });
 
@@ -495,7 +553,7 @@ export const generateCatalogueHtml = (
             if(e.target === productModal) closeModal();
         });
 
-        function getVendor(id) { return vendorsList.find(v => v.id === id); }
+        function getVendor(id) { return vendors.find(v => v.id === id); }
         function getBranch(vendor, id) { 
             const branches = vendor && Array.isArray(vendor.branches) ? vendor.branches : [];
             return branches.find(b => b.id === id); 
@@ -503,24 +561,22 @@ export const generateCatalogueHtml = (
 
         function renderHub() {
             const grid = document.getElementById('hubGrid');
-            if(cahLinksList.length === 0) {
+            if(cahLinks.length === 0) {
                 grid.innerHTML = '<p style="font-size:12px; color:#999;">No community hubs available.</p>';
                 return;
             }
 
-            const sortedLinks = [...cahLinksList].sort((a,b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+            const sortedLinks = [...cahLinks].sort((a,b) => (a.sortOrder || 0) - (b.sortOrder || 0));
 
             grid.innerHTML = sortedLinks.map(l => {
                 const url = l.whatsappCommunityLink || l.whatsappChannelLink || l.whatsappGroupLink || l.supportNumber;
                 if(!url) return '';
-                const href = url.startsWith('http') ? url : \`https://wa.me/\${url.replace(/[^0-9]/g, '')}\`;
-                return \`
-                    <a href="\${href}" class="hub-link" target="_blank">
-                        <div class="hub-type">\${escapeHtml(l.type)}</div>
-                        <div class="hub-name">\${escapeHtml(l.name)}</div>
-                        <div style="font-size:11px; margin-top:4px; color:#666;">\${escapeHtml(l.description || '')}</div>
-                    </a>
-                \`;
+                const href = url.startsWith('http') ? url : 'https://wa.me/' + url.replace(/[^0-9]/g, '');
+                return '<a href="' + href + '" class="hub-link" target="_blank">' +
+                       '<div class="hub-type">' + escapeHtml(l.type) + '</div>' +
+                       '<div class="hub-name">' + escapeHtml(l.name) + '</div>' +
+                       '<div style="font-size:11px; margin-top:4px; color:#666;">' + escapeHtml(l.description || '') + '</div>' +
+                       '</a>';
             }).join('');
         }
 
@@ -549,10 +605,10 @@ export const generateCatalogueHtml = (
                 p.tags?.join(' ')
             ].join(' ').toLowerCase();
 
-            if (tokens.some(t => searchBlob === t)) score += 100; // Exact match somewhere
-            if (tokens.some(t => (p.name || '').toLowerCase().includes(t))) score += 50;
-            if (tokens.some(t => (p.category || '').toLowerCase().includes(t))) score += 30;
-            if (tokens.some(t => (branch?.cityTown || vendor?.cityTown || '').toLowerCase().includes(t))) score += 20;
+            if (tokens.some(function(t) { return searchBlob === t; })) score += 100; // Exact match somewhere
+            if (tokens.some(function(t) { return (p.name || '').toLowerCase().includes(t); })) score += 50;
+            if (tokens.some(function(t) { return (p.category || '').toLowerCase().includes(t); })) score += 30;
+            if (tokens.some(function(t) { return (branch?.cityTown || vendor?.cityTown || '').toLowerCase().includes(t); })) score += 20;
             
             if (vendor) score += (vendor.trustScore / 10);
             if (p.stockQuantity > 0) score += 10;
@@ -577,7 +633,7 @@ export const generateCatalogueHtml = (
 
             if (tokens.length > 0) {
                 // Free-order rules-based match
-                filtered = products.map(p => {
+                filtered = products.map(function(p) {
                     const vendor = getVendor(p.vendorId);
                     const branch = getBranch(vendor, p.branchId);
                     const searchBlob = [
@@ -587,12 +643,12 @@ export const generateCatalogueHtml = (
                         p.tags?.join(' ')
                     ].join(' ').toLowerCase();
 
-                    const matches = tokens.every(token => searchBlob.includes(token));
+                    const matches = tokens.every(function(token) { return searchBlob.includes(token); });
                     if(matches) {
                         return { p: p, score: rankProduct(p, tokens) };
                     }
                     return null;
-                }).filter(x => x).sort((a,b) => b.score - a.score).map(x => x.p);
+                }).filter(function(x) { return x; }).sort(function(a,b) { return b.score - a.score; }).map(function(x) { return x.p; });
                 
                 stats.style.display = 'block';
                 stats.textContent = filtered.length + " Results Ranked";
@@ -605,7 +661,7 @@ export const generateCatalogueHtml = (
                 return;
             }
 
-            grid.innerHTML = filtered.map(p => {
+            grid.innerHTML = filtered.map(function(p) {
                 const vendor = getVendor(p.vendorId);
                 const branch = getBranch(vendor, p.branchId);
                 const location = branch?.cityTown || vendor?.cityTown || p.branchName || 'Various';
@@ -629,7 +685,7 @@ export const generateCatalogueHtml = (
         }
 
         window.openProduct = function(id) {
-            const p = products.find(x => x.id === id);
+            const p = products.find(function(x) { return x.id === id; });
             if(!p) return;
             const vendor = getVendor(p.vendorId);
             const branch = getBranch(vendor, p.branchId);
@@ -698,9 +754,45 @@ export const generateCatalogueHtml = (
 
         document.getElementById('searchInput').addEventListener('input', renderProducts);
         
-        renderProducts();
-        renderVendors();
-        renderHub();
+        var headerWrapper = null;
+        var ticking = false;
+        var compactThreshold = 70;
+
+        function applyHeaderState() {
+            if (!headerWrapper) return;
+            var shouldCompact = window.scrollY > compactThreshold;
+            if (shouldCompact) {
+                headerWrapper.classList.add("is-compact");
+            } else {
+                headerWrapper.classList.remove("is-compact");
+            }
+            ticking = false;
+        }
+
+        function onCatalogueScroll() {
+            if (!ticking) {
+                window.requestAnimationFrame(applyHeaderState);
+                ticking = true;
+            }
+        }
+
+        document.addEventListener("DOMContentLoaded", function () {
+            headerWrapper = document.querySelector(".fixed-catalogue-header-wrapper");
+            applyHeaderState();
+            window.addEventListener("scroll", onCatalogueScroll, { passive: true });
+
+            try {
+                renderProducts();
+                renderVendors();
+                renderHub();
+            } catch (error) {
+                console.error("Catalogue render failed", error);
+                var grid = document.getElementById("productGrid");
+                if (grid) {
+                    grid.innerHTML = '<div style="padding:40px 20px;text-align:center;font-weight:900;color:#ff6b00;">CATALOGUE RENDER ERROR. CHECK PRODUCT DATA.</div>';
+                }
+            }
+        });
     </script>
 </body>
 </html>

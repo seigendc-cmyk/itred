@@ -1038,3 +1038,8 @@ export interface AppNotification {
   createdAt: string;
   resolvedAt?: string;
 }
+
+export interface SystemSettings {
+  seigenLogoUrl?: string;
+  updatedAt?: string;
+}
