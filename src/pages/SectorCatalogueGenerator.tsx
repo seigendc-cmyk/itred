@@ -399,6 +399,36 @@ export const SectorCatalogueGenerator: React.FC = () => {
     [safeHistory],
   );
 
+  const sectorMatchedCahLinks = useMemo(() => {
+    const s = config.sector?.toLowerCase().trim() || "";
+    const c = config.category?.toLowerCase().trim() || "";
+
+    if (!s && !c) return [];
+
+    return safeCahLinks.filter((link) => {
+      if (link.status !== "active" || link.showInCatalogue === false)
+        return false;
+
+      const linkSector = (link.sector || "").toLowerCase();
+      const linkCategory = (link.category || "").toLowerCase();
+      const linkName = (link.name || "").toLowerCase();
+      const linkDesc = (link.description || "").toLowerCase();
+
+      const matchesSector =
+        s &&
+        (linkSector.includes(s) ||
+          linkName.includes(s) ||
+          linkDesc.includes(s));
+      const matchesCategory =
+        c &&
+        (linkCategory.includes(c) ||
+          linkName.includes(c) ||
+          linkDesc.includes(c));
+
+      return matchesSector || matchesCategory;
+    });
+  }, [safeCahLinks, config.sector, config.category]);
+
   const handleAutoSelectCAHLinks = () => {
     const s = config.sector?.toLowerCase().trim() || "";
     const c = config.category?.toLowerCase().trim() || "";
@@ -408,32 +438,7 @@ export const SectorCatalogueGenerator: React.FC = () => {
       return;
     }
 
-    const matchingIds = safeCahLinks
-      .filter((link) => {
-        if (link.status !== "active" || link.showInCatalogue === false)
-          return false;
-
-        const linkSector = (link.sector || "").toLowerCase();
-        const linkCategory = (link.category || "").toLowerCase();
-        const linkName = (link.name || "").toLowerCase();
-        const linkDesc = (link.description || "").toLowerCase();
-
-        const matchesSector =
-          s &&
-          (linkSector.includes(s) ||
-            linkName.includes(s) ||
-            linkDesc.includes(s));
-        const matchesCategory =
-          c &&
-          (linkCategory.includes(c) ||
-            linkName.includes(c) ||
-            linkDesc.includes(c));
-
-        return matchesSector || matchesCategory;
-      })
-      .map((l) => l.id);
-
-    if (matchingIds.length === 0) {
+    if (sectorMatchedCahLinks.length === 0) {
       alert(
         "No active matching WhatsApp/CAH links found for this sector/category.",
       );
@@ -442,7 +447,12 @@ export const SectorCatalogueGenerator: React.FC = () => {
 
     setConfig((prev) => ({
       ...prev,
-      cahLinkIds: Array.from(new Set([...prev.cahLinkIds, ...matchingIds])),
+      cahLinkIds: Array.from(
+        new Set([
+          ...prev.cahLinkIds,
+          ...sectorMatchedCahLinks.map((l) => l.id),
+        ]),
+      ),
     }));
   };
 
@@ -463,6 +473,20 @@ export const SectorCatalogueGenerator: React.FC = () => {
         return;
       }
     }
+
+    let finalCahLinks = selectedCahLinks;
+    const finalCahLinkIds = [...config.cahLinkIds];
+
+    if (finalCahLinks.length === 0 && sectorMatchedCahLinks.length > 0) {
+      finalCahLinks = sectorMatchedCahLinks;
+      sectorMatchedCahLinks.forEach((l) => {
+        if (!finalCahLinkIds.includes(l.id)) {
+          finalCahLinkIds.push(l.id);
+        }
+      });
+    }
+
+    console.log("Selected CAH links for export", finalCahLinks);
 
     setIsGenerating(true);
     focusMainContent();
@@ -486,7 +510,7 @@ export const SectorCatalogueGenerator: React.FC = () => {
       const html = generateCatalogueHtml(
         selectedVendors,
         allSelectedProducts,
-        selectedCahLinks,
+        finalCahLinks,
         plans,
         {
           serialNumber: config.serialNumber,
@@ -523,7 +547,7 @@ export const SectorCatalogueGenerator: React.FC = () => {
 
       const configSnapshot = {
         vendorIds: config.vendorIds,
-        cahLinkIds: config.cahLinkIds,
+        cahLinkIds: finalCahLinkIds,
         sector: config.sector,
         category: config.category,
         province: config.province,
@@ -545,7 +569,7 @@ export const SectorCatalogueGenerator: React.FC = () => {
         province: config.province,
         cityTown: config.cityTown,
         vendorIds: config.vendorIds,
-        cahLinkIds: config.cahLinkIds,
+        cahLinkIds: finalCahLinkIds,
         generatedBy: "System Admin",
         generatedAt: new Date().toISOString(),
         expiryPeriodDays: config.expiryPeriodDays,
@@ -987,16 +1011,22 @@ export const SectorCatalogueGenerator: React.FC = () => {
 
           {/* WhatsApp Access Hub Link Selection */}
           <section className="card">
-            <div className="flex items-center justify-between mb-6">
+            <div className="flex items-start justify-between mb-6">
               <div className="flex items-center gap-4">
-                <div className="w-10 h-10 bg-emerald-600 text-white flex items-center justify-center font-bold italic">
+                <div className="w-10 h-10 bg-emerald-600 text-white flex items-center justify-center font-bold italic shrink-0">
                   WA
                 </div>
-                <h3 className="text-sm uppercase font-bold tracking-[0.2em]">
-                  WhatsApp Access Hub Links
-                </h3>
+                <div>
+                  <h3 className="text-sm uppercase font-bold tracking-[0.2em]">
+                    WhatsApp Access Hub Links
+                  </h3>
+                  <p className="text-[10px] text-stone-500 mt-1 leading-tight">
+                    Selected WhatsApp/CAH links will appear under the Hub tab in
+                    the exported catalogue.
+                  </p>
+                </div>
               </div>
-              <div className="text-[10px] font-bold text-emerald-600">
+              <div className="text-[10px] font-bold text-emerald-600 shrink-0 ml-4 pt-1">
                 {config.cahLinkIds.length} Selected
               </div>
             </div>

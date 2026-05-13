@@ -496,6 +496,7 @@ export const generateCatalogueHtml = (
         </div>
     </div>
 
+    <!-- CAH LINKS EXPORTED: ${jsonData.cahLinks.length} -->
     <script>
         const db = ${JSON.stringify(jsonData)};
 
@@ -536,19 +537,51 @@ export const generateCatalogueHtml = (
             return branches.find(b => b.id === id); 
         }
 
+        function getHubUrl(l) {
+            return (
+                l.whatsappCommunityLink ||
+                l.whatsappChannelLink ||
+                l.whatsappGroupLink ||
+                l.whatsappUrl ||
+                l.url ||
+                l.link ||
+                l.supportLink ||
+                l.catalogueDistributionGroupLink ||
+                l.vendorSupportGroupLink ||
+                l.customerDiscoveryGroupLink ||
+                l.rpnSupportGroupLink ||
+                l.supportNumber ||
+                ""
+            );
+        }
+
+        function normalizeWhatsappHref(raw) {
+            if (!raw) return "";
+            var value = String(raw).trim();
+            if (value.startsWith("http://") || value.startsWith("https://")) {
+                return value;
+            }
+            var digits = value.replace(/[^0-9]/g, "");
+            if (digits) {
+                return "https://wa.me/" + digits;
+            }
+            return "";
+        }
+
         function renderHub() {
             const grid = document.getElementById('hubGrid');
             if(cahLinks.length === 0) {
-                grid.innerHTML = '<p style="font-size:12px; color:#999;">No community hubs available.</p>';
+                grid.innerHTML = '<div style="padding:40px 20px; text-align:center; font-weight:900; color:#ccc; font-size:12px;">NO SECTOR WHATSAPP GROUPS WERE INCLUDED IN THIS CATALOGUE</div>';
                 return;
             }
 
             const sortedLinks = [...cahLinks].sort((a,b) => (a.sortOrder || 0) - (b.sortOrder || 0));
 
-            grid.innerHTML = sortedLinks.map(l => {
-                const url = l.whatsappCommunityLink || l.whatsappChannelLink || l.whatsappGroupLink || l.supportNumber;
-                if(!url) return '';
-                const href = url.startsWith('http') ? url : 'https://wa.me/' + url.replace(/[^0-9]/g, '');
+            let htmlString = sortedLinks.map(l => {
+                const rawUrl = getHubUrl(l);
+                const href = normalizeWhatsappHref(rawUrl);
+                
+                if(!href) return '';
                 
                 let typeLabel = escapeHtml(l.type);
                 if (typeLabel.toLowerCase().includes('community')) typeLabel = 'Community';
@@ -556,12 +589,46 @@ export const generateCatalogueHtml = (
                 else if (typeLabel.toLowerCase().includes('channel')) typeLabel = 'Channel';
                 else if (typeLabel.toLowerCase().includes('support')) typeLabel = 'Support';
                 
-                return '<a href="' + href + '" class="hub-link" target="_blank">' +
-                       '<div class="hub-type">' + typeLabel + '</div>' +
+                const metaText = escapeHtml(l.sector || l.category || 'General');
+
+                const followerCount = l.currentFollowerCount || l.whatsappCommunityCount || l.whatsappChannelCount || l.whatsappGroupCount;
+                const countHtml = followerCount ? '<div style="font-size:10px; font-weight:800; color:var(--brand-orange); margin-bottom:8px;">' + followerCount.toLocaleString() + ' Members</div>' : '';
+
+                const hasAdditional = Array.isArray(l.additionalWhatsappGroups) && l.additionalWhatsappGroups.length > 0;
+                
+                let cardHtml = '<div>';
+                cardHtml += '<a href="' + href + '" class="hub-link" target="_blank" style="' + (hasAdditional ? 'margin-bottom:0; border-bottom:none;' : 'margin-bottom:12px;') + '">' +
+                       '<div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px;">' +
+                           '<div class="hub-type">' + typeLabel + '</div>' +
+                           '<div style="font-size:8px; font-weight:900; color:#888; text-transform:uppercase;">' + metaText + '</div>' +
+                       '</div>' +
                        '<div class="hub-name">' + escapeHtml(l.name) + '</div>' +
-                       '<div style="font-size:11px; margin-top:4px; color:#666;">' + escapeHtml(l.description || '') + '</div>' +
+                       '<div style="font-size:11px; margin-top:4px; color:#666; margin-bottom:12px;">' + escapeHtml(l.description || '') + '</div>' +
+                       countHtml +
+                       '<div class="c-btn wa" style="margin-top:0;">Join / Open WhatsApp Hub</div>' +
                        '</a>';
+
+                if (hasAdditional) {
+                    cardHtml += '<div style="background: #f9f9f9; border: 1px solid #eee; border-top: none; padding: 0 16px 16px 16px; margin-bottom: 12px;">';
+                    l.additionalWhatsappGroups.forEach(function(addGrp, idx) {
+                        const addHref = normalizeWhatsappHref(addGrp);
+                        if (addHref) {
+                            cardHtml += '<a href="' + addHref + '" class="c-btn wa" target="_blank" style="margin-top:8px; opacity:0.85;">Open Sub-Group ' + (idx + 1) + '</a>';
+                        }
+                    });
+                    cardHtml += '</div>';
+                }
+                cardHtml += '</div>';
+                
+                return cardHtml;
             }).join('');
+
+            if (!htmlString) {
+                grid.innerHTML = '<div style="padding:40px 20px; text-align:center; font-weight:900; color:#ccc; font-size:12px;">WhatsApp Hub links were selected, but no valid WhatsApp URL was found. Check the link fields in Access Hub setup.</div>';
+                return;
+            }
+
+            grid.innerHTML = htmlString;
         }
 
         function renderVendors() {
