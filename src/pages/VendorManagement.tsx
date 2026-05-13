@@ -27,6 +27,10 @@ import {
   Info,
   Layers,
   Globe,
+  Image as ImageIcon,
+  Upload,
+  CheckCircle2,
+  AlertTriangle,
 } from "lucide-react";
 import {
   TablePanel,
@@ -59,6 +63,8 @@ import {
   PricingPlan,
 } from "../types.ts";
 import { asArray } from "../utils/safeData.ts";
+import { optimizeImageToWebP } from "../utils/imageOptimizer.ts";
+import { vendorAssetService } from "../services/vendorAssetService.ts";
 
 const SECTORS = [
   "General Retail",
@@ -155,6 +161,15 @@ export const VendorManagement: React.FC = () => {
     deliveryStaff: [],
   });
 
+  // Asset Upload State
+  const [logoStatus, setLogoStatus] = useState<string>("");
+  const [bannerStatus, setBannerStatus] = useState<string>("");
+  const [showManualUrls, setShowManualUrls] = useState<boolean>(false);
+
+  const [isSaving, setIsSaving] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [formSuccess, setFormSuccess] = useState("");
+
   useEffect(() => {
     vendorService.migrateVendors();
     loadData();
@@ -243,6 +258,11 @@ export const VendorManagement: React.FC = () => {
 
   const startNewVendor = () => {
     const now = new Date().toISOString();
+    setLogoStatus("");
+    setBannerStatus("");
+    setShowManualUrls(false);
+    setFormError("");
+    setFormSuccess("");
     setFormData({
       id: `VEND-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
       status: "lead",
@@ -264,6 +284,11 @@ export const VendorManagement: React.FC = () => {
   };
 
   const startEditVendor = (vendor: Vendor) => {
+    setLogoStatus("");
+    setBannerStatus("");
+    setShowManualUrls(false);
+    setFormError("");
+    setFormSuccess("");
     setFormData({ ...vendor });
     setFormData((prev) => ({
       ...prev,
@@ -275,33 +300,47 @@ export const VendorManagement: React.FC = () => {
     setView("form");
   };
 
-  const saveVendor = () => {
+  const saveVendor = async () => {
+    setFormError("");
+    setFormSuccess("");
+
     if (!formData.name || !formData.sector) {
-      alert("Name and Sector are required for terminal deployment.");
+      setFormError("Name and Sector are required for terminal deployment.");
       return;
     }
 
-    const now = new Date().toISOString();
-    const vendorToSave = {
-      ...selectedVendor, // Preserve existing fields if not in formData
-      ...formData,
-      updatedAt: now,
-      updatedBy: "STAFF-ADM",
-    } as Vendor;
+    setIsSaving(true);
+    try {
+      const now = new Date().toISOString();
+      const vendorToSave = {
+        ...selectedVendor, // Preserve existing fields if not in formData
+        ...formData,
+        updatedAt: now,
+        updatedBy: "STAFF-ADM",
+      } as Vendor;
 
-    vendorService.updateVendor(vendorToSave);
+      await vendorService.updateVendor(vendorToSave);
 
-    analyticsService.logEvent({
-      eventType: selectedVendor ? "VENDOR_UPDATED" : "VENDOR_CREATED",
-      actorType: "admin",
-      actorName: "System Admin",
-      vendorId: vendorToSave.id,
-      vendorName: vendorToSave.name,
-      details: { action: selectedVendor ? "update" : "creation" },
-    });
+      analyticsService.logEvent({
+        eventType: selectedVendor ? "VENDOR_UPDATED" : "VENDOR_CREATED",
+        actorType: "admin",
+        actorName: "System Admin",
+        vendorId: vendorToSave.id,
+        vendorName: vendorToSave.name,
+        details: { action: selectedVendor ? "update" : "creation" },
+      });
 
-    loadData();
-    setView("list");
+      await loadData();
+      setFormSuccess("Vendor saved successfully.");
+      setTimeout(() => setView("list"), 1500);
+    } catch (error) {
+      console.error("Save vendor error:", error);
+      setFormError(
+        "Vendor was not saved. Check Firebase permissions or login status.",
+      );
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleBranchAdd = () => {
@@ -340,6 +379,90 @@ export const VendorManagement: React.FC = () => {
     });
   };
 
+  const handleLogoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      alert("Only image files are allowed.");
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      alert("File exceeds 8MB limit.");
+      return;
+    }
+
+    setLogoStatus("Optimizing...");
+    try {
+      const optimizedBlob = await optimizeImageToWebP(file, {
+        maxWidth: 512,
+        maxHeight: 512,
+        quality: 0.82,
+      });
+      if (optimizedBlob.size > 200 * 1024) {
+        console.warn(
+          `Optimized logo is still quite large: ${(optimizedBlob.size / 1024).toFixed(1)}KB`,
+        );
+      }
+      setLogoStatus("Uploading...");
+      const vendorId =
+        formData.id ||
+        `VEND-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
+      if (!formData.id) setFormData((prev) => ({ ...prev, id: vendorId }));
+      const url = await vendorAssetService.uploadVendorLogo(
+        vendorId,
+        optimizedBlob,
+      );
+      setFormData((prev) => ({ ...prev, logoUrl: url }));
+      setLogoStatus("Uploaded");
+      setTimeout(() => setLogoStatus(""), 3000);
+    } catch (error) {
+      console.error("Logo upload failed", error);
+      setLogoStatus("Failed");
+    }
+  };
+
+  const handleBannerSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      alert("Only image files are allowed.");
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      alert("File exceeds 8MB limit.");
+      return;
+    }
+
+    setBannerStatus("Optimizing...");
+    try {
+      const optimizedBlob = await optimizeImageToWebP(file, {
+        maxWidth: 1600,
+        maxHeight: 600,
+        quality: 0.82,
+      });
+      if (optimizedBlob.size > 500 * 1024) {
+        console.warn(
+          `Optimized banner is still quite large: ${(optimizedBlob.size / 1024).toFixed(1)}KB`,
+        );
+      }
+      setBannerStatus("Uploading...");
+      const vendorId =
+        formData.id ||
+        `VEND-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
+      if (!formData.id) setFormData((prev) => ({ ...prev, id: vendorId }));
+      const url = await vendorAssetService.uploadVendorBanner(
+        vendorId,
+        optimizedBlob,
+      );
+      setFormData((prev) => ({ ...prev, bannerUrl: url }));
+      setBannerStatus("Uploaded");
+      setTimeout(() => setBannerStatus(""), 3000);
+    } catch (error) {
+      console.error("Banner upload failed", error);
+      setBannerStatus("Failed");
+    }
+  };
+
   if (view === "form") {
     const currentStaff = staffService.getStaffById(
       formData.assignedStaffId || "STAFF-ADM",
@@ -366,15 +489,26 @@ export const VendorManagement: React.FC = () => {
           {permissionService.canEdit("vendorManagement") && (
             <PrimaryButton
               onClick={saveVendor}
-              className={`flex items-center gap-2 ${!permissionService.canEdit("vendorManagement") ? "opacity-50 cursor-not-allowed" : ""}`}
+              disabled={isSaving}
+              className={`flex items-center gap-2 ${!permissionService.canEdit("vendorManagement") || isSaving ? "opacity-50 cursor-not-allowed" : ""}`}
             >
-              <Save size={14} /> Save Changes
+              <Save size={14} /> {isSaving ? "Saving..." : "Save Changes"}
             </PrimaryButton>
           )}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 space-y-8">
+            {formError && (
+              <div className="p-4 border-l-4 border-red-500 bg-red-50 text-red-700 text-xs font-bold uppercase tracking-widest flex items-center gap-2">
+                <AlertTriangle size={16} /> {formError}
+              </div>
+            )}
+            {formSuccess && (
+              <div className="p-4 border-l-4 border-emerald-500 bg-emerald-50 text-emerald-700 text-xs font-bold uppercase tracking-widest flex items-center gap-2">
+                <CheckCircle2 size={16} /> {formSuccess}
+              </div>
+            )}
             {/* Basic Identity */}
             <DataPanel title="General Information">
               <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -495,30 +629,6 @@ export const VendorManagement: React.FC = () => {
                     className="w-full border-2 border-stone-200 p-2.5 text-xs font-bold focus:border-brand-orange outline-none"
                   />
                 </div>
-                <div className="space-y-1.5">
-                  <label className="text-[10px] uppercase font-bold text-stone-400">
-                    Logo Asset URL
-                  </label>
-                  <input
-                    value={formData.logoUrl || ""}
-                    onChange={(e) =>
-                      setFormData({ ...formData, logoUrl: e.target.value })
-                    }
-                    className="w-full border-2 border-stone-200 p-2.5 text-xs font-mono focus:border-brand-orange outline-none"
-                  />
-                </div>
-                <div className="space-y-1.5 md:col-span-2">
-                  <label className="text-[10px] uppercase font-bold text-stone-400">
-                    Banner Asset URL
-                  </label>
-                  <input
-                    value={formData.bannerUrl || ""}
-                    onChange={(e) =>
-                      setFormData({ ...formData, bannerUrl: e.target.value })
-                    }
-                    className="w-full border-2 border-stone-200 p-2.5 text-xs font-mono focus:border-brand-orange outline-none"
-                  />
-                </div>
                 <div className="space-y-1.5 md:col-span-2">
                   <label className="text-[10px] uppercase font-bold text-stone-400">
                     Business Summary / Capability
@@ -565,6 +675,171 @@ export const VendorManagement: React.FC = () => {
                     className="w-full border-2 border-stone-200 p-2.5 text-xs focus:border-brand-orange outline-none font-mono"
                     placeholder="https://whatsapp.com/channel/..."
                   />
+                </div>
+              </div>
+            </DataPanel>
+
+            {/* Identity Assets */}
+            <DataPanel title="Identity Assets">
+              <div className="p-6 space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Logo Upload */}
+                  <div className="border-2 border-stone-100 p-4 bg-stone-50/30">
+                    <h4 className="text-[10px] uppercase font-bold text-stone-400 mb-3 flex items-center gap-1.5">
+                      <ImageIcon size={12} /> Vendor Logo
+                    </h4>
+                    <div className="flex gap-4 items-start">
+                      <div className="w-20 h-20 bg-white border-2 border-stone-200 flex items-center justify-center overflow-hidden shrink-0">
+                        {formData.logoUrl ? (
+                          <img
+                            src={formData.logoUrl}
+                            className="w-full h-full object-contain"
+                            alt="Logo"
+                          />
+                        ) : (
+                          <span className="text-[8px] uppercase font-bold text-stone-300 text-center">
+                            No Logo
+                            <br />
+                            Uploaded
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex-1 space-y-2">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleLogoSelect}
+                          className="hidden"
+                          id="logo-upload"
+                        />
+                        <label
+                          htmlFor="logo-upload"
+                          className="inline-flex items-center gap-2 bg-brand-charcoal text-white px-3 py-1.5 text-[9px] font-bold uppercase tracking-widest cursor-pointer hover:bg-brand-orange transition-colors"
+                        >
+                          <Upload size={10} /> Select Logo
+                        </label>
+                        {logoStatus && (
+                          <p className="text-[9px] font-bold text-brand-orange uppercase">
+                            {logoStatus}
+                          </p>
+                        )}
+                        {formData.logoUrl && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setFormData((prev) => ({ ...prev, logoUrl: "" }))
+                            }
+                            className="block text-[9px] text-red-500 hover:text-red-700 uppercase font-bold mt-2"
+                          >
+                            Remove Logo
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Banner Upload */}
+                  <div className="border-2 border-stone-100 p-4 bg-stone-50/30">
+                    <h4 className="text-[10px] uppercase font-bold text-stone-400 mb-3 flex items-center gap-1.5">
+                      <ImageIcon size={12} /> Vendor Banner
+                    </h4>
+                    <div className="flex gap-4 items-start flex-col sm:flex-row">
+                      <div className="w-full sm:w-32 h-16 bg-white border-2 border-stone-200 flex items-center justify-center overflow-hidden shrink-0">
+                        {formData.bannerUrl ? (
+                          <img
+                            src={formData.bannerUrl}
+                            className="w-full h-full object-cover"
+                            alt="Banner"
+                          />
+                        ) : (
+                          <span className="text-[8px] uppercase font-bold text-stone-300 text-center">
+                            No Banner
+                            <br />
+                            Uploaded
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex-1 space-y-2 w-full">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleBannerSelect}
+                          className="hidden"
+                          id="banner-upload"
+                        />
+                        <label
+                          htmlFor="banner-upload"
+                          className="inline-flex items-center gap-2 bg-brand-charcoal text-white px-3 py-1.5 text-[9px] font-bold uppercase tracking-widest cursor-pointer hover:bg-brand-orange transition-colors"
+                        >
+                          <Upload size={10} /> Select Banner
+                        </label>
+                        {bannerStatus && (
+                          <p className="text-[9px] font-bold text-brand-orange uppercase">
+                            {bannerStatus}
+                          </p>
+                        )}
+                        {formData.bannerUrl && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setFormData((prev) => ({
+                                ...prev,
+                                bannerUrl: "",
+                              }))
+                            }
+                            className="block text-[9px] text-red-500 hover:text-red-700 uppercase font-bold mt-2"
+                          >
+                            Remove Banner
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-4 border-t border-stone-100">
+                  <button
+                    type="button"
+                    onClick={() => setShowManualUrls(!showManualUrls)}
+                    className="text-[10px] font-bold uppercase text-stone-400 hover:text-brand-charcoal transition-colors flex items-center gap-1"
+                  >
+                    {showManualUrls ? "Hide" : "Show"} Advanced: Paste URL
+                    Manually
+                  </button>
+                  {showManualUrls && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 p-4 bg-stone-50 border border-stone-200">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] uppercase font-bold text-stone-400">
+                          Logo Asset URL
+                        </label>
+                        <input
+                          value={formData.logoUrl || ""}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              logoUrl: e.target.value,
+                            })
+                          }
+                          className="w-full border-2 border-stone-200 p-2.5 text-xs font-mono focus:border-brand-orange outline-none"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] uppercase font-bold text-stone-400">
+                          Banner Asset URL
+                        </label>
+                        <input
+                          value={formData.bannerUrl || ""}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              bannerUrl: e.target.value,
+                            })
+                          }
+                          className="w-full border-2 border-stone-200 p-2.5 text-xs font-mono focus:border-brand-orange outline-none"
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </DataPanel>

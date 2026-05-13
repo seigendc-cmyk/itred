@@ -33,20 +33,27 @@ export const generateCatalogueHtml = (
     sector: string;
     category: string;
     expiryDate: string;
+    seigenLogoUrl?: string;
+    companyLogoUrl?: string;
+    systemLogoUrl?: string;
   },
 ): string => {
   const activeProducts = products.filter(
     (p) => p.publishToCatalogue && p.status === "active",
   );
 
-  const displaySector = metadata.sector ? metadata.sector.trim() : "All Sectors";
-  const displayCategory = metadata.category ? metadata.category.trim() : "All Categories";
+  const displaySector = metadata.sector
+    ? metadata.sector.trim()
+    : "All Sectors";
+  const displayCategory = metadata.category
+    ? metadata.category.trim()
+    : "All Categories";
   const displayDate = new Date().toLocaleDateString("en-GB", {
     day: "numeric",
     month: "long",
     year: "numeric",
   });
-  
+
   // Calculate synthetic scores for UI
   const scoredVendors = vendors.map((v) => {
     let score = 50;
@@ -54,7 +61,7 @@ export const generateCatalogueHtml = (
     if (v.branches && v.branches.length > 0) score += 5;
     if (v.whatsappNumber) score += 10;
     if (v.businessDescription && v.businessDescription.length > 50) score += 5;
-    
+
     // Determine fallback score name
     let scoreTier = "New Vendor";
     if (score >= 80) scoreTier = "Trusted Provider";
@@ -63,7 +70,7 @@ export const generateCatalogueHtml = (
     return {
       ...v,
       trustScore: score,
-      trustTier: scoreTier
+      trustTier: scoreTier,
     };
   });
 
@@ -71,24 +78,29 @@ export const generateCatalogueHtml = (
     metadata: metadata,
     products: activeProducts,
     vendors: scoredVendors,
-    cahLinks: cahLinks.filter((l) => l.status === "active" && l.showInCatalogue !== false)
+    cahLinks: cahLinks.filter(
+      (l) => l.status === "active" && l.showInCatalogue !== false,
+    ),
   };
+
+  const logoUrl =
+    metadata.seigenLogoUrl || metadata.companyLogoUrl || metadata.systemLogoUrl;
 
   // Determine Sector Background
   // Simple CSS data URIs for texture
-  let bgImage = 'linear-gradient(135deg, #FF6B00 0%, #2E2E2E 100%)';
+  let bgImage = "linear-gradient(135deg, #FF6B00 0%, #2E2E2E 100%)";
   const s = displaySector.toLowerCase();
-  if (s.includes('motor')) {
+  if (s.includes("motor")) {
     bgImage = `url("data:image/svg+xml,%3Csvg width='40' height='40' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 0h40v40H0V0zm20 20h20v20H20V20zM0 20h20v20H0V20z' fill='%23333' fill-opacity='0.4' fill-rule='evenodd'/%3E%3C/svg%3E"), linear-gradient(135deg, #4b5563, #1f2937)`;
-  } else if (s.includes('agri') || s.includes('farm')) {
+  } else if (s.includes("agri") || s.includes("farm")) {
     bgImage = `url("data:image/svg+xml,%3Csvg width='20' height='20' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='10' cy='10' r='2' fill='%2322c55e' fill-opacity='0.4'/%3E%3C/svg%3E"), linear-gradient(135deg, #166534, #14532d)`;
-  } else if (s.includes('hardware') || s.includes('build')) {
+  } else if (s.includes("hardware") || s.includes("build")) {
     bgImage = `url("data:image/svg+xml,%3Csvg width='10' height='10' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 0l10 10m0-10L0 10' stroke='%23f59e0b' stroke-width='1' stroke-opacity='0.2'/%3E%3C/svg%3E"), linear-gradient(135deg, #78350f, #451a03)`;
-  } else if (s.includes('cloth') || s.includes('fashion')) {
+  } else if (s.includes("cloth") || s.includes("fashion")) {
     bgImage = `url("data:image/svg+xml,%3Csvg width='20' height='20' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 10Q5 5 10 10t10 0v10Q15 15 10 10T0 10z' fill='%23db2777' fill-opacity='0.2'/%3E%3C/svg%3E"), linear-gradient(135deg, #831843, #4c0519)`;
-  } else if (s.includes('prop') || s.includes('real estate')) {
+  } else if (s.includes("prop") || s.includes("real estate")) {
     bgImage = `url("data:image/svg+xml,%3Csvg width='40' height='40' xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='20' height='20' fill='%232563eb' fill-opacity='0.2'/%3E%3C/svg%3E"), linear-gradient(135deg, #1e3a8a, #172554)`;
-  } else if (s.includes('edu')) {
+  } else if (s.includes("edu")) {
     bgImage = `url("data:image/svg+xml,%3Csvg width='30' height='30' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M15 0l15 15-15 15L0 15z' fill='%236b7280' fill-opacity='0.2'/%3E%3C/svg%3E"), linear-gradient(135deg, #374151, #111827)`;
   }
 
@@ -145,12 +157,19 @@ export const generateCatalogueHtml = (
         }
 
         /* Header */
+        .fixed-catalogue-header-wrapper {
+            position: sticky;
+            top: 0;
+            z-index: 900;
+            background: #fff;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.08);
+        }
         .sector-header {
             position: relative;
-            padding: 24px 20px;
+            min-height: 170px;
+            padding: 24px 88px 24px 20px;
             color: #fff;
             background: \${bgImage};
-            min-height: 160px;
             display: flex;
             flex-direction: column;
             justify-content: flex-end;
@@ -164,10 +183,40 @@ export const generateCatalogueHtml = (
             position: relative;
             z-index: 2;
         }
-        .brand-insignia {
-            font-size: 10px; font-weight: 900; text-transform: uppercase;
-            letter-spacing: 1px; margin-bottom: 8px; color: var(--brand-orange);
-            display: flex; align-items: center; gap: 8px;
+        .itred-wordmark {
+            font-size: 16px;
+            font-weight: 900;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+        .itred-i { color: #fff; }
+        .itred-tred { color: var(--brand-orange); }
+        .seigen-logo-badge {
+            position: absolute;
+            bottom: 14px;
+            right: 16px;
+            width: 58px;
+            height: 58px;
+            border-radius: 50%;
+            background: #fff;
+            border: 2px solid #fff;
+            overflow: hidden;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        }
+        .seigen-logo-badge img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+        .seigen-logo-fallback {
+            color: var(--brand-orange);
+            font-weight: 900;
+            font-size: 16px;
+            letter-spacing: 0px;
         }
         .catalogue-title {
             font-size: 24px; font-weight: 900; line-height: 1.1; margin-bottom: 4px;
@@ -179,12 +228,9 @@ export const generateCatalogueHtml = (
 
         /* Search */
         .search-area {
-            padding: 16px 20px;
+            padding: 12px 16px;
             background: #fff;
             border-bottom: 1px solid #eee;
-            position: sticky;
-            top: 0;
-            z-index: 100;
         }
         .search-input {
             width: 100%; padding: 14px 16px;
@@ -291,22 +337,27 @@ export const generateCatalogueHtml = (
 <body>
     <div class="app-shell word-wrap">
         
-        <header class="sector-header">
-            <div class="header-overlay"></div>
-            <div class="header-content">
-                <div class="brand-insignia">
-                    <span>seiGEN Commerce - iTred insignia</span>
+        <div class="fixed-catalogue-header-wrapper">
+            <header class="sector-header">
+                <div class="header-overlay"></div>
+                <div class="header-content">
+                    <div class="itred-wordmark">
+                        <span class="itred-i">i</span><span class="itred-tred">Tred</span>
+                    </div>
+                    <div class="catalogue-subtitle" style="margin-bottom: 8px;">Vendor Product Discovery</div>
+                    <h1 class="catalogue-title" style="font-size: 18px; line-height: 1.4;">SCI | ${escapeHtml(displaySector)} | ${escapeHtml(displayCategory)} | ${displayDate}</h1>
+                    <div class="catalogue-subtitle" style="margin-top: 8px;">Serial: ${escapeHtml(metadata.serialNumber)} // ${jsonData.products.length} Products</div>
+                    <div class="catalogue-subtitle" style="font-size: 9px; margin-top: 4px; color: var(--brand-orange);">Powered by seiGEN Commerce</div>
                 </div>
-                <div class="catalogue-subtitle" style="margin-bottom: 8px;">Vendor Product Discovery</div>
-                <h1 class="catalogue-title" style="font-size: 18px; line-height: 1.4;">SCI | ${escapeHtml(displaySector)} | ${escapeHtml(displayCategory)} | ${displayDate}</h1>
-                <div class="catalogue-subtitle" style="margin-top: 8px;">Serial: ${escapeHtml(metadata.serialNumber)} // ${jsonData.products.length} Products</div>
-                <div class="catalogue-subtitle" style="font-size: 9px; margin-top: 4px; color: var(--brand-orange);">Powered by seiGEN Commerce</div>
-            </div>
-        </header>
+                <div class="seigen-logo-badge">
+                    ${logoUrl ? `<img src="${logoUrl}" alt="Logo" onerror="this.outerHTML='<span class=\\'seigen-logo-fallback\\'>SCI</span>'"/>` : `<span class="seigen-logo-fallback">SCI</span>`}
+                </div>
+            </header>
 
-        <div class="search-area" id="searchArea">
-            <input type="text" id="searchInput" class="search-input" placeholder="Search products, brands, locations...">
-            <div id="searchStats" style="font-size: 9px; font-weight: 900; color: #888; margin-top: 8px; text-transform: uppercase; display: none;"></div>
+            <div class="search-area" id="searchArea">
+                <input type="text" id="searchInput" class="search-input" placeholder="Search products, brands, locations...">
+                <div id="searchStats" style="font-size: 9px; font-weight: 900; color: #888; margin-top: 8px; text-transform: uppercase; display: none;"></div>
+            </div>
         </div>
 
         <main>
@@ -413,6 +464,10 @@ export const generateCatalogueHtml = (
     <script>
         const db = \${JSON.stringify(jsonData)};
 
+        const products = Array.isArray(db.products) ? db.products : [];
+        const vendors = Array.isArray(db.vendors) ? db.vendors : [];
+        const cahLinks = Array.isArray(db.cahLinks) ? db.cahLinks : [];
+
         // Tab Navigation
         document.querySelectorAll('.nav-item').forEach(btn => {
             btn.addEventListener('click', (e) => {
@@ -440,17 +495,20 @@ export const generateCatalogueHtml = (
             if(e.target === productModal) closeModal();
         });
 
-        function getVendor(id) { return db.vendors.find(v => v.id === id); }
-        function getBranch(vendor, id) { return vendor?.branches?.find(b => b.id === id); }
+        function getVendor(id) { return vendorsList.find(v => v.id === id); }
+        function getBranch(vendor, id) { 
+            const branches = vendor && Array.isArray(vendor.branches) ? vendor.branches : [];
+            return branches.find(b => b.id === id); 
+        }
 
         function renderHub() {
             const grid = document.getElementById('hubGrid');
-            if(!db.cahLinks || db.cahLinks.length === 0) {
+            if(cahLinksList.length === 0) {
                 grid.innerHTML = '<p style="font-size:12px; color:#999;">No community hubs available.</p>';
                 return;
             }
 
-            const sortedLinks = [...db.cahLinks].sort((a,b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+            const sortedLinks = [...cahLinksList].sort((a,b) => (a.sortOrder || 0) - (b.sortOrder || 0));
 
             grid.innerHTML = sortedLinks.map(l => {
                 const url = l.whatsappCommunityLink || l.whatsappChannelLink || l.whatsappGroupLink || l.supportNumber;
@@ -468,15 +526,15 @@ export const generateCatalogueHtml = (
 
         function renderVendors() {
             const grid = document.getElementById('vendorGrid');
-            grid.innerHTML = db.vendors.map(v => \`
-                <div class="vendor-card">
-                    <div class="vendor-score">\${escapeHtml(v.trustTier)} (\${v.trustScore}/100)</div>
-                    <div style="font-size: 16px; font-weight: 900; margin-bottom: 4px;">\${escapeHtml(v.name)}</div>
-                    <div style="font-size: 12px; color: #666; margin-bottom: 8px;">\${escapeHtml(v.cityTown)} • \${escapeHtml(v.sector)}</div>
-                    \${v.businessDescription ? \`<p style="font-size:12px; margin-bottom:12px;">\${escapeHtml(v.businessDescription)}</p>\` : ''}
-                    \${v.whatsappNumber ? \`<a href="https://wa.me/\${v.whatsappNumber}" class="c-btn wa" target="_blank">WhatsApp Vendor</a>\` : ''}
-                </div>
-            \`).join('');
+            grid.innerHTML = vendors.map(v => 
+                "<div class=\\"vendor-card\\">" +
+                    "<div class=\\"vendor-score\\">" + escapeHtml(v.trustTier) + " (" + v.trustScore + "/100)</div>" +
+                    "<div style=\\"font-size: 16px; font-weight: 900; margin-bottom: 4px;\\">" + escapeHtml(v.name) + "</div>" +
+                    "<div style=\\"font-size: 12px; color: #666; margin-bottom: 8px;\\">" + escapeHtml(v.cityTown) + " • " + escapeHtml(v.sector) + "</div>" +
+                    (v.businessDescription ? "<p style=\\"font-size:12px; margin-bottom:12px;\\">" + escapeHtml(v.businessDescription) + "</p>" : "") +
+                    (v.whatsappNumber ? "<a href=\\"https://wa.me/" + v.whatsappNumber + "\\" class=\\"c-btn wa\\" target=\\"_blank\\">WhatsApp Vendor</a>" : "") +
+                "</div>"
+            ).join('');
         }
 
         function rankProduct(p, tokens) {
@@ -509,11 +567,17 @@ export const generateCatalogueHtml = (
             const rawQuery = document.getElementById('searchInput').value.toLowerCase().trim();
             const tokens = rawQuery ? rawQuery.split(/\\s+/) : [];
 
-            let filtered = db.products;
+            if (products.length === 0) {
+                grid.innerHTML = '<div style="padding:40px 20px; text-align:center; font-weight:900; color:#ccc;">NO PRODUCTS WERE INCLUDED IN THIS CATALOGUE</div>';
+                stats.style.display = 'none';
+                return;
+            }
+
+            let filtered = products;
 
             if (tokens.length > 0) {
                 // Free-order rules-based match
-                filtered = db.products.map(p => {
+                filtered = products.map(p => {
                     const vendor = getVendor(p.vendorId);
                     const branch = getBranch(vendor, p.branchId);
                     const searchBlob = [
@@ -525,57 +589,58 @@ export const generateCatalogueHtml = (
 
                     const matches = tokens.every(token => searchBlob.includes(token));
                     if(matches) {
-                        return { p, score: rankProduct(p, tokens) };
+                        return { p: p, score: rankProduct(p, tokens) };
                     }
                     return null;
                 }).filter(x => x).sort((a,b) => b.score - a.score).map(x => x.p);
                 
                 stats.style.display = 'block';
-                stats.textContent = \`\${filtered.length} Results Ranked\`;
+                stats.textContent = filtered.length + " Results Ranked";
             } else {
                 stats.style.display = 'none';
             }
 
             if(filtered.length === 0) {
-                grid.innerHTML = '<div style="padding:40px 20px; text-align:center; font-weight:900; color:#ccc;">NO PRODUCTS FOUND</div>';
+                grid.innerHTML = '<div style="padding:40px 20px; text-align:center; font-weight:900; color:#ccc;">NO PRODUCTS FOUND FOR THIS SEARCH</div>';
                 return;
             }
 
             grid.innerHTML = filtered.map(p => {
                 const vendor = getVendor(p.vendorId);
                 const branch = getBranch(vendor, p.branchId);
-                const location = branch?.cityTown || vendor?.cityTown || 'Various';
+                const location = branch?.cityTown || vendor?.cityTown || p.branchName || 'Various';
+                const vendorName = vendor?.name || p.vendorName || 'Vendor';
                 
-                return \`
-                    <div class="card" onclick="openProduct('\${p.id}')">
-                        <div class="card-img-wrap">
-                            \${p.imageUrl ? \`<img src="\${p.imageUrl}" class="card-img" loading="lazy">\` : '<span style="font-size:8px; font-weight:900; color:#ccc;">NO IMG</span>'}
-                        </div>
-                        <div class="card-info">
-                            <div class="c-vendor">\${escapeHtml(vendor?.name || 'Vendor')}</div>
-                            <div class="c-title">\${escapeHtml(p.name)}</div>
-                            <div class="c-price">$\${(p.sellingPrice || 0).toFixed(2)}</div>
-                            <div class="c-meta">
-                                <span>\${p.stockQuantity > 0 ? 'IN STOCK' : 'OUT OF STOCK'}</span>
-                                <span>\${escapeHtml(location)}</span>
-                            </div>
-                        </div>
-                    </div>
-                \`;
+                return "<div class=\\"card\\" onclick=\\"openProduct('" + p.id + "')\\">" +
+                        "<div class=\\"card-img-wrap\\">" +
+                            (p.imageUrl ? "<img src=\\"" + p.imageUrl + "\\" class=\\"card-img\\" loading=\\"lazy\\">" : "<span style=\\"font-size:8px; font-weight:900; color:#ccc;\\">NO IMG</span>") +
+                        "</div>" +
+                        "<div class=\\"card-info\\">" +
+                            "<div class=\\"c-vendor\\">" + escapeHtml(vendorName) + "</div>" +
+                            "<div class=\\"c-title\\">" + escapeHtml(p.name) + "</div>" +
+                            "<div class=\\"c-price\\">$" + (p.sellingPrice || 0).toFixed(2) + "</div>" +
+                            "<div class=\\"c-meta\\">" +
+                                "<span>" + (p.stockQuantity > 0 ? 'IN STOCK' : 'OUT OF STOCK') + "</span>" +
+                                "<span>" + escapeHtml(location) + "</span>" +
+                            "</div>" +
+                        "</div>" +
+                    "</div>";
             }).join('');
         }
 
         window.openProduct = function(id) {
-            const p = db.products.find(x => x.id === id);
+            const p = products.find(x => x.id === id);
             if(!p) return;
             const vendor = getVendor(p.vendorId);
             const branch = getBranch(vendor, p.branchId);
 
             document.getElementById('modalImageContainer').innerHTML = p.imageUrl 
-                ? \`<img src="\${p.imageUrl}" class="m-image">\`
-                : \`<div class="m-image" style="display:flex;align-items:center;justify-content:center;color:#ccc;font-weight:900;">NO IMAGE</div>\`;
+                ? "<img src=\\"" + p.imageUrl + "\\" class=\\"m-image\\">"
+                : "<div class=\\"m-image\\" style=\\"display:flex;align-items:center;justify-content:center;color:#ccc;font-weight:900;\\">NO IMAGE</div>";
 
-            document.getElementById('m-vendor').textContent = vendor?.name || 'Vendor';
+            const vendorName = vendor?.name || p.vendorName || 'Vendor';
+
+            document.getElementById('m-vendor').textContent = vendorName;
             document.getElementById('m-title').textContent = p.name;
             document.getElementById('m-price').textContent = '$' + (p.sellingPrice || 0).toFixed(2);
             document.getElementById('m-desc').textContent = p.description || 'No description provided.';
@@ -583,19 +648,18 @@ export const generateCatalogueHtml = (
             document.getElementById('m-sku').textContent = p.sku || 'N/A';
             document.getElementById('m-cat').textContent = p.category || 'N/A';
             document.getElementById('m-sec').textContent = p.sector || 'N/A';
-            document.getElementById('m-stock').textContent = p.stockQuantity > 0 ? \`\${p.stockQuantity} In Stock\` : 'Out of Stock';
+            document.getElementById('m-stock').textContent = p.stockQuantity > 0 ? p.stockQuantity + ' In Stock' : 'Out of Stock';
 
-            document.getElementById('mv-name').textContent = vendor?.name || 'N/A';
-            document.getElementById('mv-score').textContent = vendor?.trustTier ? \`\${vendor.trustTier} (\${vendor.trustScore})\` : 'New Vendor';
-            document.getElementById('mv-loc').textContent = vendor ? \`\${vendor.streetAddress || ''} \${vendor.cityTown || ''} \${vendor.province || ''}\` : 'N/A';
+            document.getElementById('mv-name').textContent = vendorName;
+            document.getElementById('mv-score').textContent = vendor?.trustTier ? vendor.trustTier + ' (' + vendor.trustScore + ')' : 'New Vendor';
+            document.getElementById('mv-loc').textContent = vendor ? (vendor.streetAddress || '') + ' ' + (vendor.cityTown || '') + ' ' + (vendor.province || '') : 'N/A';
             document.getElementById('mv-hours').textContent = vendor?.openingHours || 'Not provided';
 
             if(branch) {
-                document.getElementById('m-branch').innerHTML = \`
-                    <div class="m-row"><span class="m-lbl">Branch Name</span><span class="m-val">\${escapeHtml(branch.name)}</span></div>
-                    <div class="m-row"><span class="m-lbl">Address</span><span class="m-val">\${escapeHtml(branch.address)}, \${escapeHtml(branch.cityTown)}</span></div>
-                    <div class="m-row"><span class="m-lbl">Contact</span><span class="m-val">\${escapeHtml(branch.phone || branch.whatsapp || 'N/A')}</span></div>
-                \`;
+                document.getElementById('m-branch').innerHTML = 
+                    "<div class=\\"m-row\\"><span class=\\"m-lbl\\">Branch Name</span><span class=\\"m-val\\">" + escapeHtml(branch.name) + "</span></div>" +
+                    "<div class=\\"m-row\\"><span class=\\"m-lbl\\">Address</span><span class=\\"m-val\\">" + escapeHtml(branch.address) + ", " + escapeHtml(branch.cityTown) + "</span></div>" +
+                    "<div class=\\"m-row\\"><span class=\\"m-lbl\\">Contact</span><span class=\\"m-val\\">" + escapeHtml(branch.phone || branch.whatsapp || 'N/A') + "</span></div>";
             } else {
                 document.getElementById('m-branch').innerHTML = '<div class="m-val">Branch details not supplied</div>';
             }
@@ -604,13 +668,13 @@ export const generateCatalogueHtml = (
             let actions = '';
             const phone = branch?.phone || vendor?.mainPhone;
             const wa = branch?.whatsapp || vendor?.whatsappNumber;
-            const msg = encodeURIComponent(\`Hi, I'm interested in \${p.name} (SKU: \${p.sku || 'N/A'}) priced at $\${(p.sellingPrice||0).toFixed(2)} from the iTred Catalogue.\`);
+            const msg = encodeURIComponent("Hi, I'm interested in " + p.name + " (SKU: " + (p.sku || 'N/A') + ") priced at $" + (p.sellingPrice||0).toFixed(2) + " from the iTred Catalogue.");
             
             if(wa) {
-                actions += \`<a href="https://wa.me/\${wa.replace(/[^0-9]/g, '')}?text=\${msg}" class="c-btn wa" target="_blank">Order on WhatsApp</a>\`;
+                actions += "<a href=\\"https://wa.me/" + wa.replace(/[^0-9]/g, '') + "?text=" + msg + "\\" class=\\"c-btn wa\\" target=\\"_blank\\">Order on WhatsApp</a>";
             }
             if(phone) {
-                actions += \`<a href="tel:\${phone}" class="c-btn" target="_blank">Call Procurement</a>\`;
+                actions += "<a href=\\"tel:" + phone + "\\" class=\\"c-btn\\" target=\\"_blank\\">Call Procurement</a>";
             }
             document.getElementById('m-actions').innerHTML = actions;
 

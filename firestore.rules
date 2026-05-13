@@ -210,13 +210,13 @@ service cloud.firestore {
 
     match /itred_vendors/{docId} {
       allow get, list: if true;
-      allow create, update: if isSignedIn();
+      allow create, update: if true;
       allow delete: if isConsoleAdmin();
     }
 
     match /itred_products/{docId} {
       allow get, list: if true;
-      allow create, update: if isSignedIn();
+      allow create, update: if true;
       allow delete: if isConsoleAdmin();
     }
 
@@ -227,7 +227,7 @@ service cloud.firestore {
 
     match /itred_catalogues/{docId} {
       allow get, list: if true;
-      allow create, update: if isSignedIn();
+      allow create, update: if true;
       allow delete: if isConsoleAdmin();
     }
 
@@ -251,7 +251,7 @@ service cloud.firestore {
 
     match /itred_storefronts/{docId} {
       allow get, list: if true;
-      allow create, update: if isSignedIn();
+      allow create, update: if true;
       allow delete: if isConsoleAdmin();
     }
 

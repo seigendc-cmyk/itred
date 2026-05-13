@@ -287,6 +287,7 @@ export const firebaseAdapter: StorageAdapter = {
       }
     } catch (err) {
       console.error(`Firebase Error: Failed to set data for "${key}"`, err);
+      throw err;
     }
   },
   removeItem: async (key: string): Promise<void> => {

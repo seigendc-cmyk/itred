@@ -75,79 +75,86 @@ export const vendorService = {
   },
 
   updateVendor: async (vendor: Vendor): Promise<void> => {
-    const vendors = await vendorService.getVendors();
-    const index = vendors.findIndex((v) => v.id === vendor.id);
-    const oldVendor = index >= 0 ? vendors[index] : null;
+    console.log("Saving vendor to itred_vendors");
+    try {
+      const vendors = await vendorService.getVendors();
+      const index = vendors.findIndex((v) => v.id === vendor.id);
+      const oldVendor = index >= 0 ? vendors[index] : null;
 
-    if (index >= 0) {
-      vendors[index] = vendor;
+      if (index >= 0) {
+        vendors[index] = vendor;
 
-      if (
-        oldVendor &&
-        oldVendor.assignedRPNId !== vendor.assignedRPNId &&
-        vendor.assignedRPNId
-      ) {
-        await analyticsService.logEvent({
-          eventType: "VENDOR_ASSIGNED_TO_RPN",
-          actorType: "admin",
-          actorName: "System Admin",
-          vendorId: vendor.id,
-          vendorName: vendor.name,
-          details: { rpnId: vendor.assignedRPNId },
-        });
-      }
-
-      // Check subscription status changes
-      if (
-        oldVendor &&
-        oldVendor.subscriptionStatus !== vendor.subscriptionStatus
-      ) {
-        if (vendor.subscriptionStatus === "due") {
+        if (
+          oldVendor &&
+          oldVendor.assignedRPNId !== vendor.assignedRPNId &&
+          vendor.assignedRPNId
+        ) {
           await analyticsService.logEvent({
-            eventType: "SUBSCRIPTION_DUE",
-            actorType: "system",
-            actorName: "Subscription Engine",
+            eventType: "VENDOR_ASSIGNED_TO_RPN",
+            actorType: "admin",
+            actorName: "System Admin",
             vendorId: vendor.id,
             vendorName: vendor.name,
-            details: { status: "due" },
-          });
-        } else if (vendor.subscriptionStatus === "overdue") {
-          await analyticsService.logEvent({
-            eventType: "SUBSCRIPTION_OVERDUE",
-            actorType: "system",
-            actorName: "Subscription Engine",
-            vendorId: vendor.id,
-            vendorName: vendor.name,
-            details: { status: "overdue" },
+            details: { rpnId: vendor.assignedRPNId },
           });
         }
-      }
-    } else {
-      if (!vendor.systemCode) {
-        vendor.systemCode = vendorService.generateSystemCode(vendors);
+
+        // Check subscription status changes
+        if (
+          oldVendor &&
+          oldVendor.subscriptionStatus !== vendor.subscriptionStatus
+        ) {
+          if (vendor.subscriptionStatus === "due") {
+            await analyticsService.logEvent({
+              eventType: "SUBSCRIPTION_DUE",
+              actorType: "system",
+              actorName: "Subscription Engine",
+              vendorId: vendor.id,
+              vendorName: vendor.name,
+              details: { status: "due" },
+            });
+          } else if (vendor.subscriptionStatus === "overdue") {
+            await analyticsService.logEvent({
+              eventType: "SUBSCRIPTION_OVERDUE",
+              actorType: "system",
+              actorName: "Subscription Engine",
+              vendorId: vendor.id,
+              vendorName: vendor.name,
+              details: { status: "overdue" },
+            });
+          }
+        }
+      } else {
+        if (!vendor.systemCode) {
+          vendor.systemCode = vendorService.generateSystemCode(vendors);
+          await analyticsService.logEvent({
+            eventType: "VENDOR_SYSTEM_CODE_GENERATED",
+            actorType: "admin",
+            actorName: "System Admin",
+            vendorId: vendor.id,
+            vendorName: vendor.name,
+            details: {
+              systemCode: vendor.systemCode,
+              reason: "new_registration",
+            },
+          });
+        }
+        vendors.push(vendor);
         await analyticsService.logEvent({
-          eventType: "VENDOR_SYSTEM_CODE_GENERATED",
+          eventType: "VENDOR_CREATED",
           actorType: "admin",
           actorName: "System Admin",
           vendorId: vendor.id,
           vendorName: vendor.name,
-          details: {
-            systemCode: vendor.systemCode,
-            reason: "new_registration",
-          },
+          details: { name: vendor.name, tradingName: vendor.tradingName },
         });
       }
-      vendors.push(vendor);
-      await analyticsService.logEvent({
-        eventType: "VENDOR_CREATED",
-        actorType: "admin",
-        actorName: "System Admin",
-        vendorId: vendor.id,
-        vendorName: vendor.name,
-        details: { name: vendor.name, tradingName: vendor.tradingName },
-      });
+      await vendorService.saveVendors(vendors);
+      console.log("Vendor saved successfully");
+    } catch (error) {
+      console.error("Vendor save failed", error);
+      throw error;
     }
-    await vendorService.saveVendors(vendors);
   },
 
   deleteVendor: async (id: string): Promise<void> => {

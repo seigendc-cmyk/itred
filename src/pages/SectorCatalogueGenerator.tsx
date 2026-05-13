@@ -369,8 +369,10 @@ export const SectorCatalogueGenerator: React.FC = () => {
           sector: config.sector,
           category: config.category,
           expiryDate: expiry.toISOString(),
+          seigenLogoUrl: contactSettings?.seigenLogoUrl,
+          companyLogoUrl: contactSettings?.companyLogoUrl,
+          systemLogoUrl: contactSettings?.systemLogoUrl,
         },
-        contactSettings,
       );
 
       const newId = `CAT-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;

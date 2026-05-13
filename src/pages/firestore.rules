@@ -3,12 +3,14 @@ service cloud.firestore {
   match /databases/{database}/documents {
     // TEMP DEV ONLY - Fallback for missing vendorId records
     match /itred_activity_logs/{docId} {
-      allow read, list, create, update: if request.auth != null;
-      allow delete: if request.auth != null; // Simplified dev fallback
+      allow get, list: if true;
+      allow create, update: if true;
+      allow delete: if isConsoleAdmin();
     }
     match /itred_catalogue_history/{docId} {
-      allow read, list, create, update: if request.auth != null;
-      allow delete: if request.auth != null;
+      allow get, list: if true;
+      allow create, update: if true;
+      allow delete: if isConsoleAdmin();
     }
     match /itred_vendors/{docId} {
       allow read, list, create, update: if request.auth != null;
