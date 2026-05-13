@@ -52,6 +52,8 @@ export const PricingPlans: React.FC = () => {
 
   const [newFeature, setNewFeature] = useState("");
 
+  const [isSavingPlan, setIsSavingPlan] = useState(false);
+
   const safePlans = asArray<PricingPlan>(plans);
   const safeVendors = asArray<Vendor>(vendors);
   const safeProducts = asArray<Product>(products);
@@ -109,66 +111,78 @@ export const PricingPlans: React.FC = () => {
       return;
     }
 
-    const planToSave = {
-      ...editingPlan,
-      id: editingPlan.id || `plan-${Date.now()}`,
-      status: editingPlan.status || "active",
-      monthlyPrice: Number(editingPlan.monthlyPrice) || 0,
-      currency: editingPlan.currency || "USD",
-      maxProducts: Number(editingPlan.maxProducts) || 0,
-      maxVendorsPerCatalogue: Number(editingPlan.maxVendorsPerCatalogue) || 1,
-      maxImagesPerCatalogue: Number(editingPlan.maxImagesPerCatalogue) || 0,
-      deploymentFrequency: editingPlan.deploymentFrequency || "monthly",
-      maxDeploymentsPerMonth: Number(editingPlan.maxDeploymentsPerMonth) || 0,
-      maxCahLinks: Number(editingPlan.maxCahLinks) || 0,
-      maxBranchesPerVendor: Number(editingPlan.maxBranchesPerVendor) || 1,
-      maxStaffPerVendor: Number(editingPlan.maxStaffPerVendor) || 1,
-      maxDeliveryContactsPerVendor:
-        Number(editingPlan.maxDeliveryContactsPerVendor) || 1,
-      isWhatsAppProductButtonEnabled:
-        !!editingPlan.isWhatsAppProductButtonEnabled,
-      isDirectCallProductButtonEnabled:
-        !!editingPlan.isDirectCallProductButtonEnabled,
-      isVendorWhatsAppGroupLinkEnabled:
-        !!editingPlan.isVendorWhatsAppGroupLinkEnabled,
-      isVendorWhatsAppChannelLinkEnabled:
-        !!editingPlan.isVendorWhatsAppChannelLinkEnabled,
-      isInventorySpotCheckIncluded: !!editingPlan.isInventorySpotCheckIncluded,
-      inventorySpotChecksPerMonth:
-        Number(editingPlan.inventorySpotChecksPerMonth) || 0,
-      biAnalyticsLevel: editingPlan.biAnalyticsLevel || "none",
-      rpnSupportLevel: editingPlan.rpnSupportLevel || "none",
-      isCollectionReminderEnabled: !!editingPlan.isCollectionReminderEnabled,
-      isHostedCatalogueSupportEnabled:
-        !!editingPlan.isHostedCatalogueSupportEnabled,
-      isVendorStorefrontBuilderEnabled:
-        !!editingPlan.isVendorStorefrontBuilderEnabled,
-      maxStorefrontImages: Number(editingPlan.maxStorefrontImages) || 0,
-      maxStorefrontDeploymentsPerMonth:
-        Number(editingPlan.maxStorefrontDeploymentsPerMonth) || 0,
-      features: asArray<string>(editingPlan.features),
-      createdBy: editingPlan.createdBy || "Admin",
-      updatedBy: "Admin",
-      createdAt: editingPlan.createdAt || new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    } as PricingPlan;
+    setIsSavingPlan(true);
 
-    await pricingPlanService.savePlan(planToSave);
+    try {
+      const planToSave = {
+        ...editingPlan,
+        id: editingPlan.id || `plan-${Date.now()}`,
+        status: editingPlan.status || "active",
+        monthlyPrice: Number(editingPlan.monthlyPrice) || 0,
+        currency: editingPlan.currency || "USD",
+        maxProducts: Number(editingPlan.maxProducts) || 0,
+        maxVendorsPerCatalogue: Number(editingPlan.maxVendorsPerCatalogue) || 1,
+        maxImagesPerCatalogue: Number(editingPlan.maxImagesPerCatalogue) || 0,
+        deploymentFrequency: editingPlan.deploymentFrequency || "monthly",
+        maxDeploymentsPerMonth: Number(editingPlan.maxDeploymentsPerMonth) || 0,
+        maxCahLinks: Number(editingPlan.maxCahLinks) || 0,
+        maxBranchesPerVendor: Number(editingPlan.maxBranchesPerVendor) || 1,
+        maxStaffPerVendor: Number(editingPlan.maxStaffPerVendor) || 1,
+        maxDeliveryContactsPerVendor:
+          Number(editingPlan.maxDeliveryContactsPerVendor) || 1,
+        isWhatsAppProductButtonEnabled:
+          !!editingPlan.isWhatsAppProductButtonEnabled,
+        isDirectCallProductButtonEnabled:
+          !!editingPlan.isDirectCallProductButtonEnabled,
+        isVendorWhatsAppGroupLinkEnabled:
+          !!editingPlan.isVendorWhatsAppGroupLinkEnabled,
+        isVendorWhatsAppChannelLinkEnabled:
+          !!editingPlan.isVendorWhatsAppChannelLinkEnabled,
+        isInventorySpotCheckIncluded:
+          !!editingPlan.isInventorySpotCheckIncluded,
+        inventorySpotChecksPerMonth:
+          Number(editingPlan.inventorySpotChecksPerMonth) || 0,
+        biAnalyticsLevel: editingPlan.biAnalyticsLevel || "none",
+        rpnSupportLevel: editingPlan.rpnSupportLevel || "none",
+        isCollectionReminderEnabled: !!editingPlan.isCollectionReminderEnabled,
+        isHostedCatalogueSupportEnabled:
+          !!editingPlan.isHostedCatalogueSupportEnabled,
+        isVendorStorefrontBuilderEnabled:
+          !!editingPlan.isVendorStorefrontBuilderEnabled,
+        maxStorefrontImages: Number(editingPlan.maxStorefrontImages) || 0,
+        maxStorefrontDeploymentsPerMonth:
+          Number(editingPlan.maxStorefrontDeploymentsPerMonth) || 0,
+        features: asArray<string>(editingPlan.features),
+        createdBy: editingPlan.createdBy || "Admin",
+        updatedBy: "Admin",
+        createdAt: editingPlan.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      } as PricingPlan;
 
-    analyticsService.logEvent({
-      eventType: editingPlan.id ? "PLAN_UPDATED" : "PLAN_CREATED",
-      actorType: "admin",
-      actorName: "System Admin",
-      details: {
-        planId: planToSave.id,
-        name: planToSave.name,
-        price: planToSave.monthlyPrice,
-      },
-    });
+      await pricingPlanService.savePlan(planToSave);
 
-    await loadData();
-    setIsFormOpen(false);
-    setEditingPlan(null);
+      analyticsService.logEvent({
+        eventType: editingPlan.id ? "PLAN_UPDATED" : "PLAN_CREATED",
+        actorType: "admin",
+        actorName: "System Admin",
+        details: {
+          planId: planToSave.id,
+          name: planToSave.name,
+          price: planToSave.monthlyPrice,
+        },
+      });
+
+      await loadData();
+      setIsFormOpen(false);
+      setEditingPlan(null);
+    } catch (error) {
+      console.error("Pricing plan save failed", error);
+      alert(
+        "Pricing plan was not saved. Check Firebase permissions or network.",
+      );
+    } finally {
+      setIsSavingPlan(false);
+    }
   };
 
   const handleDeletePlan = async (id: string) => {
@@ -876,8 +890,9 @@ export const PricingPlans: React.FC = () => {
                 <button
                   type="submit"
                   className="flex-1 btn btn-primary py-5 text-sm"
+                  disabled={isSavingPlan}
                 >
-                  Save Pricing Plan
+                  {isSavingPlan ? "Saving..." : "Save Pricing Plan"}
                 </button>
                 <button
                   type="button"
