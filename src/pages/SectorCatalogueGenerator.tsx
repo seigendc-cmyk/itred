@@ -56,6 +56,23 @@ import { settingsService } from "../services/settingsService.ts";
 import { focusMainContent } from "../utils/uiHelpers.ts";
 import { WhatsAppActivityQuickLog } from "../components/WhatsAppActivityQuickLog.tsx";
 
+async function assetUrlToDataUri(url: string): Promise<string> {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return "";
+    const blob = await response.blob();
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = () => resolve("");
+      reader.readAsDataURL(blob);
+    });
+  } catch (error) {
+    console.warn("Failed to convert asset to Data URI", error);
+    return "";
+  }
+}
+
 interface CatalogueConfig {
   id: string;
   serialNumber: string;
@@ -413,6 +430,13 @@ export const SectorCatalogueGenerator: React.FC = () => {
       const expiry = new Date();
       expiry.setDate(now.getDate() + config.expiryPeriodDays);
 
+      let seigenLogoDataUri = "";
+      try {
+        seigenLogoDataUri = await assetUrlToDataUri(
+          "/brand/seigen-commerce-logo.png",
+        );
+      } catch (e) {}
+
       const html = generateCatalogueHtml(
         selectedVendors,
         allSelectedProducts,
@@ -423,10 +447,11 @@ export const SectorCatalogueGenerator: React.FC = () => {
           sector: config.sector,
           category: config.category,
           expiryDate: expiry.toISOString(),
+          seigenLogoDataUri,
           seigenLogoUrl:
             systemSettings?.seigenLogoUrl ||
             contactSettings?.seigenLogoUrl ||
-            "/brand/seigen-commerce-logo.png",
+            "",
           companyLogoUrl: contactSettings?.companyLogoUrl,
           systemLogoUrl: contactSettings?.systemLogoUrl,
         },

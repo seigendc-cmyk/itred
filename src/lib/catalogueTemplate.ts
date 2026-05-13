@@ -33,6 +33,7 @@ export const generateCatalogueHtml = (
     sector: string;
     category: string;
     expiryDate: string;
+    seigenLogoDataUri?: string;
     seigenLogoUrl?: string;
     companyLogoUrl?: string;
     systemLogoUrl?: string;
@@ -181,7 +182,7 @@ export const generateCatalogueHtml = (
             flex-direction: column;
             justify-content: flex-end;
             overflow: hidden;
-            transition: min-height 180ms ease, padding 180ms ease, opacity 180ms ease;
+            transition: min-height 180ms ease, padding 180ms ease;
         }
         .fixed-catalogue-header-wrapper.is-compact .sector-header {
             min-height: 74px;
@@ -241,6 +242,7 @@ export const generateCatalogueHtml = (
             width: 100%;
             height: 100%;
             object-fit: contain;
+            display: block;
         }
         .seigen-logo-fallback {
             color: var(--brand-orange);
@@ -760,8 +762,7 @@ export const generateCatalogueHtml = (
 
         function applyHeaderState() {
             if (!headerWrapper) return;
-            var shouldCompact = window.scrollY > compactThreshold;
-            if (shouldCompact) {
+            if (window.scrollY > compactThreshold) {
                 headerWrapper.classList.add("is-compact");
             } else {
                 headerWrapper.classList.remove("is-compact");
