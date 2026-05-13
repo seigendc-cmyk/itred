@@ -508,6 +508,18 @@ export const SectorCatalogueGenerator: React.FC = () => {
         console.warn("Failed to embed default seiGEN logo", error);
       }
 
+      const newId = `CAT-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+      const finalId =
+        mode === "update" && editingCatalogueId ? editingCatalogueId : newId;
+
+      const publicSlug = `${config.sector}-${config.category}-${finalId}`
+        .toLowerCase()
+        .replace(/\s+/g, "-")
+        .replace(/[^a-z0-9-]/g, "")
+        .replace(/-+/g, "-");
+
+      const hostedUrl = "";
+
       const html = generateCatalogueHtml(
         selectedVendors,
         allSelectedProducts,
@@ -528,10 +540,6 @@ export const SectorCatalogueGenerator: React.FC = () => {
           hostedUrl,
         },
       );
-
-      const newId = `CAT-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
-      const finalId =
-        mode === "update" && editingCatalogueId ? editingCatalogueId : newId;
 
       const displaySector = config.sector
         ? config.sector.trim()
@@ -582,6 +590,7 @@ export const SectorCatalogueGenerator: React.FC = () => {
         fileName: finalFileName,
         htmlContent: html,
         hostedUrl,
+        publicSlug,
         configSnapshot: configSnapshot,
       };
 
