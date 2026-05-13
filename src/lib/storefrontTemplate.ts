@@ -94,8 +94,8 @@ export const generateVendorStorefrontHtml = (
             <span>Packaging: ${escapeHtml(product.packagingType || "N/A")} ${escapeHtml(product.packagingSize || "")} • Min Order: ${escapeHtml(product.minimumOrderQuantity || 1)}</span>
           </div>
           <div class="product-footer">
-            <span class="product-price">USD ${product.sellingPrice.toFixed(2)}</span>
-            ${allowWhatsApp && mainWhatsapp ? `<a class="btn btn-primary" href="${mainWhatsapp}?text=${encodeURIComponent(`Inquiry about ${product.name} (${product.cropType || "Crop"})`)}" target="_blank" rel="noreferrer" style="font-size: 0.8rem; padding: 8px 12px;">WhatsApp</a>` : ""}
+            <span class="product-price">USD ${(product.sellingPrice || 0).toFixed(2)}</span>
+            <button type="button" class="btn-primary" onclick="addToCart('${escapeHtml(product.id)}')">Add to Cart</button>
             <button type="button" class="btn-secondary view-details" data-detail-id="product-${globalIndex}">Details</button>
           </div>
         </div>
@@ -143,14 +143,14 @@ export const generateVendorStorefrontHtml = (
       `;
 
             return `
-      <article class="product-card" data-product-name="${escapeHtml(product.name.toLowerCase())}" data-product-category="${escapeHtml(product.category.toLowerCase())}" data-product-branch="${escapeHtml(product.branchName?.toLowerCase())}" data-is-farm-produce="${isFarmProduce}">
+      <article class="product-card" data-product-name="${escapeHtml(product.name.toLowerCase())}" data-product-category="${escapeHtml(product.category.toLowerCase())}" data-product-branch="${escapeHtml(product.branchName?.toLowerCase() || "")}" data-is-farm-produce="${isFarmProduce ? "true" : "false"}">
         <button type="button" class="product-media" data-detail-id="product-${index}">
           <img src="${imageSrc}" alt="${escapeHtml(product.name)}" loading="lazy" decoding="async" />
         </button>
         <div class="product-card-body">
           ${farmProduceDetails}
           <div class="product-footer">
-            <span class="product-price">USD ${product.sellingPrice.toFixed(2)}</span>
+            <span class="product-price">USD ${(product.sellingPrice || 0).toFixed(2)}</span>
             <button type="button" class="btn-primary" onclick="addToCart('${escapeHtml(product.id)}')">Add to Cart</button>
             <button type="button" class="btn-secondary view-details" data-detail-id="product-${index}">Quick view</button>
           </div>
@@ -166,10 +166,10 @@ export const generateVendorStorefrontHtml = (
   const branchRows = branches
     .map((branch) => {
       const waLink = cleanWa(branch.whatsapp)
-        ? `<a href="https://wa.me/${cleanWa(branch.whatsapp)}" class="btn btn-primary" style="flex:1; font-size:0.75rem; padding:8px;" target="_blank">WhatsApp</a>`
+        ? `<a href="https://wa.me/${cleanWa(branch.whatsapp)}" class="btn btn-primary" style="flex:1; font-size:0.75rem; padding:8px; min-width:80px;" target="_blank">WhatsApp</a>`
         : "";
       const callLink = cleanPhone(branch.phone)
-        ? `<a href="tel:${cleanPhone(branch.phone)}" class="btn btn-secondary" style="flex:1; font-size:0.75rem; padding:8px;">Call</a>`
+        ? `<a href="tel:${cleanPhone(branch.phone)}" class="btn btn-secondary" style="flex:1; font-size:0.75rem; padding:8px; min-width:80px;">Call</a>`
         : "";
       return `
       <div class="info-card">
@@ -177,10 +177,10 @@ export const generateVendorStorefrontHtml = (
         <div style="font-size:0.85rem; display:grid; gap:4px; margin-top:8px;">
           <span><strong>Address:</strong> ${escapeHtml(branch.address || "Not supplied")}</span>
           <span><strong>District/Suburb:</strong> ${escapeHtml(branch.district || "Not supplied")} / ${escapeHtml(branch.suburb || "Not supplied")}</span>
-          <span><strong>Contact:</strong> ${escapeHtml(branch.contactPerson || "Not supplied")}</span>
+          <span><strong>Contact:</strong> ${escapeHtml(branch.managerName || "Not supplied")}</span>
           <span><strong>Hours:</strong> ${escapeHtml(branch.openingHours || "Not supplied")}</span>
         </div>
-        <div style="display:flex; gap:8px; margin-top:12px;">${callLink}${waLink}</div>
+        <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:12px;">${callLink}${waLink}</div>
       </div>
     `;
     })
@@ -189,19 +189,18 @@ export const generateVendorStorefrontHtml = (
   const staffRows = staff
     .map((person) => {
       const waLink = cleanWa(person.whatsapp)
-        ? `<a href="https://wa.me/${cleanWa(person.whatsapp)}" class="btn btn-primary" style="flex:1; font-size:0.75rem; padding:8px;" target="_blank">WhatsApp</a>`
+        ? `<a href="https://wa.me/${cleanWa(person.whatsapp)}" class="btn btn-primary" style="flex:1; font-size:0.75rem; padding:8px; min-width:80px;" target="_blank">WhatsApp</a>`
         : "";
       const callLink = cleanPhone(person.phone)
-        ? `<a href="tel:${cleanPhone(person.phone)}" class="btn btn-secondary" style="flex:1; font-size:0.75rem; padding:8px;">Call</a>`
+        ? `<a href="tel:${cleanPhone(person.phone)}" class="btn btn-secondary" style="flex:1; font-size:0.75rem; padding:8px; min-width:80px;">Call</a>`
         : "";
       return `
       <div class="info-card">
         <strong style="font-size:1.1rem; color:var(--orange);">${escapeHtml(person.fullName || "Not supplied")}</strong>
         <div style="font-size:0.85rem; display:grid; gap:4px; margin-top:8px;">
           <span><strong>Role:</strong> ${escapeHtml(person.role || "Not supplied")}</span>
-          <span><strong>Branch:</strong> ${escapeHtml(person.branchAssigned || "Not supplied")}</span>
         </div>
-        <div style="display:flex; gap:8px; margin-top:12px;">${callLink}${waLink}</div>
+        <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:12px;">${callLink}${waLink}</div>
       </div>
     `;
     })
@@ -210,10 +209,10 @@ export const generateVendorStorefrontHtml = (
   const deliveryRows = deliveryStaff
     .map((driver) => {
       const waLink = cleanWa(driver.whatsapp)
-        ? `<a href="https://wa.me/${cleanWa(driver.whatsapp)}" class="btn btn-primary" style="flex:1; font-size:0.75rem; padding:8px;" target="_blank">WhatsApp</a>`
+        ? `<a href="https://wa.me/${cleanWa(driver.whatsapp)}" class="btn btn-primary" style="flex:1; font-size:0.75rem; padding:8px; min-width:80px;" target="_blank">WhatsApp</a>`
         : "";
       const callLink = cleanPhone(driver.phone)
-        ? `<a href="tel:${cleanPhone(driver.phone)}" class="btn btn-secondary" style="flex:1; font-size:0.75rem; padding:8px;">Call</a>`
+        ? `<a href="tel:${cleanPhone(driver.phone)}" class="btn btn-secondary" style="flex:1; font-size:0.75rem; padding:8px; min-width:80px;">Call</a>`
         : "";
       return `
       <div class="info-card">
@@ -222,7 +221,7 @@ export const generateVendorStorefrontHtml = (
           <span><strong>Vehicle:</strong> ${escapeHtml(driver.vehicleType || "Not supplied")}</span>
           <span><strong>Area:</strong> ${escapeHtml(driver.serviceArea || "Not supplied")}</span>
         </div>
-        <div style="display:flex; gap:8px; margin-top:12px;">${callLink}${waLink}</div>
+        <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:12px;">${callLink}${waLink}</div>
       </div>
     `;
     })
@@ -234,13 +233,13 @@ export const generateVendorStorefrontHtml = (
       <div style="font-size:0.9rem; margin-bottom:12px; color:var(--muted);">Trading as: ${escapeHtml(vendor.tradingName || vendor.name || "Not supplied")}</div>
       <div style="display:grid; gap:8px; font-size:0.85rem;">
         <span><strong>Address:</strong> ${escapeHtml(vendor.streetAddress || "Not supplied")}</span>
-        <span><strong>Location:</strong> ${escapeHtml(vendor.suburb || "Not supplied")}, ${escapeHtml(vendor.district || "Not supplied")}, ${escapeHtml(vendor.cityTown || "Not supplied")}, ${escapeHtml(vendor.province || "Not supplied")}</span>
+        <span><strong>Location:</strong> ${escapeHtml(vendor.suburb || "Not supplied")}${vendor.suburb ? ", " : ""}${escapeHtml(vendor.district || "Not supplied")}${vendor.district ? ", " : ""}${escapeHtml(vendor.cityTown || "Not supplied")}${vendor.cityTown ? ", " : ""}${escapeHtml(vendor.province || "Not supplied")}</span>
         <span><strong>Hours:</strong> ${escapeHtml(vendor.openingHours || "Not supplied")}</span>
         <span><strong>Email:</strong> ${escapeHtml(vendor.email || "Not supplied")}</span>
       </div>
-      <div style="display:flex; gap:8px; margin-top:16px; max-width: 400px;">
-        ${cleanPhone(vendor.mainPhone) ? `<a href="tel:${cleanPhone(vendor.mainPhone)}" class="btn btn-secondary" style="flex:1;">Call HQ</a>` : ""}
-        ${cleanWa(vendor.whatsappNumber) ? `<a href="https://wa.me/${cleanWa(vendor.whatsappNumber)}" class="btn btn-primary" style="flex:1;" target="_blank">WhatsApp HQ</a>` : ""}
+      <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:16px; max-width: 400px;">
+        ${cleanPhone(vendor.mainPhone) ? `<a href="tel:${cleanPhone(vendor.mainPhone)}" class="btn btn-secondary" style="flex:1; min-width:120px;">Call HQ</a>` : ""}
+        ${cleanWa(vendor.whatsappNumber) ? `<a href="https://wa.me/${cleanWa(vendor.whatsappNumber)}" class="btn btn-primary" style="flex:1; min-width:120px;" target="_blank">WhatsApp HQ</a>` : ""}
       </div>
     </div>
   `;
@@ -293,12 +292,12 @@ export const generateVendorStorefrontHtml = (
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>${escapeHtml(title || `${vendor.name} Storefront`)}</title>
   <style>
     :root {
       color-scheme: light;
-      font-family: Inter, system-ui, sans-serif;
+      font-family: Inter, system-ui, -apple-system, sans-serif;
       color: #111111;
       background: #ffffff;
       --orange: #f97316;
@@ -308,8 +307,9 @@ export const generateVendorStorefrontHtml = (
       --border: #e5e7eb;
     }
     * { box-sizing: border-box; border-radius: 0 !important; }
-    body { margin: 0; min-height: 100vh; background: #ffffff; color: var(--charcoal); }
-    button, input, select, textarea { font: inherit; }
+    body { margin: 0; min-height: 100vh; background: #ffffff; color: var(--charcoal); overflow-wrap: break-word; word-wrap: break-word; }
+    img, video, iframe, table { max-width: 100%; height: auto; display: block; }
+    button, input, select, textarea { font: inherit; max-width: 100%; }
     a { color: inherit; text-decoration: none; }
     
     /* Sticky Top Header */
@@ -369,7 +369,7 @@ export const generateVendorStorefrontHtml = (
       border-bottom-color: var(--orange);
     }
 
-    .page-shell { width: 100%; max-width: 1200px; margin: 0 auto; padding: 24px 16px 40px; }
+    .page-shell { width: 100%; max-width: 1200px; margin: 0 auto; padding: 24px 16px 40px; overflow-x: hidden; }
     .hero, .section, .footer, .grid, .card { background: #ffffff; border: 1px solid var(--border); }
     .hero { overflow: hidden; margin-bottom: 24px; }
     .hero-banner { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; display: block; }
@@ -381,7 +381,7 @@ export const generateVendorStorefrontHtml = (
     .pill-list { display: flex; flex-wrap: wrap; gap: 10px; }
     .pill { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; background: #f8fafc; color: var(--charcoal); font-size: 0.8rem; border: 1px solid var(--border); }
     .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; }
-    .btn, .button-link { padding: 14px 20px; border: none; cursor: pointer; transition: transform 0.15s ease, background-color 0.2s ease; display: inline-flex; align-items: center; justify-content: center; gap: 8px; font-weight: 700; }
+    .btn, .button-link { padding: 14px 20px; border: none; cursor: pointer; transition: transform 0.15s ease, background-color 0.2s ease; display: inline-flex; align-items: center; justify-content: center; gap: 8px; font-weight: 700; text-align: center; }
     .btn-primary { background: var(--orange); color: #ffffff; }
     .btn-primary:hover { transform: translateY(-1px); }
     .btn-secondary { background: #f8fafc; color: var(--charcoal); border: 1px solid var(--border); }
@@ -389,45 +389,51 @@ export const generateVendorStorefrontHtml = (
     .section h2 { margin: 0 0 16px; font-size: 1.15rem; letter-spacing: -0.03em; }
     .section p { margin: 0; color: var(--muted); line-height: 1.75; }
     .grid { display: grid; gap: 18px; }
+    .grid-1 { grid-template-columns: minmax(0, 1fr); }
     .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .info-card { padding: 16px; border: 1px solid var(--border); background: #fafafa; display: grid; gap: 8px; }
+    .info-card { padding: 16px; border: 1px solid var(--border); background: #fafafa; display: grid; gap: 8px; overflow-wrap: break-word; word-break: break-word; }
     .info-card strong { color: var(--charcoal); }
     .product-filters { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; }
-    .product-filters input, .product-filters select { width: 100%; min-width: 160px; padding: 12px 14px; border: 1px solid var(--border); background: #fff; color: var(--charcoal); }
+    .product-filters input, .product-filters select { flex: 1 1 auto; min-width: 140px; padding: 12px 14px; border: 1px solid var(--border); background: #fff; color: var(--charcoal); }
     .product-grid { display: grid; gap: 18px; }
-    .product-card { display: grid; background: #fff; border: 1px solid var(--border); overflow: hidden; }
+    .product-card { display: flex; flex-direction: column; background: #fff; border: 1px solid var(--border); overflow: hidden; }
     .product-media { width: 100%; background: #f8fafc; border: none; cursor: pointer; padding: 0; }
     .product-media img { width: 100%; height: 220px; object-fit: cover; display: block; }
-    .product-card-body { padding: 18px; display: grid; gap: 12px; }
+    .product-card-body { padding: 18px; display: flex; flex-direction: column; gap: 12px; flex: 1; }
     .product-meta { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; }
     .product-card h3 { margin: 0; font-size: 1rem; color: var(--charcoal); }
-    .product-card p { margin: 0; color: var(--muted); line-height: 1.6; font-size: 0.95rem; min-height: 2.8em; }
+    .product-card p { margin: 0; color: var(--muted); line-height: 1.6; font-size: 0.95rem; min-height: 2.8em; flex: 1; }
     .product-labels { font-size: 0.8rem; color: var(--muted); }
-    .product-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
-    .product-price { font-size: 1rem; font-weight: 800; color: var(--charcoal); }
+    .product-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: auto; }
+    .product-price { font-size: 1rem; font-weight: 800; color: var(--charcoal); width: 100%; }
+    .product-footer button { flex: 1; min-width: 100px; padding: 10px; font-size: 0.85rem; }
     .view-details { background: #f8fafc; color: var(--charcoal); border: 1px solid var(--border); }
     .footer-links { display: grid; gap: 10px; }
     .footer-link { display: flex; justify-content: space-between; gap: 12px; padding: 14px 16px; background: #f8fafc; border: 1px solid var(--border); }
     .footer-link a { color: var(--orange); font-weight: 700; }
-    .details-panel { position: fixed; inset: 0; z-index: 20; background: rgba(15, 23, 42, 0.75); display: none; align-items: center; justify-content: center; padding: 24px; }
+    .details-panel { position: fixed; inset: 0; z-index: 2000; background: rgba(15, 23, 42, 0.75); display: none; align-items: center; justify-content: center; padding: 16px; }
     .details-panel.active { display: flex; }
-    .details-card { width: min(880px,100%); background: #ffffff; padding: 28px; position: relative; max-height: 90vh; overflow-y: auto; }
-    .details-close { position: absolute; right: 16px; top: 16px; border: none; background: transparent; font-size: 1rem; cursor: pointer; color: var(--charcoal); }
-    .details-card img { width: 100%; object-fit: cover; max-height: 320px; }
+    .details-card { width: 100%; max-width: 480px; background: #ffffff; padding: 24px; position: relative; max-height: 90vh; overflow-y: auto; overflow-wrap: break-word; }
+    .details-close { position: absolute; right: 12px; top: 12px; border: none; background: #f3f4f6; font-size: 1.25rem; font-weight: bold; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--charcoal); z-index: 10; }
+    .details-card img { width: 100%; object-fit: cover; max-height: 320px; margin-bottom: 16px; }
     .badge { display: inline-flex; padding: 8px 12px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; background: #f8fafc; color: var(--charcoal); border: 1px solid var(--border); }
-    .footer { padding: 24px 0 0; }
-    .footer-copy { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px; color: var(--muted); font-size: 0.85rem; }
+    .footer { padding: 24px 16px; text-align: center; }
+    .footer-copy { display: flex; flex-direction: column; gap: 8px; color: var(--muted); font-size: 0.85rem; }
+    
     @media (min-width: 768px) {
       .hero-body { grid-template-columns: auto 1fr; align-items: center; }
       .hero-meta { display: grid; gap: 10px; }
       .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .product-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .product-price { width: auto; }
+      .footer-copy { flex-direction: row; justify-content: space-between; }
     }
     @media (max-width: 767px) {
       .hero-body { padding: 18px; }
       .hero-actions { flex-direction: column; align-items: stretch; }
       .product-grid { grid-template-columns: 1fr; }
+      .grid-2, .grid-3 { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -465,9 +471,8 @@ export const generateVendorStorefrontHtml = (
           <div class="hero-actions">
             ${allowWhatsApp && mainWhatsapp ? `<a class="btn btn-primary" href="${mainWhatsapp}" target="_blank" rel="noreferrer">Order on WhatsApp</a>` : ""}
             ${allowCall && mainCall ? `<a class="btn btn-secondary" href="${mainCall}">Call Vendor</a>` : ""}
-            <a class="button-link" href="#products">Products</a>
-            <a class="button-link" href="#branches">Branches</a>
-            <a class="button-link" href="#delivery">Delivery</a>
+            <a class="button-link" href="#itred_products">Products</a>
+            <a class="button-link" href="#contact">Contact & Branches</a>
             <a class="button-link" href="#cah-links">CAH</a>
           </div>
         </div>
@@ -493,25 +498,10 @@ export const generateVendorStorefrontHtml = (
         <div class="product-filters">
           <input id="filter-search" type="search" placeholder="Search products" />
           <select id="filter-branch"><option value="">All branches</option>${branches.map((b) => `<option value="${escapeHtml(b.name)}">${escapeHtml(b.name)}</option>`).join("")}</select>
-          <select id="filter-category"><option value="">All categories</option>${[...new Set(products.map((p) => p.category).filter(Boolean))].map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("")}</select>
+          <select id="filter-category"><option value="">All categories</option>${[...new Set(vendorProducts.map((p) => p.category).filter(Boolean))].map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("")}</select>
         </div>
       </div>
       <div class="product-grid">${productItems}</div>
-    </section>
-
-    <section class="section" id="branches">
-      <h2>Branches</h2>
-      <ul class="grid grid-2">${branchRows || '<li class="info-card">No branches selected.</li>'}</ul>
-    </section>
-
-    <section class="section" id="staff">
-      <h2>Staff & Contacts</h2>
-      <ul class="grid grid-2">${staffRows || '<li class="info-card">No staff selected.</li>'}</ul>
-    </section>
-
-    <section class="section" id="delivery">
-      <h2>Delivery Options</h2>
-      <ul class="grid grid-2">${deliveryRows || '<li class="info-card">No delivery contacts selected.</li>'}</ul>
     </section>
 
     ${
@@ -543,6 +533,55 @@ export const generateVendorStorefrontHtml = (
     `
         : ""
     }
+
+    <section class="section" id="contact">
+      <h2>Contact & Business Details</h2>
+      <div class="grid grid-1" style="margin-bottom: 24px;">
+        ${vendorBusinessHtml}
+      </div>
+
+      ${
+        branches.length > 0
+          ? `
+      <h3>Branches</h3>
+      <div class="grid grid-2" style="margin-bottom: 24px;">
+        ${branchRows}
+      </div>
+      `
+          : ""
+      }
+
+      ${
+        staff.length > 0
+          ? `
+      <h3>Staff</h3>
+      <div class="grid grid-2" style="margin-bottom: 24px;">
+        ${staffRows}
+      </div>
+      `
+          : ""
+      }
+
+      ${
+        deliveryStaff.length > 0
+          ? `
+      <h3>Delivery Options</h3>
+      <div class="grid grid-2" style="margin-bottom: 24px;">
+        ${deliveryRows}
+      </div>
+      `
+          : ""
+      }
+    </section>
+
+    <section class="section" id="privacy">
+      <h2>Privacy Policy</h2>
+      <div class="info-card">
+        <p>Your privacy is important to us. This storefront operates offline and does not track or collect your personal data automatically. When you place an order via WhatsApp or call us directly, we receive the information you choose to share (such as your phone number and order details).</p>
+        <p style="margin-top: 12px;">We use this information solely for the purpose of fulfilling your order and providing customer support. We do not sell or share your contact information with unauthorized third parties.</p>
+        <p style="margin-top: 12px;">All product warranties, returns, and guarantees are subject to our direct business terms. Please confirm stock availability before purchasing.</p>
+      </div>
+    </section>
 
     <footer class="footer" id="cah-links">
       ${
@@ -637,12 +676,12 @@ export const generateVendorStorefrontHtml = (
         const lineTotal = item.price * item.quantity;
         total += lineTotal;
         return \`
-          <div style="display: flex; justify-content: space-between; align-items: center; border: 1px solid var(--border); padding: 12px; background: #fafafa;">
-            <div style="flex: 1;">
+          <div style="display: flex; justify-content: space-between; align-items: center; border: 1px solid var(--border); padding: 12px; background: #fafafa; flex-wrap: wrap; gap: 8px;">
+            <div style="flex: 1; min-width: 150px;">
               <div style="font-weight: 800; font-size: 0.9rem;">\${item.name}</div>
               <div style="font-size: 0.8rem; color: var(--muted);">Qty: \${item.quantity} × USD \${item.price.toFixed(2)}</div>
             </div>
-            <div style="font-weight: 800; margin-right: 16px;">USD \${lineTotal.toFixed(2)}</div>
+            <div style="font-weight: 800; margin-right: 16px; white-space: nowrap;">USD \${lineTotal.toFixed(2)}</div>
             <button onclick="removeFromCart('\${item.id}')" style="background: none; border: none; color: #ef4444; font-weight: bold; cursor: pointer; padding: 4px;">Remove</button>
           </div>
         \`;
@@ -725,7 +764,7 @@ export const generateVendorStorefrontHtml = (
         const matchesSearch = query === '' || query.split(' ').every(term => name.includes(term) || categoryValue.includes(term) || branchValue.includes(term));
         const matchesBranch = !branch || branchValue === branch;
         const matchesCategory = !category || categoryValue === category;
-        card.style.display = matchesSearch && matchesBranch && matchesCategory ? 'grid' : 'none';
+        card.style.display = matchesSearch && matchesBranch && matchesCategory ? 'flex' : 'none';
       });
     };
 
@@ -741,7 +780,7 @@ export const generateVendorStorefrontHtml = (
         const packagingValue = card.querySelector('.product-labels')?.textContent?.toLowerCase() || '';
         const matchesStatus = !status || statusValue === status;
         const matchesPackaging = !packaging || packagingValue.includes(packaging);
-        card.style.display = matchesStatus && matchesPackaging ? 'grid' : 'none';
+        card.style.display = matchesStatus && matchesPackaging ? 'flex' : 'none';
       });
     };
 

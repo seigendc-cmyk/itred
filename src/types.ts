@@ -27,6 +27,7 @@ export enum AppRoute {
   HOW_TO = "how-to",
   WHATSAPP_ACTIVITY = "whatsapp-activity",
   COMMUNITY_BI = "whatsapp-community-bi",
+  WHATSAPP_REPORTS = "whatsapp-performance-reports",
 }
 export type DeskType =
   | "SysAdmin Desk"
@@ -77,7 +78,8 @@ export type MenuKey =
   | "systemSettings"
   | "howTo"
   | "whatsappActivity"
-  | "whatsappCommunityBI";
+  | "whatsappCommunityBI"
+  | "whatsappReports";
 
 export type MenuPermissions = Partial<Record<MenuKey, PermissionLevel>>;
 
@@ -159,9 +161,21 @@ export type WhatsAppSourceType =
   | "BROADCAST_LIST"
   | "OTHER";
 
-export type WhatsAppLeadStatus = "NEW" | "REFERRED" | "CONTACTED" | "CONVERTED" | "LOST" | "FOLLOW_UP_REQUIRED" | "NOT_APPLICABLE";
+export type WhatsAppLeadStatus =
+  | "NEW"
+  | "REFERRED"
+  | "CONTACTED"
+  | "CONVERTED"
+  | "LOST"
+  | "FOLLOW_UP_REQUIRED"
+  | "NOT_APPLICABLE";
 export type WhatsAppPriority = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
-export type WhatsAppResponseStatus = "NOT_REQUIRED" | "PENDING" | "RESPONDED" | "MISSED" | "ESCALATED";
+export type WhatsAppResponseStatus =
+  | "NOT_REQUIRED"
+  | "PENDING"
+  | "RESPONDED"
+  | "MISSED"
+  | "ESCALATED";
 
 export interface WhatsAppActivityLog {
   id: string;

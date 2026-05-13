@@ -1,4 +1,4 @@
-﻿﻿/**
+﻿﻿﻿/**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -66,6 +66,9 @@ const MENU_KEYS: MenuKey[] = [
   "addNewProduct",
   "productList",
   "accessHub",
+  "whatsappActivity",
+  "whatsappCommunityBI",
+  "whatsappReports",
   "cahBooths",
   "pricing",
   "subscriptionsCollections",
@@ -82,6 +85,7 @@ const MENU_KEYS: MenuKey[] = [
   "roleMenuPermissions",
   "staffAccessLogs",
   "systemSettings",
+  "howTo",
 ];
 
 const PERMISSIONS = [
@@ -94,6 +98,9 @@ const PERMISSIONS = [
   { id: "addNewProduct", label: "Add New Product" },
   { id: "productList", label: "Product List" },
   { id: "accessHub", label: "Access Hub" },
+  { id: "whatsappActivity", label: "WhatsApp Activity" },
+  { id: "whatsappCommunityBI", label: "WhatsApp Community BI" },
+  { id: "whatsappReports", label: "WhatsApp Reports" },
   { id: "cahBooths", label: "CAH Booths" },
   { id: "pricing", label: "Pricing" },
   { id: "subscriptionsCollections", label: "Subscriptions & Collections" },
@@ -110,6 +117,7 @@ const PERMISSIONS = [
   { id: "roleMenuPermissions", label: "Role & Menu Permissions" },
   { id: "staffAccessLogs", label: "Staff Access Logs" },
   { id: "systemSettings", label: "System Settings" },
+  { id: "howTo", label: "How To & Help" },
 ];
 
 export const StaffManagement: React.FC = () => {
