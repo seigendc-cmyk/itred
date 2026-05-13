@@ -137,6 +137,7 @@ export const SectorCatalogueGenerator: React.FC = () => {
     html: string;
     id: string;
     fileName: string;
+    hostedUrl?: string;
   } | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
 
@@ -524,6 +525,7 @@ export const SectorCatalogueGenerator: React.FC = () => {
             "",
           companyLogoUrl: contactSettings?.companyLogoUrl,
           systemLogoUrl: contactSettings?.systemLogoUrl,
+          hostedUrl,
         },
       );
 
@@ -579,6 +581,7 @@ export const SectorCatalogueGenerator: React.FC = () => {
         htmlSize: html.length,
         fileName: finalFileName,
         htmlContent: html,
+        hostedUrl,
         configSnapshot: configSnapshot,
       };
 
@@ -590,7 +593,12 @@ export const SectorCatalogueGenerator: React.FC = () => {
         await catalogueService.saveCatalogue(catalogueData);
       }
 
-      setLastGenerated({ html, id: finalId, fileName: finalFileName });
+      setLastGenerated({
+        html,
+        id: finalId,
+        fileName: finalFileName,
+        hostedUrl,
+      });
       if (mode === "update" || mode === "replace") {
         setEditingCatalogueId(null);
       }
@@ -680,6 +688,7 @@ export const SectorCatalogueGenerator: React.FC = () => {
         html: cat.htmlContent,
         id: cat.id,
         fileName: cat.fileName || `${cat.serialNumber}.html`,
+        hostedUrl: cat.hostedUrl,
       });
       focusMainContent();
     } else {
@@ -1102,19 +1111,28 @@ export const SectorCatalogueGenerator: React.FC = () => {
                     <p className="text-[10px] text-stone-400 font-bold uppercase tracking-wider">
                       Catalogue ID: {lastGenerated.id}
                     </p>
+                    {lastGenerated.hostedUrl && (
+                      <p className="text-[10px] font-bold text-brand-orange mt-1">
+                        iPhone users should use the hosted link.
+                      </p>
+                    )}
                   </div>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap justify-end">
                   <SecondaryButton
                     onClick={() => {
-                      if (permissionService.canApprove("createCatalogue"))
+                      if (permissionService.canApprove("createCatalogue")) {
                         handleMarkDeployed(lastGenerated.id);
-                      else alert("Permission denied to deploy catalogues.");
+                        if (lastGenerated.hostedUrl) {
+                          window.open(lastGenerated.hostedUrl, "_blank");
+                        }
+                      } else alert("Permission denied to deploy catalogues.");
                     }}
                     size="sm"
                     disabled={!permissionService.canApprove("createCatalogue")}
                   >
-                    <Globe size={14} className="mr-2" /> Deploy
+                    <Globe size={14} className="mr-2" /> Deploy / Open Hosted
+                    Catalogue
                   </SecondaryButton>
                   <SecondaryButton
                     onClick={() => {
@@ -1156,7 +1174,8 @@ export const SectorCatalogueGenerator: React.FC = () => {
                     size="sm"
                     disabled={!permissionService.canExport("createCatalogue")}
                   >
-                    <Download size={14} className="mr-2" /> Download
+                    <Download size={14} className="mr-2" /> Download Offline
+                    HTML
                   </PrimaryButton>
                 </div>
               </div>

@@ -712,6 +712,8 @@ export interface CatalogueGeneration {
   htmlContent?: string;
   archivedAt?: string;
   deletedAt?: string;
+  hostedUrl?: string;
+  publicSlug?: string;
   configSnapshot?: {
     vendorIds: string[];
     cahLinkIds: string[];

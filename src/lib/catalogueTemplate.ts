@@ -37,6 +37,8 @@ export const generateCatalogueHtml = (
     seigenLogoUrl?: string;
     companyLogoUrl?: string;
     systemLogoUrl?: string;
+    hostedUrl?: string;
+    recommendedOpenMode?: "hosted" | "offline";
   },
 ): string => {
   const activeProducts = products.filter(
@@ -363,6 +365,76 @@ export const generateCatalogueHtml = (
         .hub-type { font-size: 9px; font-weight: 900; color: var(--brand-orange); text-transform: uppercase; }
         .hub-name { font-size: 14px; font-weight: 800; margin-top: 4px; }
 
+        /* Browser Gate */
+        .browser-gate {
+            position: fixed;
+            inset: 0;
+            z-index: 5000;
+            background: rgba(46,46,46,0.78);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+        .browser-gate-card {
+            width: 100%;
+            max-width: 360px;
+            background: #ffffff;
+            border: 2px solid var(--brand-orange);
+            padding: 24px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.28);
+            text-align: center;
+        }
+        .browser-gate-badge {
+            display: inline-block;
+            background: var(--brand-orange);
+            color: #ffffff;
+            font-weight: 900;
+            padding: 8px 12px;
+            margin-bottom: 16px;
+        }
+        .browser-gate-card h2 {
+            margin: 0 0 10px;
+            font-size: 18px;
+            font-weight: 900;
+            color: var(--brand-charcoal);
+            text-transform: uppercase;
+        }
+        .browser-gate-card p {
+            font-size: 13px;
+            line-height: 1.5;
+            color: #555;
+            margin-bottom: 20px;
+        }
+        .browser-gate-actions {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 10px;
+        }
+        .browser-gate-actions button,
+        .browser-gate-actions a {
+            display: block;
+            text-decoration: none;
+            border: none;
+            padding: 13px 14px;
+            font-size: 12px;
+            font-weight: 900;
+            text-transform: uppercase;
+            cursor: pointer;
+        }
+        #continueIosBtn,
+        #continueCatalogueBtn {
+            background: #f3f3f3;
+            color: var(--brand-charcoal);
+        }
+        #openHostedBtn,
+        #downloadChromeBtn {
+            background: var(--brand-orange);
+            color: #ffffff;
+        }
+
         main {
             position: relative;
             z-index: 1;
@@ -493,6 +565,36 @@ export const generateCatalogueHtml = (
                 <div class="m-row"><span class="m-lbl">Sales Contact</span><span class="m-val" id="m-staff">Sales contact not supplied</span></div>
             </div>
             
+        </div>
+    </div>
+
+    <!-- IOS GATE -->
+    <div id="iosGate" class="browser-gate" style="display:none;">
+        <div class="browser-gate-card">
+            <div class="browser-gate-badge">iTred</div>
+            <h2>iPhone Notice</h2>
+            <p id="iosGateText">
+                For best results, ask the sender for the online catalogue link.
+            </p>
+            <div class="browser-gate-actions">
+                <a id="openHostedBtn" href="#" target="_blank" rel="noopener" style="display:none;">Open Online Catalogue</a>
+                <button id="continueIosBtn">Continue Offline</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- BROWSER GATE -->
+    <div id="browserGate" class="browser-gate" style="display:none;">
+        <div class="browser-gate-card">
+            <div class="browser-gate-badge">iTred</div>
+            <h2>Open in Google Chrome</h2>
+            <p>
+                For the best catalogue experience, use Google Chrome. Some features may not work correctly in your current browser.
+            </p>
+            <div class="browser-gate-actions">
+                <button id="continueCatalogueBtn">Continue Anyway</button>
+                <a id="downloadChromeBtn" href="#" target="_blank" rel="noopener">Download Chrome</a>
+            </div>
         </div>
     </div>
 
@@ -803,10 +905,47 @@ export const generateCatalogueHtml = (
             );
         }
 
+        function isChromeLikeBrowser() {
+            var ua = navigator.userAgent || "";
+            var isChromium = ua.indexOf("Chrome") > -1 || ua.indexOf("CriOS") > -1 || ua.indexOf("Chromium") > -1;
+            var isEdge = ua.indexOf("Edg") > -1;
+            var isOpera = ua.indexOf("OPR") > -1 || ua.indexOf("Opera") > -1;
+            var isBrave = ua.indexOf("Brave") > -1;
+            return isChromium || isEdge || isOpera || isBrave;
+        }
+
+        function getChromeDownloadUrl() {
+            var ua = navigator.userAgent || "";
+            if (/android/i.test(ua)) {
+                return "https://play.google.com/store/apps/details?id=com.android.chrome";
+            }
+            if (/iphone|ipad|ipod/i.test(ua)) {
+                return "https://apps.apple.com/app/google-chrome/id535886823";
+            }
+            return "https://www.google.com/chrome/";
+        }
+
+        function initBrowserGate() {
+            var gate = document.getElementById("browserGate");
+            var continueBtn = document.getElementById("continueCatalogueBtn");
+            var downloadBtn = document.getElementById("downloadChromeBtn");
+            if (!gate || !continueBtn || !downloadBtn) return;
+            downloadBtn.href = getChromeDownloadUrl();
+            var dismissed = false;
+            try { dismissed = localStorage.getItem("itred_chrome_gate_dismissed") === "true"; } catch (e) {}
+            if (!isChromeLikeBrowser() && !dismissed) { gate.style.display = "flex"; }
+            continueBtn.addEventListener("click", function () {
+                gate.style.display = "none";
+                try { localStorage.setItem("itred_chrome_gate_dismissed", "true"); } catch (e) {}
+            });
+        }
+
         document.getElementById('searchInput').addEventListener('input', renderProducts);
         
         document.addEventListener("DOMContentLoaded", function () {
             try {
+                initIosGate();
+                initBrowserGate();
                 renderProducts();
                 renderVendors();
                 renderHub();
