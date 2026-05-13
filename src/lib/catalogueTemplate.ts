@@ -424,12 +424,12 @@ export const generateCatalogueHtml = (
             text-transform: uppercase;
             cursor: pointer;
         }
-        #continueIosBtn,
+        #iosContinueBtn,
         #continueCatalogueBtn {
             background: #f3f3f3;
             color: var(--brand-charcoal);
         }
-        #openHostedBtn,
+        #iosOpenHostedBtn,
         #downloadChromeBtn {
             background: var(--brand-orange);
             color: #ffffff;
@@ -573,12 +573,10 @@ export const generateCatalogueHtml = (
         <div class="browser-gate-card">
             <div class="browser-gate-badge">iTred</div>
             <h2>iPhone Notice</h2>
-            <p id="iosGateText">
-                For best results, ask the sender for the online catalogue link.
-            </p>
+            <p>Downloaded HTML catalogues may not open correctly on iPhone. For best results, use the online catalogue link.</p>
             <div class="browser-gate-actions">
-                <a id="openHostedBtn" href="#" target="_blank" rel="noopener" style="display:none;">Open Online Catalogue</a>
-                <button id="continueIosBtn">Continue Offline</button>
+                <a id="iosOpenHostedBtn" href="#" target="_blank" rel="noopener" style="display:none;">Open Online Catalogue</a>
+                <button id="iosContinueBtn">Continue Offline</button>
             </div>
         </div>
     </div>
@@ -944,11 +942,11 @@ export const generateCatalogueHtml = (
         
         document.addEventListener("DOMContentLoaded", function () {
             try {
-                initIosGate();
-                initBrowserGate();
                 renderProducts();
                 renderVendors();
                 renderHub();
+                if (typeof initIosGate === "function") initIosGate();
+                if (typeof initBrowserGate === "function") initBrowserGate();
             } catch (error) {
                 console.error("Catalogue render failed", error);
                 var grid = document.getElementById("productGrid");
