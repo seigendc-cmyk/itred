@@ -57,20 +57,16 @@ import { focusMainContent } from "../utils/uiHelpers.ts";
 import { WhatsAppActivityQuickLog } from "../components/WhatsAppActivityQuickLog.tsx";
 
 async function assetUrlToDataUri(url: string): Promise<string> {
-  try {
-    const response = await fetch(url);
-    if (!response.ok) return "";
-    const blob = await response.blob();
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = () => resolve("");
-      reader.readAsDataURL(blob);
-    });
-  } catch (error) {
-    console.warn("Failed to convert asset to Data URI", error);
-    return "";
-  }
+  const response = await fetch(url);
+  if (!response.ok) throw new Error("Failed to load asset: " + url);
+  const blob = await response.blob();
+
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(String(reader.result || ""));
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
 }
 
 interface CatalogueConfig {
@@ -431,11 +427,14 @@ export const SectorCatalogueGenerator: React.FC = () => {
       expiry.setDate(now.getDate() + config.expiryPeriodDays);
 
       let seigenLogoDataUri = "";
+
       try {
         seigenLogoDataUri = await assetUrlToDataUri(
           "/brand/seigen-commerce-logo.png",
         );
-      } catch (e) {}
+      } catch (error) {
+        console.warn("Failed to embed default seiGEN logo", error);
+      }
 
       const html = generateCatalogueHtml(
         selectedVendors,

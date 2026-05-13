@@ -409,7 +409,7 @@ export const generateCatalogueHtml = (
                     <div class="catalogue-subtitle" style="font-size: 9px; margin-top: 4px; color: var(--brand-orange);">Powered by seiGEN Commerce</div>
                 </div>
                 <div class="seigen-logo-badge">
-                    ${logoUrl ? `<img src="${logoUrl}" alt="Logo" onerror="this.outerHTML='<span class=\\'seigen-logo-fallback\\'>SCI</span>'"/>` : `<span class="seigen-logo-fallback">SCI</span>`}
+                    ${logoUrl ? `<img src="${logoUrl}" alt="seiGEN Commerce" onerror="this.outerHTML='<span class=\\'seigen-logo-fallback\\'>SCI</span>'"/>` : `<span class="seigen-logo-fallback">SCI</span>`}
                 </div>
             </header>
 
