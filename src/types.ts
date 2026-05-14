@@ -31,6 +31,7 @@ export enum AppRoute {
   APPROVAL_QUEUE = "approval-queue",
   NOTIFICATIONS = "notifications",
   STAFF_TASKS = "staff-tasks",
+  RPN_PERFORMANCE = "rpn-performance",
 }
 export type DeskType =
   | "SysAdmin Desk"
@@ -85,7 +86,8 @@ export type MenuKey =
   | "whatsappCommunityBI"
   | "approvalQueue"
   | "notifications"
-  | "staffTasks";
+  | "staffTasks"
+  | "rpnPerformance";
 
 export type MenuPermissions = Partial<Record<MenuKey, PermissionLevel>>;
 
@@ -126,7 +128,21 @@ export type ActionPermissionKey =
   | "approvalQueue.approve"
   | "staffTasks.viewOwn"
   | "staffTasks.assign"
-  | "staffTasks.complete";
+  | "staffTasks.complete"
+  | "rpn.viewPerformance"
+  | "rpn.viewFinancials"
+  | "rpn.setThresholds"
+  | "rpn.assignVendor"
+  | "rpn.reassignVendor"
+  | "rpn.viewChurn"
+  | "rpn.viewCommissions"
+  | "rpn.exportReports"
+  | "roles.viewPermissions"
+  | "roles.editPermissions"
+  | "roles.createRoleTemplate"
+  | "roles.deleteRoleTemplate"
+  | "roles.assignRoleToStaff"
+  | "roles.auditPermissionChanges";
 
 export type ActionPermissions = Partial<Record<ActionPermissionKey, boolean>>;
 
@@ -176,6 +192,37 @@ export interface Staff {
   isLocked: boolean;
   lastLoginDate?: string;
   lastLogoutDate?: string;
+  personalDetails?: {
+    nationalId?: string;
+    dateOfBirth?: string;
+    gender?: string;
+    maritalStatus?: string;
+    nextOfKinName?: string;
+    nextOfKinPhone?: string;
+  };
+  addressDetails?: {
+    country?: string;
+    province?: string;
+    cityTown?: string;
+    district?: string;
+    suburb?: string;
+    streetAddress?: string;
+    gpsNotes?: string;
+  };
+  kycDetails?: {
+    idType?: string;
+    idNumber?: string;
+    kycStatus?: "not_started" | "pending" | "verified" | "rejected";
+    verifiedByStaffId?: string;
+    verifiedByName?: string;
+    verifiedAt?: string;
+    notes?: string;
+  };
+  kycDocuments?: {
+    idDocumentUrl?: string;
+    proofOfResidenceUrl?: string;
+    photoUrl?: string;
+  };
   // Permissions are now an object mapping MenuKey to PermissionLevel
   menuPermissions: MenuPermissions;
   actionPermissions?: ActionPermissions;
@@ -434,6 +481,15 @@ export interface Vendor {
 
   // Management & Subscription
   assignedRPNId?: string;
+  rpnId?: string;
+  rpnName?: string;
+  onboardedByStaffId?: string;
+  onboardedByName?: string;
+  onboardedAt?: string;
+  monthlyPlanValue?: number;
+  lifetimeValue?: number;
+  churnStatus?: "active" | "at_risk" | "churned";
+  churnReason?: string;
   assignedStaffId?: string;
   planId: string; // References PricingPlan.id
   subscriptionStatus: SubscriptionStatus;
@@ -1168,11 +1224,26 @@ export interface FeedbackWhatsAppRoute {
   updatedAt: string;
 }
 
+export interface RPNPerformanceSettings {
+  dailyOnboardingThreshold: number;
+  weeklyOnboardingThreshold: number;
+  monthlyOnboardingThreshold: number;
+  churnWarningPercent: number;
+  minimumCollectionRatePercent: number;
+  graceDaysBeforeWarning: number;
+  enableThresholdAlerts: boolean;
+  requireApprovalForThresholdChange: boolean;
+  updatedAt: string;
+  updatedByStaffId?: string;
+  updatedByName?: string;
+}
+
 export interface SystemSettings {
   seigenLogoUrl?: string;
   feedbackWhatsAppRoutes?: FeedbackWhatsAppRoute[];
   defaultFeedbackWhatsAppNumber?: string;
   syncEndpointUrl?: string;
+  rpnPerformanceSettings?: RPNPerformanceSettings;
   updatedAt?: string;
 }
 

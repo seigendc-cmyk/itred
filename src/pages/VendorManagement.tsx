@@ -136,6 +136,7 @@ export const VendorManagement: React.FC = () => {
   // Data State
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [rpns, setRpns] = useState<RPN[]>([]);
+  const [staffList, setStaffList] = useState<Staff[]>([]);
   const [plans, setPlans] = useState<PricingPlan[]>([]);
 
   // Lists stats (counts)
@@ -193,10 +194,14 @@ export const VendorManagement: React.FC = () => {
     const pl = asArray<PricingPlan>(
       await Promise.resolve(pricingPlanService.getPlans()),
     );
+    const st = asArray<Staff>(
+      await Promise.resolve(staffService.getAllStaff()),
+    );
 
     setVendors(v);
     setRpns(r);
     setPlans(pl);
+    setStaffList(st);
 
     // Calculate counts
     const pCounts: Record<string, number> = {};
@@ -213,6 +218,18 @@ export const VendorManagement: React.FC = () => {
     });
     setCatalogueCounts(cCounts);
   };
+
+  const filteredStaffRPNs = useMemo(() => {
+    return staffList.filter((s) => {
+      const role = (s.role || "").toLowerCase();
+      return (
+        role.includes("rpn") ||
+        role.includes("agent") ||
+        role.includes("field") ||
+        role.includes("sales")
+      );
+    });
+  }, [staffList]);
 
   const filtered = vendors.filter((v) => {
     const matchesSearch =
@@ -249,6 +266,20 @@ export const VendorManagement: React.FC = () => {
       loadData();
       setIsDeleteDialogOpen(false);
       setVendorToDelete(null);
+
+      // Non-blocking staff audit logging
+      try {
+        const vendor = vendors.find((v) => v.id === vendorToDelete);
+        void staffAuditService.logDelete(
+          "vendor",
+          "vendor",
+          vendorToDelete,
+          vendor?.name || "Unknown",
+          vendor,
+        );
+      } catch (e) {
+        console.error("Audit log failed", e);
+      }
     }
   };
 
@@ -369,6 +400,22 @@ export const VendorManagement: React.FC = () => {
             vendorToSave.name,
             vendorToSave,
           );
+        }
+
+        if (
+          oldVendor &&
+          (oldVendor.rpnId !== vendorToSave.rpnId ||
+            oldVendor.assignedRPNId !== vendorToSave.assignedRPNId)
+        ) {
+          await staffAuditService.logAction({
+            eventType: "RECORD_UPDATED",
+            module: "vendor",
+            action: "Assigned/Reassigned vendor to RPN",
+            severity: "high",
+            recordType: "vendor",
+            recordId: vendorToSave.id,
+            recordName: vendorToSave.name,
+          });
         }
       } catch (auditErr) {
         console.error("Audit log failed", auditErr);

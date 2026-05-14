@@ -32,6 +32,7 @@ import { AdminDashboard } from "./pages/AdminDashboard.tsx";
 import { RoleMenuPermissions } from "./pages/RoleMenuPermissions.tsx";
 import { StaffAccessLogs } from "./pages/StaffAccessLogs.tsx";
 import { SystemSettings } from "./pages/SystemSettings.tsx";
+import { RPNPerformanceDashboard } from "./pages/RPNPerformanceDashboard.tsx";
 import { ContactHubSettings } from "./pages/ContactHubSettings.tsx";
 import WelcomePage from "./pages/WelcomePage.tsx";
 import { HowToPage } from "./pages/HowToPage.tsx";
@@ -129,6 +130,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     [AppRoute.SYSTEM_SETTINGS]: "System Settings",
     [AppRoute.CONTACT_HUB_SETTINGS]: "Catalogue Contact Hub",
     [AppRoute.HOW_TO]: "How To",
+    [AppRoute.RPN_PERFORMANCE]: "RPN Performance",
   };
 
   const checkAccess = (route: string) => {
@@ -158,6 +160,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       "approval-queue": "approvalQueue",
       notifications: "notifications",
       "staff-tasks": "staffTasks",
+      "rpn-performance": "rpnPerformance",
       "how-to": "howTo",
       dashboard: "dashboard",
       // Add other specific mappings if routes don't directly match MenuKey
@@ -416,6 +419,16 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           element={
             checkAccess("staff-tasks") ? (
               <AdminDashboard onNavigate={handleNavigate} />
+            ) : (
+              <RestrictedAccess />
+            )
+          }
+        />
+        <Route
+          path="/rpn-performance"
+          element={
+            checkAccess("rpn-performance") ? (
+              <RPNPerformanceDashboard />
             ) : (
               <RestrictedAccess />
             )

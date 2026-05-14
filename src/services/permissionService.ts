@@ -151,6 +151,51 @@ export const permissionService = {
     return permissionService.hasActionPermission("staffTasks.assign");
   },
 
+  canSetRpnThresholds: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return permissionService.hasActionPermission("rpn.setThresholds");
+  },
+
+  canViewRpnPerformance: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return permissionService.hasActionPermission("rpn.viewPerformance");
+  },
+
+  canViewRpnFinancials: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return permissionService.hasActionPermission("rpn.viewFinancials");
+  },
+
+  canAssignVendorToRpn: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return permissionService.hasActionPermission("rpn.assignVendor");
+  },
+
+  canViewRolePermissions: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return permissionService.hasActionPermission("roles.viewPermissions");
+  },
+
+  canEditRolePermissions: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return permissionService.hasActionPermission("roles.editPermissions");
+  },
+
+  canCreateRoleTemplate: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return permissionService.hasActionPermission("roles.createRoleTemplate");
+  },
+
+  canDeleteRoleTemplate: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return permissionService.hasActionPermission("roles.deleteRoleTemplate");
+  },
+
+  canAssignRoleToStaff: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return permissionService.hasActionPermission("roles.assignRoleToStaff");
+  },
+
   canOverridePasscode: (menuKey: MenuKey): boolean => {
     if (permissionService.isSysAdmin()) return true; // Only SysAdmin can override passcodes
     const level = permissionService.getPermissions()[menuKey];

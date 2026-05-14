@@ -53,3 +53,28 @@ export function safeSlice<T>(
 export function safeLength(value: unknown): number {
   return asArray(value).length;
 }
+
+export function stripUndefinedDeep<T>(obj: T): T {
+  if (Array.isArray(obj)) {
+    return obj.map((item) => stripUndefinedDeep(item)) as any;
+  }
+  if (obj !== null && typeof obj === "object") {
+    const cleaned: Record<string, any> = {};
+    for (const [key, value] of Object.entries(obj)) {
+      if (value === undefined) {
+        continue;
+      }
+      if (
+        value instanceof File ||
+        value instanceof Blob ||
+        typeof value === "function" ||
+        typeof value === "symbol"
+      ) {
+        continue;
+      }
+      cleaned[key] = stripUndefinedDeep(value);
+    }
+    return cleaned as any;
+  }
+  return obj;
+}

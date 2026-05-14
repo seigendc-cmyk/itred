@@ -250,6 +250,18 @@ export const PricingPlans: React.FC = () => {
     });
 
     await loadData();
+
+    // Non-blocking staff audit logging
+    try {
+      void staffAuditService.logDelete(
+        "pricing",
+        "pricing_plan",
+        id,
+        plan?.name || "Unknown",
+      );
+    } catch (e) {
+      console.error("Audit log failed", e);
+    }
   };
 
   const handleToggleStatus = async (id: string, currentStatus: string) => {
@@ -270,6 +282,21 @@ export const PricingPlans: React.FC = () => {
     });
 
     await loadData();
+
+    // Non-blocking staff audit logging
+    try {
+      void staffAuditService.logAction({
+        eventType: "RECORD_UPDATED",
+        module: "pricing",
+        action: `Plan status changed to ${newStatus} for ${plan?.name}`,
+        severity: "critical",
+        recordType: "pricing_plan",
+        recordId: id,
+        recordName: plan?.name,
+      });
+    } catch (e) {
+      console.error("Audit log failed", e);
+    }
   };
 
   const handleAssignPlan = async () => {

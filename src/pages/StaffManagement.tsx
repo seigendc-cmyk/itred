@@ -42,9 +42,10 @@ import {
   ActionPermissions,
   ActionPermissionKey,
 } from "../types.ts";
-import { asArray } from "../utils/safeData.ts";
+import { asArray, stripUndefinedDeep } from "../utils/safeData.ts";
 import { pdfService } from "../services/pdfService.ts";
 import { focusMainContent } from "../utils/uiHelpers.ts";
+
 import { staffAuditService } from "../services/staffAuditService.ts";
 
 const DESKS: DeskType[] = [
@@ -196,6 +197,30 @@ const ACTION_GROUPS = [
     name: "Staff Tasks",
     keys: ["staffTasks.viewOwn", "staffTasks.assign", "staffTasks.complete"],
   },
+  {
+    name: "RPN & Field Network",
+    keys: [
+      "rpn.viewPerformance",
+      "rpn.viewFinancials",
+      "rpn.setThresholds",
+      "rpn.assignVendor",
+      "rpn.reassignVendor",
+      "rpn.viewChurn",
+      "rpn.viewCommissions",
+      "rpn.exportReports",
+    ],
+  },
+  {
+    name: "Role & Menu Permissions",
+    keys: [
+      "roles.viewPermissions",
+      "roles.editPermissions",
+      "roles.createRoleTemplate",
+      "roles.deleteRoleTemplate",
+      "roles.assignRoleToStaff",
+      "roles.auditPermissionChanges",
+    ],
+  },
 ] as const;
 
 const JUNIOR_STAFF_PERMS: ActionPermissions = {
@@ -234,6 +259,7 @@ const MANAGER_PERMS: ActionPermissions = {
   "approvalQueue.view": true,
   "approvalQueue.approve": true,
   "staffTasks.assign": true,
+  "roles.viewPermissions": true,
 };
 
 const SUPER_ADMIN_PERMS: ActionPermissions = {
@@ -244,6 +270,12 @@ const SUPER_ADMIN_PERMS: ActionPermissions = {
   "product.delete": true,
   "catalogue.download": true,
   "catalogue.archive": true,
+  "roles.viewPermissions": true,
+  "roles.editPermissions": true,
+  "roles.createRoleTemplate": true,
+  "roles.deleteRoleTemplate": true,
+  "roles.assignRoleToStaff": true,
+  "roles.auditPermissionChanges": true,
 };
 
 export const StaffManagement: React.FC = () => {
@@ -477,6 +509,10 @@ export const StaffManagement: React.FC = () => {
       passcode: "",
       failedAttemptCount: 0,
       isLocked: false,
+      personalDetails: {},
+      addressDetails: {},
+      kycDetails: { kycStatus: "not_started" },
+      kycDocuments: {},
       createdAt: new Date().toISOString(),
       createdBy: "SysAdmin",
     });
@@ -503,6 +539,11 @@ export const StaffManagement: React.FC = () => {
       setFormError(
         "Please fill in all required fields: Full Name, Display Name, Role, and Desk.",
       );
+      return;
+    }
+
+    if (formData.personalDetails?.nationalId && formData.personalDetails.nationalId.trim().length > 0 && formData.personalDetails.nationalId.trim().length < 5) {
+      setFormError("National ID must be at least 5 characters.");
       return;
     }
 
@@ -537,7 +578,7 @@ export const StaffManagement: React.FC = () => {
       ? selectedStaff.id
       : formData.id || staffCode || `STF-${Date.now()}`;
 
-    const staffToSave: Staff = {
+    const staffToSave: Staff = stripUndefinedDeep({
       ...(formData as Staff),
       id: staffId,
       staffCode,
@@ -559,7 +600,7 @@ export const StaffManagement: React.FC = () => {
       updatedAt: now,
       createdAt: formData.createdAt || selectedStaff?.createdAt || now,
       updatedBy: "SysAdmin",
-    };
+    });
 
     try {
       await staffService.saveStaff(staffToSave);
@@ -579,6 +620,45 @@ export const StaffManagement: React.FC = () => {
         },
       });
 
+      if (selectedStaff) {
+        const oldStaff = selectedStaff;
+        const oldKycStatus = oldStaff.kycDetails?.kycStatus;
+        const newKycStatus = staffToSave.kycDetails?.kycStatus;
+
+        if (oldKycStatus !== newKycStatus) {
+          void staffAuditService.logAction({
+            eventType: "RECORD_UPDATED",
+            module: "staff",
+            severity: "critical",
+            action: "Updated staff KYC status",
+            recordType: "staff",
+            recordId: staffToSave.id,
+            recordName: staffToSave.displayName || staffToSave.fullName,
+            beforeSnapshot: oldStaff,
+            afterSnapshot: staffToSave,
+          });
+        }
+
+        const pChanged = JSON.stringify(oldStaff.personalDetails || {}) !== JSON.stringify(staffToSave.personalDetails || {});
+        const aChanged = JSON.stringify(oldStaff.addressDetails || {}) !== JSON.stringify(staffToSave.addressDetails || {});
+        const kChanged = JSON.stringify(oldStaff.kycDetails || {}) !== JSON.stringify(staffToSave.kycDetails || {});
+        const dChanged = JSON.stringify(oldStaff.kycDocuments || {}) !== JSON.stringify(staffToSave.kycDocuments || {});
+
+        if (pChanged || aChanged || kChanged || dChanged) {
+          void staffAuditService.logAction({
+            eventType: "RECORD_UPDATED",
+            module: "staff",
+            severity: "high",
+            action: "Updated staff Personal, Address & KYC Details",
+            recordType: "staff",
+            recordId: staffToSave.id,
+            recordName: staffToSave.displayName || staffToSave.fullName,
+            beforeSnapshot: oldStaff,
+            afterSnapshot: staffToSave,
+          });
+        }
+      }
+
       setStaffList(asArray<Staff>(staffService.getAllStaff()));
       await loadLogs();
 
@@ -590,14 +670,14 @@ export const StaffManagement: React.FC = () => {
       setConfirmTempPasscode("");
       setSelectedStaff(null);
       setFormData({});
-      setFormSuccess("Staff saved to Firebase/local cache");
+      setFormSuccess("Staff Personal, Address & KYC details saved.");
       setView("list");
       focusMainContent();
       setTimeout(() => setFormSuccess(""), 3000);
     } catch (error) {
       console.error("Failed to save staff profile.", error);
       setFormError(
-        "Failed to save staff profile to Firebase. Check console for details.",
+        "Staff KYC details were not saved. Check permissions or network.",
       );
     }
   };
@@ -829,7 +909,8 @@ export const StaffManagement: React.FC = () => {
         id="staff-management-header"
         tabIndex={-1}
       >
-        {["directory", "roles", "logs", "settings"].map((tab) => (
+        {["directory", "roles", "logs", "settings"].map((tab) => rmissions() && !permissionService.hasMenuAccess("roleMenuPermissions")) return null;
+          return (
           <button
             key={tab}
             onClick={() => {
@@ -844,14 +925,19 @@ export const StaffManagement: React.FC = () => {
           >
             {tab}
           </button>
-        ))}
+          );
       </div>
 
-      {activeTab === "roles" && view === "list" && (
+      {activeTab === "roles" && permissionService.canViewRolePermissions() && view === "list" && (
         <div className="space-y-6">
+          {!permissionServissionbg-yellow-50 border border-yellow-200 text-yellow-800 text-sm">
+              You can view role permissions, but you do not have authority to edit them.
+            </div>
+          )}
           <DataPanel
             title="Role Templates"
             actions={
+              permissionService.canCreateRoleTemplate() && (
               <PrimaryButton
                 onClick={() => {
                   setEditedRoleName("New Custom Role");
@@ -864,6 +950,7 @@ export const StaffManagement: React.FC = () => {
               >
                 <Plus size={14} /> New Template
               </PrimaryButton>
+              )
             }
           >
             <div className="space-y-4">
@@ -897,6 +984,7 @@ export const StaffManagement: React.FC = () => {
                     </div>
 
                     <div className="flex gap-2">
+                      {permissionService.canAssignRoleToStaff() && (
                       <PrimaryButton
                         onClick={() => {
                           setApplyRoleConfig({ role });
@@ -906,6 +994,7 @@ export const StaffManagement: React.FC = () => {
                       >
                         Apply to Staff
                       </PrimaryButton>
+                      )}
 
                       <SecondaryButton
                         onClick={() => {
@@ -924,11 +1013,10 @@ export const StaffManagement: React.FC = () => {
                         }}
                         className="text-xs px-3 py-1"
                       >
-                        Edit Permissions
+                        {permissionService.canEditRolePermissions() ? "Edit Permissions" : "View Permissions"}
                       </SecondaryButton>
                     </div>
-                  </div>
-
+                 </div>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
                     {Object.entries(
                       localRoleTemplates[role].menuPermissions || {},
@@ -958,21 +1046,21 @@ export const StaffManagement: React.FC = () => {
         </div>
       )}
 
-      {activeTab === "roles" && view === "roleEdit" && selectedStaff?.role && (
+      {activeTab === "roles" && permissionService.canViewRolePermissions() && view === "roleEdit" && selectedStaff?.role && (
         <div className="space-y-8">
           <div className="flex justify-between items-center bg-stone-900 text-white p-6">
             <h3 className="text-sm font-bold uppercase tracking-widest">
-              Edit Role Template - {selectedStaff.role}
-            </h3>
+              {permissionServici
 
             <div className="flex gap-3">
               <SecondaryButton
-                onClick={() => setView("list")}
                 className="text-white border-white/20"
               >
                 Cancel
               </SecondaryButton>
 
+              {permissionService.canEditRolePermissions() && (
+                <>
               <SecondaryButton
                 onClick={() => {
                   const resetPerms =
@@ -990,6 +1078,10 @@ export const StaffManagement: React.FC = () => {
 
               <PrimaryButton
                 onClick={() => {
+                  if (!permissionService.canEditRolePermissions()) {
+                    alert("You do not have permission to edit role permissions.");
+                    return;
+                  }
                   const updatedRole = selectedStaff.role as string;
                   const newRole = editedRoleName.trim() || updatedRole;
                   const newTemplates = {
@@ -1026,12 +1118,13 @@ export const StaffManagement: React.FC = () => {
                     void staffAuditService.logAction({
                       eventType: "PERMISSION_CHANGED",
                       module: "staff",
-                      action: `Updated role template permissions for ${newRole}`,
+                      action: "Updated role/menu/action permissions",
                       severity: "critical",
                       recordType: "role_template",
                       recordName: newRole,
-                    });
-                  } catch (auditErr) {
+                      beforeSnapshot: localRoleTemplates[updatedRole],
+                      afterSnapshot: newTemplates[newRole],
+                    });itErr) {
                     console.error("Audit log failed", auditErr);
                   }
 
@@ -1041,8 +1134,16 @@ export const StaffManagement: React.FC = () => {
               >
                 Save Role Permissions
               </PrimaryButton>
+                </>
+              )}
             </div>
           </div>
+
+          {!permissionService.canEditRolePermissions() && (
+            <div className="p-4 bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm mt-4 mx-6">
+              You can view role permissions, but you do not have authority to edit them.
+            </div>
+          )}
 
           <DataPanel title="Template Identity">
             <div className="p-6">
@@ -1053,14 +1154,13 @@ export const StaffManagement: React.FC = () => {
                   onChange={(e) => setEditedRoleName(e.target.value)}
                   className="form-input max-w-md"
                   disabled={
-                    selectedStaff.role === "SysAdmin" ||
-                    selectedStaff.role === "Admin"
+                    !permissionService.canEditRolePermissions() ||
+                    selectedStaff?.role === "SysAdmin" ||
+                    selectedStaff?.role === "Admin"
                   }
                 />
               </FormField>
-              {(selectedStaff.role === "SysAdmin" ||
-                selectedStaff.role === "Admin") && (
-                <p className="text-[10px] text-stone-400 mt-2 italic">
+              {(selectedStafne-400 mt-2 italic">
                   System roles cannot be renamed.
                 </p>
               )}
@@ -1087,16 +1187,15 @@ export const StaffManagement: React.FC = () => {
                       )
                     }
                     disabled={
-                      selectedStaff.role === "SysAdmin" ||
-                      selectedStaff.role === "Admin"
+                      !permissionService.canEditRolePermissions() ||
+                      selectedStaff?.role === "SysAdmin" ||
+                      selectedStaff?.role === "Admin"
                     }
                     className="text-xs border border-stone-200 rounded-none px-2 py-1"
                   >
                     <option value="hidden">Hidden</option>
                     <option value="view">View</option>
-                    <option value="create">Create</option>
-                    <option value="submit">Submit</option>
-                    <option value="edit">Edit</option>
+                    <option van>
                     <option value="approve">Approve</option>
                     <option value="delete">Delete</option>
                     <option value="export">Export</option>
@@ -1134,6 +1233,7 @@ export const StaffManagement: React.FC = () => {
                           )
                         }
                         disabled={
+                          !permissionService.canEditRolePermissions() ||
                           selectedStaff?.role === "SysAdmin" ||
                           selectedStaff?.role === "Admin"
                         }
@@ -1756,6 +1856,211 @@ export const StaffManagement: React.FC = () => {
               </div>
             </div>
           </DataPanel>
+
+            <DataPanel title="Personal Details">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 p-6">
+                <FormField label="National ID">
+                  <input
+                    type="text"
+                    value={formData.personalDetails?.nationalId || ""}
+                    onChange={(e) => setFormData(prev => ({ ...prev, personalDetails: { ...(prev.personalDetails || {}), nationalId: e.target.value } }))}
+                    className="form-input"
+                    placeholder="At least 5 chars"
+                  />
+                </FormField>
+                <FormField label="Date of Birth">
+                  <input
+                    type="date"
+                    value={formData.personalDetails?.dateOfBirth || ""}
+                    onChange={(e) => setFormData(prev => ({ ...prev, personalDetails: { ...(prev.personalDetails || {}), dateOfBirth: e.target.value } }))}
+                    className="form-input"
+                  />
+                </FormField>
+                <FormField label="Gender">
+                  <select
+                    value={formData.personalDetails?.gender || ""}
+                    onChange={(e) => setFormData(prev => ({ ...prev, personalDetails: { ...(prev.personalDetails || {}), gender: e.target.value } }))}
+                    className="form-input"
+                  >
+                    <option value="">Select Gender</option>
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                    <option value="other">Other</option>
+                  </select>
+                </FormField>
+                <FormField label="Marital Status">
+                  <select
+                    value={formData.personalDetails?.maritalStatus || ""}
+                    onChange={(e) => setFormData(prev => ({ ...prev, personalDetails: { ...(prev.personalDetails || {}), maritalStatus: e.target.value } }))}
+                    className="form-input"
+                  >
+                    <option value="">Select Status</option>
+                    <option value="single">Single</option>
+                    <option value="married">Married</option>
+                    <option value="divorced">Divorced</option>
+                    <option value="widowed">Widowed</option>
+                  </select>
+                </FormField>
+                <FormField label="Next of Kin Name">
+                  <input
+                    type="text"
+                    value={formData.personalDetails?.nextOfKinName || ""}
+                    onChange={(e) => setFormData(prev => ({ ...prev, personalDetails: { ...(prev.personalDetails || {}), nextOfKinName: e.target.value } }))}
+                    className="form-input"
+                  />
+                </FormField>
+                <FormField label="Next of Kin Phone">
+                  <input
+                    type="tel"
+                    value={formData.personalDetails?.nextOfKinPhone || ""}
+                    onChange={(e) => setFormData(prev => ({ ...prev, personalDetails: { ...(prev.personalDetails || {}), nextOfKinPhone: e.target.value } }))}
+                    className="form-input"
+                    placeholder="+263..."
+                  />
+                </FormField>
+              </div>
+            </DataPanel>
+
+            <DataPanel title="Address Details">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 p-6">
+                <FormField label="Country">
+                  <input
+                    type="text"
+                    value={formData.addressDetails?.country || ""}
+                    onChange={(e) => setFormData(prev => ({ ...prev, addressDetails: { ...(prev.addressDetails || {}), country: e.target.value } }))}
+                    className="form-input"
+                  />
+                </FormField>
+                <FormField label="Province">
+                  <input
+                    type="text"
+                    value={formData.addressDetails?.province || ""}
+                    onChange={(e) => setFormData(prev => ({ ...prev, addressDetails: { ...(prev.addressDetails || {}), province: e.target.value } }))}
+                    className="form-input"
+                  />
+                </FormField>
+                <FormField label="City / Town">
+                  <input
+                    type="text"
+                    value={formData.addressDetails?.cityTown || ""}
+                    onChange={(e) => setFormData(prev => ({ ...prev, addressDetails: { ...(prev.addressDetails || {}), cityTown: e.target.value } }))}
+                    className="form-input"
+                  />
+                </FormField>
+                <FormField label="District">
+                  <input
+                    type="text"
+                    value={formData.addressDetails?.district || ""}
+                    onChange={(e) => setFormData(prev => ({ ...prev, addressDetails: { ...(prev.addressDetails || {}), district: e.target.value } }))}
+                    className="form-input"
+                  />
+                </FormField>
+                <FormField label="Suburb">
+                  <input
+                    type="text"
+                    value={formData.addressDetails?.suburb || ""}
+                    onChange={(e) => setFormData(prev => ({ ...prev, addressDetails: { ...(prev.addressDetails || {}), suburb: e.target.value } }))}
+                    className="form-input"
+                  />
+                </FormField>
+                <FormField label="Street Address">
+                  <input
+                    type="text"
+                    value={formData.addressDetails?.streetAddress || ""}
+                    onChange={(e) => setFormData(prev => ({ ...prev, addressDetails: { ...(prev.addressDetails || {}), streetAddress: e.target.value } }))}
+                    className="form-input"
+                  />
+                </FormField>
+                <div className="md:col-span-2 lg:col-span-3">
+                  <FormField label="GPS Notes">
+                    <textarea
+                      value={formData.addressDetails?.gpsNotes || ""}
+                      onChange={(e) => setFormData(prev => ({ ...prev, addressDetails: { ...(prev.addressDetails || {}), gpsNotes: e.target.value } }))}
+                      className="form-input min-h-[80px]"
+                      placeholder="Directions or landmarks..."
+                    />
+                  </FormField>
+                </div>
+              </div>
+            </DataPanel>
+
+            <DataPanel title="KYC Details">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-6">
+                <FormField label="ID Type">
+                  <select
+                    value={formData.kycDetails?.idType || ""}
+                    onChange={(e) => setFormData(prev => ({ ...prev, kycDetails: { ...(prev.kycDetails || {}), idType: e.target.value } }))}
+                    className="form-input"
+                  >
+                    <option value="">Select ID Type</option>
+                    <option value="National ID">National ID</option>
+                    <option value="Passport">Passport</option>
+                    <option value="Driver's License">Driver's License</option>
+                  </select>
+                </FormField>
+                <FormField label="ID Number">
+                  <input
+                    type="text"
+                    value={formData.kycDetails?.idNumber || ""}
+                    onChange={(e) => setFormData(prev => ({ ...prev, kycDetails: { ...(prev.kycDetails || {}), idNumber: e.target.value } }))}
+                    className="form-input"
+                  />
+                </FormField>
+                <FormField label="KYC Status">
+                  <select
+                    value={formData.kycDetails?.kycStatus || "not_started"}
+                    onChange={(e) => setFormData(prev => ({ ...prev, kycDetails: { ...(prev.kycDetails || {}), kycStatus: e.target.value as any } }))}
+                    className="form-input font-bold"
+                  >
+                    <option value="not_started">Not Started</option>
+                    <option value="pending">Pending Verification</option>
+                    <option value="verified">Verified</option>
+                    <option value="rejected">Rejected</option>
+                  </select>
+                </FormField>
+                <div className="md:col-span-2">
+                  <FormField label="KYC Notes">
+                    <textarea
+                      value={formData.kycDetails?.notes || ""}
+                      onChange={(e) => setFormData(prev => ({ ...prev, kycDetails: { ...(prev.kycDetails || {}), notes: e.target.value } }))}
+                      className="form-input min-h-[80px]"
+                    />
+                  </FormField>
+                </div>
+              </div>
+            </DataPanel>
+
+            <DataPanel title="KYC Documents">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 p-6">
+                <FormField label="ID Document URL">
+                  <input
+                    type="text"
+                    value={formData.kycDocuments?.idDocumentUrl || ""}
+                    onChange={(e) => setFormData(prev => ({ ...prev, kycDocuments: { ...(prev.kycDocuments || {}), idDocumentUrl: e.target.value } }))}
+                    className="form-input"
+                    placeholder="Link to ID scan"
+                  />
+                </FormField>
+                <FormField label="Proof of Residence URL">
+                  <input
+                    type="text"
+                    value={formData.kycDocuments?.proofOfResidenceUrl || ""}
+                    onChange={(e) => setFormData(prev => ({ ...prev, kycDocuments: { ...(prev.kycDocuments || {}), proofOfResidenceUrl: e.target.value } }))}
+                    className="form-input"
+                    placeholder="Link to utility bill"
+                  />
+                </FormField>
+                <FormField label="Staff Photo URL">
+                  <input
+                    type="text"
+                    value={formData.kycDocuments?.photoUrl || ""}
+                    onChange={(e) => setFormData(prev => ({ ...prev, kycDocuments: { ...(prev.kycDocuments || {}), photoUrl: e.target.value } }))}
+                    className="form-input"
+                    placeholder="Link to portrait"
+                  />
+                </FormField>
+              </div>
+            </DataPanel>
         </div>
       )}
 
@@ -1763,7 +2068,7 @@ export const StaffManagement: React.FC = () => {
         <div className="space-y-8">
           <div className="flex justify-between items-center bg-stone-900 text-white p-6">
             <h3 className="text-sm font-bold uppercase tracking-widest">
-              Edit Staff Permissions - {selectedStaff?.displayName}
+              {permissionService.canEditRolePermissions() ? "Edit Staff Permissions" : "View Staff Permissions"} - {selectedStaff?.displayName}
             </h3>
 
             <div className="flex gap-3">
@@ -1774,8 +2079,12 @@ export const StaffManagement: React.FC = () => {
                 Cancel
               </SecondaryButton>
 
-              <PrimaryButton
+              t&imaryButton
                 onClick={async () => {
+                  if (!permissionService.canEditRolePermissions()) {
+                    alert("You do not have permission to edit role permissions.");
+                    return;
+                  }
                   if (selectedStaff) {
                     try {
                       await staffService.saveStaff({
@@ -1800,17 +2109,18 @@ export const StaffManagement: React.FC = () => {
                         void staffAuditService.logAction({
                           eventType: "PERMISSION_CHANGED",
                           module: "staff",
-                          action: `Updated individual permissions for ${selectedStaff.displayName}`,
+                          action: "Updated role/menu/action permissions",
                           severity: "critical",
                           recordType: "staff",
                           recordId: selectedStaff.id,
                           recordName: selectedStaff.displayName,
+                          beforeSnapshot: { menuPermissions: selectedStaff.menuPermissions, actionPermissions: selectedStaff.actionPermissions },
+                          afterSnapshot: { menuPermissions: formData.menuPermissions, actionPermissions: formData.actionPermissions },
                         });
                       } catch (auditErr) {
                         console.error("Audit log failed", auditErr);
                       }
 
-                      setStaffList(asArray<Staff>(staffService.getAllStaff()));
 
                       window.setTimeout(() => {
                         void loadStaff();
@@ -1832,8 +2142,15 @@ export const StaffManagement: React.FC = () => {
               >
                 Save Permissions
               </PrimaryButton>
+              )}
             </div>
           </div>
+
+          {!permissionService.canEditRolePermissions() && (
+            <div className="p-4 bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm mt-4 mx-6">
+              You can view staff permissions, but you do not have authority to edit them.
+            </div>
+          )}
 
           <DataPanel title="Menu Permissions">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -1854,6 +2171,7 @@ export const StaffManagement: React.FC = () => {
                         e.target.value as PermissionLevel,
                       )
                     }
+                    disabled={!permissionService.canEditRolePermissions()}
                     className="text-xs border border-stone-200 rounded-none px-2 py-1"
                   >
                     <option value="hidden">Hidden</option>
@@ -1896,6 +2214,7 @@ export const StaffManagement: React.FC = () => {
                             e.target.checked,
                           )
                         }
+                        disabled={!permissionService.canEditRolePermissions()}
                       />
                       {key.split(".")[1]}
                     </label>

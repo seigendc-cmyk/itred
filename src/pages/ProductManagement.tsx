@@ -441,6 +441,19 @@ export const ProductManagement: React.FC = () => {
       });
 
       loadData();
+
+      // Non-blocking staff audit logging
+      try {
+        void staffAuditService.logDelete(
+          "product",
+          "product",
+          id,
+          product?.name || "Unknown",
+          product,
+        );
+      } catch (e) {
+        console.error("Audit log failed", e);
+      }
     }
   };
 
@@ -527,6 +540,19 @@ export const ProductManagement: React.FC = () => {
         updates: bulkData,
       },
     });
+
+    // Non-blocking staff audit logging
+    try {
+      void staffAuditService.logAction({
+        eventType: "RECORD_UPDATED",
+        module: "product",
+        action: `Bulk updated ${selectedProductIds.length} products`,
+        severity: "warning",
+        afterSnapshot: bulkData,
+      });
+    } catch (e) {
+      console.error("Audit log failed", e);
+    }
 
     loadData();
     setIsBulkUpdateOpen(false);

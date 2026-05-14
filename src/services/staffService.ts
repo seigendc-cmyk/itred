@@ -275,6 +275,7 @@ const ROLE_TEMPLATES_OBJECT: Record<string, MenuPermissions> = {
     roleMenuPermissions: "full",
     staffAccessLogs: "full",
     systemSettings: "full",
+    rpnPerformance: "full",
     howTo: "view",
   },
   Admin: {
@@ -303,6 +304,7 @@ const ROLE_TEMPLATES_OBJECT: Record<string, MenuPermissions> = {
     roleMenuPermissions: "full",
     staffAccessLogs: "full",
     systemSettings: "full",
+    rpnPerformance: "full",
     howTo: "view",
   },
   "Backoffice Operator": {
@@ -354,6 +356,7 @@ const ROLE_TEMPLATES_OBJECT: Record<string, MenuPermissions> = {
     collectionCalendar: "view",
     inventorySpotChecks: "full",
     analytics: "view",
+    rpnPerformance: "full",
   },
   "CAH Officer": {
     dashboard: "view",
@@ -381,6 +384,7 @@ const ROLE_TEMPLATES_OBJECT: Record<string, MenuPermissions> = {
     biMarketAnalytics: "view",
     performanceMetrics: "view",
     activityLogs: "view",
+    rpnPerformance: "view",
   },
 };
 

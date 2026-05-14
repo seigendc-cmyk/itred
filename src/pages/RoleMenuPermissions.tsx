@@ -10,6 +10,7 @@ import {
   PrimaryButton,
 } from "../components/CommonUI.tsx";
 import { Shield } from "lucide-react";
+import { permissionService } from "../services/permissionService.ts";
 
 const ACTION_GROUPS = [
   {
@@ -83,15 +84,57 @@ const ACTION_GROUPS = [
     name: "Staff Tasks",
     keys: ["staffTasks.viewOwn", "staffTasks.assign", "staffTasks.complete"],
   },
+  {
+    name: "RPN & Field Network",
+    keys: [
+      "rpn.viewPerformance",
+      "rpn.viewFinancials",
+      "rpn.setThresholds",
+      "rpn.assignVendor",
+      "rpn.reassignVendor",
+      "rpn.viewChurn",
+      "rpn.viewCommissions",
+      "rpn.exportReports",
+    ],
+  },
+  {
+    name: "Role & Menu Permissions",
+    keys: [
+      "roles.viewPermissions",
+      "roles.editPermissions",
+      "roles.createRoleTemplate",
+      "roles.deleteRoleTemplate",
+      "roles.assignRoleToStaff",
+      "roles.auditPermissionChanges",
+    ],
+  },
 ];
 
 export const RoleMenuPermissions: React.FC = () => {
+  const canEdit = permissionService.canEditRolePermissions();
+  const canView =
+    permissionService.canViewRolePermissions() ||
+    permissionService.hasMenuAccess("roleMenuPermissions");
+
+  if (!canView) {
+    return (
+      <div className="p-8 text-center text-stone-500">Access Restricted</div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Role & Menu Permissions"
         subtitle="Configure role-based access control and menu permissions"
       />
+
+      {!canEdit && (
+        <div className="p-4 bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm">
+          You can view role permissions, but you do not have authority to edit
+          them.
+        </div>
+      )}
 
       <DataPanel title="Permission Management">
         <div className="text-center py-8 text-stone-500">

@@ -116,7 +116,14 @@ const MENU_GROUPS: {
     id: "rpn-field-network",
     label: "RPN & Field Network",
     icon: Users,
-    items: [{ id: AppRoute.RPN_MGMT, label: "RPN Management", icon: Users }],
+    items: [
+      { id: AppRoute.RPN_MGMT, label: "RPN Management", icon: Users },
+      {
+        id: AppRoute.RPN_PERFORMANCE,
+        label: "RPN Performance",
+        icon: Activity,
+      },
+    ],
   },
   {
     id: "finance-subscriptions",
@@ -254,6 +261,7 @@ export const AppShell: React.FC<AppShellProps> = ({
       [AppRoute.APPROVAL_QUEUE]: "approvalQueue",
       [AppRoute.NOTIFICATIONS]: "notifications",
       [AppRoute.STAFF_TASKS]: "staffTasks",
+      [AppRoute.RPN_PERFORMANCE]: "rpnPerformance",
       [AppRoute.DASHBOARD]: "dashboard",
       [AppRoute.HOW_TO]: "howTo",
     };
