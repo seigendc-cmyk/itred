@@ -97,6 +97,38 @@ const loadStaffFromFirestore = async (): Promise<Staff[]> => {
   });
 };
 
+const validateUniqueStaffIdentity = async (staff: Staff): Promise<void> => {
+  let remoteStaff: Staff[] = [];
+  try {
+    remoteStaff = await loadStaffFromFirestore();
+  } catch (e) {
+    remoteStaff = getLocalStaff();
+  }
+
+  const codeDuplicate = remoteStaff.find(
+    (s) => s.staffCode === staff.staffCode && s.id !== staff.id,
+  );
+  if (codeDuplicate) {
+    throw new Error(
+      "Duplicate staff code found. Generate a new staff code before saving.",
+    );
+  }
+
+  if (staff.email && staff.email.trim() !== "") {
+    const emailDuplicate = remoteStaff.find(
+      (s) =>
+        s.email?.toLowerCase() === staff.email?.toLowerCase() &&
+        s.id !== staff.id &&
+        s.status === "active",
+    );
+    if (emailDuplicate) {
+      throw new Error(
+        "Duplicate staff email found. This email is already attached to another staff member.",
+      );
+    }
+  }
+};
+
 // Mock initial staff data
 const DEFAULT_STAFF: Staff[] = [
   {
@@ -427,6 +459,8 @@ export const staffService = {
       createdAt: staff.createdAt || now,
     } as Staff);
 
+    await validateUniqueStaffIdentity(staffToSave);
+
     upsertLocalStaff(staffToSave);
 
     try {
@@ -484,6 +518,44 @@ export const staffService = {
 
     const allStaff = getLocalStaff();
     const prefix = `ITR-STF-${yearMonth}-`;
+
+    const existingCodes = allStaff
+      .filter(
+        (staff) =>
+          staff &&
+          typeof staff.staffCode === "string" &&
+          staff.staffCode.startsWith(prefix),
+      )
+      .map((staff) => staff.staffCode as string);
+
+    let nextNumber = 1;
+
+    if (existingCodes.length > 0) {
+      const numbers = existingCodes
+        .map((code) => parseInt(code.split("-").pop() || "0", 10))
+        .filter((value) => !Number.isNaN(value))
+        .sort((a, b) => b - a);
+
+      nextNumber = (numbers[0] || 0) + 1;
+    }
+
+    return `${prefix}${nextNumber.toString().padStart(4, "0")}`;
+  },
+
+  generateUniqueStaffCodeFromFirebase: async (): Promise<string> => {
+    const now = new Date();
+    const yearMonth =
+      now.getFullYear().toString() +
+      (now.getMonth() + 1).toString().padStart(2, "0");
+
+    const prefix = `ITR-STF-${yearMonth}-`;
+
+    let allStaff: Staff[] = [];
+    try {
+      allStaff = await loadStaffFromFirestore();
+    } catch (e) {
+      allStaff = getLocalStaff();
+    }
 
     const existingCodes = allStaff
       .filter(

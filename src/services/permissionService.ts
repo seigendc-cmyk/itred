@@ -171,6 +171,36 @@ export const permissionService = {
     return permissionService.hasActionPermission("rpn.assignVendor");
   },
 
+  canViewRpnAgents: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return permissionService.hasActionPermission("rpn.viewAgents");
+  },
+
+  canCreateRpnAgent: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return permissionService.hasActionPermission("rpn.createAgent");
+  },
+
+  canEditRpnAgent: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return permissionService.hasActionPermission("rpn.editAgent");
+  },
+
+  canSuspendRpnAgent: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return permissionService.hasActionPermission("rpn.suspendAgent");
+  },
+
+  canDeleteRpnAgent: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return permissionService.hasActionPermission("rpn.deleteAgent");
+  },
+
+  canEditStaffKycDetails: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return permissionService.hasActionPermission("staff.editKycDetails");
+  },
+
   canViewRolePermissions: (): boolean => {
     if (permissionService.isSysAdmin()) return true;
     return permissionService.hasActionPermission("roles.viewPermissions");

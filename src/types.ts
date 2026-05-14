@@ -129,6 +129,11 @@ export type ActionPermissionKey =
   | "staffTasks.viewOwn"
   | "staffTasks.assign"
   | "staffTasks.complete"
+  | "rpn.viewAgents"
+  | "rpn.createAgent"
+  | "rpn.editAgent"
+  | "rpn.suspendAgent"
+  | "rpn.deleteAgent"
   | "rpn.viewPerformance"
   | "rpn.viewFinancials"
   | "rpn.setThresholds"
@@ -137,6 +142,7 @@ export type ActionPermissionKey =
   | "rpn.viewChurn"
   | "rpn.viewCommissions"
   | "rpn.exportReports"
+  | "staff.editKycDetails"
   | "roles.viewPermissions"
   | "roles.editPermissions"
   | "roles.createRoleTemplate"
@@ -472,6 +478,10 @@ export interface Vendor {
   businessDescription: string;
   logoUrl?: string;
   bannerUrl?: string;
+  logoAssetUrl?: string;
+  bannerAssetUrl?: string;
+  businessLogoUrl?: string;
+  businessBannerUrl?: string;
   catalogueDisplayName: string;
   catalogueSlogan: string;
   openingHours: string;
@@ -900,6 +910,41 @@ export interface RPN {
   assignedVendors: string[]; // Vendor IDs
   createdAt: string;
   updatedAt: string;
+  personalDetails?: {
+    nationalId?: string;
+    dateOfBirth?: string;
+    gender?: string;
+    maritalStatus?: string;
+    nextOfKinName?: string;
+    nextOfKinPhone?: string;
+    nextOfKinRelationship?: string;
+    highestEducation?: string;
+    skills?: string;
+  };
+  addressDetails?: {
+    country?: string;
+    province?: string;
+    cityTown?: string;
+    district?: string;
+    suburb?: string;
+    streetAddress?: string;
+    gpsNotes?: string;
+  };
+  kycDetails?: {
+    idType?: string;
+    idNumber?: string;
+    kycStatus?: "not_started" | "pending" | "verified" | "rejected";
+    verifiedByStaffId?: string;
+    verifiedByName?: string;
+    verifiedAt?: string;
+    notes?: string;
+    vettingNotes?: string;
+  };
+  kycDocuments?: {
+    passportPhotoUrl?: string;
+    passportPhotoName?: string;
+    passportPhotoUpdatedAt?: string;
+  };
 }
 
 export type CollectionType =

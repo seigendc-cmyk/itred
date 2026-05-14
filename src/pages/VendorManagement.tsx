@@ -64,7 +64,7 @@ import {
   PricingPlan,
 } from "../types.ts";
 import { asArray } from "../utils/safeData.ts";
-import { optimizeImageToWebP } from "../utils/imageOptimizer.ts";
+import { optimizeImageToWebP } from "../utils/imageUtils.ts";
 import { vendorAssetService } from "../services/vendorAssetService.ts";
 import { findSimilarVendors } from "../utils/duplicateDetection.ts";
 import { approvalService } from "../services/approvalService.ts";
@@ -503,9 +503,21 @@ export const VendorManagement: React.FC = () => {
         vendorId,
         optimizedBlob,
       );
-      setFormData((prev) => ({ ...prev, logoUrl: url }));
+      setFormData((prev) => ({ ...prev, logoAssetUrl: url, logoUrl: url }));
       setLogoStatus("Uploaded");
       setTimeout(() => setLogoStatus(""), 3000);
+
+      try {
+        void staffAuditService.logAction({
+          eventType: "RECORD_UPDATED",
+          module: "vendor",
+          severity: "high",
+          action: "Updated vendor identity assets",
+          recordType: "vendor",
+          recordId: vendorId,
+          recordName: formData.name,
+        });
+      } catch (e) {}
     } catch (error) {
       console.error("Logo upload failed", error);
       setLogoStatus("Failed");
@@ -545,9 +557,21 @@ export const VendorManagement: React.FC = () => {
         vendorId,
         optimizedBlob,
       );
-      setFormData((prev) => ({ ...prev, bannerUrl: url }));
+      setFormData((prev) => ({ ...prev, bannerAssetUrl: url, bannerUrl: url }));
       setBannerStatus("Uploaded");
       setTimeout(() => setBannerStatus(""), 3000);
+
+      try {
+        void staffAuditService.logAction({
+          eventType: "RECORD_UPDATED",
+          module: "vendor",
+          severity: "high",
+          action: "Updated vendor identity assets",
+          recordType: "vendor",
+          recordId: vendorId,
+          recordName: formData.name,
+        });
+      } catch (e) {}
     } catch (error) {
       console.error("Banner upload failed", error);
       setBannerStatus("Failed");
@@ -606,6 +630,16 @@ export const VendorManagement: React.FC = () => {
     const currentStaff = staffService.getStaffById(
       formData.assignedStaffId || "STAFF-ADM",
     );
+    const vendorLogo =
+      formData.logoAssetUrl ||
+      formData.logoUrl ||
+      formData.businessLogoUrl ||
+      "";
+    const vendorBanner =
+      formData.bannerAssetUrl ||
+      formData.bannerUrl ||
+      formData.businessBannerUrl ||
+      "";
     return (
       <div className="space-y-8 pb-32">
         <div className="flex items-center justify-between bg-stone-50 p-6 border border-stone-200">
@@ -909,11 +943,14 @@ export const VendorManagement: React.FC = () => {
                     </h4>
                     <div className="flex gap-4 items-start">
                       <div className="w-20 h-20 bg-white border-2 border-stone-200 flex items-center justify-center overflow-hidden shrink-0">
-                        {formData.logoUrl ? (
+                        {vendorLogo ? (
                           <img
-                            src={formData.logoUrl}
+                            src={vendorLogo}
                             className="w-full h-full object-contain"
                             alt="Logo"
+                            onError={(e) => {
+                              e.currentTarget.style.display = "none";
+                            }}
                           />
                         ) : (
                           <span className="text-[8px] uppercase font-bold text-stone-300 text-center">
@@ -942,11 +979,16 @@ export const VendorManagement: React.FC = () => {
                             {logoStatus}
                           </p>
                         )}
-                        {formData.logoUrl && (
+                        {vendorLogo && (
                           <button
                             type="button"
                             onClick={() =>
-                              setFormData((prev) => ({ ...prev, logoUrl: "" }))
+                              setFormData((prev) => ({
+                                ...prev,
+                                logoUrl: "",
+                                logoAssetUrl: "",
+                                businessLogoUrl: "",
+                              }))
                             }
                             className="block text-[9px] text-red-500 hover:text-red-700 uppercase font-bold mt-2"
                           >
@@ -964,11 +1006,14 @@ export const VendorManagement: React.FC = () => {
                     </h4>
                     <div className="flex gap-4 items-start flex-col sm:flex-row">
                       <div className="w-full sm:w-32 h-16 bg-white border-2 border-stone-200 flex items-center justify-center overflow-hidden shrink-0">
-                        {formData.bannerUrl ? (
+                        {vendorBanner ? (
                           <img
-                            src={formData.bannerUrl}
+                            src={vendorBanner}
                             className="w-full h-full object-cover"
                             alt="Banner"
+                            onError={(e) => {
+                              e.currentTarget.style.display = "none";
+                            }}
                           />
                         ) : (
                           <span className="text-[8px] uppercase font-bold text-stone-300 text-center">
@@ -997,13 +1042,15 @@ export const VendorManagement: React.FC = () => {
                             {bannerStatus}
                           </p>
                         )}
-                        {formData.bannerUrl && (
+                        {vendorBanner && (
                           <button
                             type="button"
                             onClick={() =>
                               setFormData((prev) => ({
                                 ...prev,
                                 bannerUrl: "",
+                                bannerAssetUrl: "",
+                                businessBannerUrl: "",
                               }))
                             }
                             className="block text-[9px] text-red-500 hover:text-red-700 uppercase font-bold mt-2"
@@ -1760,6 +1807,11 @@ export const VendorManagement: React.FC = () => {
       >
         {filtered.map((vendor) => {
           const rpn = rpns.find((r) => r.id === vendor.assignedRPNId);
+          const vendorLogo =
+            vendor.logoAssetUrl ||
+            vendor.logoUrl ||
+            vendor.businessLogoUrl ||
+            "";
           return (
             <tr
               key={vendor.id}
@@ -1768,11 +1820,14 @@ export const VendorManagement: React.FC = () => {
               <div className="p-4 border-b border-stone-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div className="flex items-center gap-4">
                   <div className="w-10 h-10 border border-stone-200 bg-orange-50/50 flex items-center justify-center p-1">
-                    {vendor.logoUrl ? (
+                    {vendorLogo ? (
                       <img
-                        src={vendor.logoUrl}
+                        src={vendorLogo}
                         className="w-full h-full object-cover grayscale opacity-80"
                         alt=""
+                        onError={(e) => {
+                          e.currentTarget.style.display = "none";
+                        }}
                       />
                     ) : (
                       <Store size={20} className="text-brand-charcoal" />

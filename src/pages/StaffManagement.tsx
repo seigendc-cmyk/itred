@@ -18,6 +18,7 @@ import {
   RotateCcw,
   FileText,
   Download,
+  AlertTriangle,
 } from "lucide-react";
 import {
   StatusBadge,
@@ -542,7 +543,11 @@ export const StaffManagement: React.FC = () => {
       return;
     }
 
-    if (formData.personalDetails?.nationalId && formData.personalDetails.nationalId.trim().length > 0 && formData.personalDetails.nationalId.trim().length < 5) {
+    if (
+      formData.personalDetails?.nationalId &&
+      formData.personalDetails.nationalId.trim().length > 0 &&
+      formData.personalDetails.nationalId.trim().length < 5
+    ) {
       setFormError("National ID must be at least 5 characters.");
       return;
     }
@@ -639,10 +644,18 @@ export const StaffManagement: React.FC = () => {
           });
         }
 
-        const pChanged = JSON.stringify(oldStaff.personalDetails || {}) !== JSON.stringify(staffToSave.personalDetails || {});
-        const aChanged = JSON.stringify(oldStaff.addressDetails || {}) !== JSON.stringify(staffToSave.addressDetails || {});
-        const kChanged = JSON.stringify(oldStaff.kycDetails || {}) !== JSON.stringify(staffToSave.kycDetails || {});
-        const dChanged = JSON.stringify(oldStaff.kycDocuments || {}) !== JSON.stringify(staffToSave.kycDocuments || {});
+        const pChanged =
+          JSON.stringify(oldStaff.personalDetails || {}) !==
+          JSON.stringify(staffToSave.personalDetails || {});
+        const aChanged =
+          JSON.stringify(oldStaff.addressDetails || {}) !==
+          JSON.stringify(staffToSave.addressDetails || {});
+        const kChanged =
+          JSON.stringify(oldStaff.kycDetails || {}) !==
+          JSON.stringify(staffToSave.kycDetails || {});
+        const dChanged =
+          JSON.stringify(oldStaff.kycDocuments || {}) !==
+          JSON.stringify(staffToSave.kycDocuments || {});
 
         if (pChanged || aChanged || kChanged || dChanged) {
           void staffAuditService.logAction({
@@ -674,11 +687,22 @@ export const StaffManagement: React.FC = () => {
       setView("list");
       focusMainContent();
       setTimeout(() => setFormSuccess(""), 3000);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to save staff profile.", error);
-      setFormError(
-        "Staff KYC details were not saved. Check permissions or network.",
-      );
+      if (error.message && error.message.includes("Duplicate")) {
+        void staffAuditService.logAction({
+          eventType: "ACCESS_DENIED",
+          module: "staff",
+          severity: "high",
+          action: "Blocked duplicate staff code/email save",
+        });
+        setFormError(error.message);
+      } else {
+        setFormError(
+          "Staff details were not saved. Check permissions or network.",
+        );
+      }
+      window.scrollTo({ top: 0, behavior: "smooth" });
     }
   };
 
@@ -902,6 +926,26 @@ export const StaffManagement: React.FC = () => {
     }));
   };
 
+  const duplicates = useMemo(() => {
+    if (!formData.staffCode && !formData.email) return [];
+
+    return staffList.filter((s) => {
+      if (s.id === formData.id) return false;
+      const sameCode =
+        !!formData.staffCode && s.staffCode === formData.staffCode;
+      const sameEmail =
+        !!formData.email &&
+        !!s.email &&
+        s.email.toLowerCase() === formData.email.toLowerCase() &&
+        s.status === "active";
+      return sameCode || sameEmail;
+    });
+  }, [formData.staffCode, formData.email, formData.id, staffList]);
+
+  const hasDuplicateCode = duplicates.some(
+    (s) => s.staffCode === formData.staffCode,
+  );
+
   return (
     <div className="space-y-8 pb-20">
       <div
@@ -909,344 +953,383 @@ export const StaffManagement: React.FC = () => {
         id="staff-management-header"
         tabIndex={-1}
       >
-        {["directory", "roles", "logs", "settings"].map((tab) => rmissions() && !permissionService.hasMenuAccess("roleMenuPermissions")) return null;
+        {["directory", "roles", "logs", "settings"].map((tab) => {
+          if (
+            tab === "roles" &&
+            !permissionService.hasMenuAccess("roleMenuPermissions")
+          )
+            return null;
+          if (
+            tab === "logs" &&
+            !permissionService.hasMenuAccess("staffAccessLogs")
+          )
+            return null;
+          if (
+            tab === "settings" &&
+            !permissionService.hasMenuAccess("systemSettings")
+          )
+            return null;
           return (
-          <button
-            key={tab}
-            onClick={() => {
-              setActiveTab(tab as any);
-              setView("list");
-            }}
-            className={`px-6 py-2 text-[10px] font-bold uppercase tracking-widest ${
-              activeTab === tab
-                ? "bg-white text-brand-orange shadow-sm"
-                : "text-stone-400"
-            }`}
-          >
-            {tab}
-          </button>
+            <button
+              key={tab}
+              onClick={() => {
+                setActiveTab(tab as any);
+                setView("list");
+              }}
+              className={`px-6 py-2 text-[10px] font-bold uppercase tracking-widest ${
+                activeTab === tab
+                  ? "bg-white text-brand-orange shadow-sm"
+                  : "text-stone-400"
+              }`}
+            >
+              {tab}
+            </button>
           );
+        })}
       </div>
 
-      {activeTab === "roles" && permissionService.canViewRolePermissions() && view === "list" && (
-        <div className="space-y-6">
-          {!permissionServissionbg-yellow-50 border border-yellow-200 text-yellow-800 text-sm">
-              You can view role permissions, but you do not have authority to edit them.
-            </div>
-          )}
-          <DataPanel
-            title="Role Templates"
-            actions={
-              permissionService.canCreateRoleTemplate() && (
-              <PrimaryButton
-                onClick={() => {
-                  setEditedRoleName("New Custom Role");
-                  setFormData({ menuPermissions: {} });
-                  setSelectedStaff({ role: "New Custom Role" } as any);
-                  setView("roleEdit");
-                  focusMainContent();
-                }}
-                className="text-xs px-3 py-1 flex items-center gap-1"
-              >
-                <Plus size={14} /> New Template
-              </PrimaryButton>
-              )
-            }
-          >
-            <div className="space-y-4">
-              {Object.keys(localRoleTemplates).map((role) => (
-                <div
-                  key={role}
-                  className="border border-stone-200 rounded-none p-4"
-                >
-                  <div className="flex justify-between items-start mb-4">
-                    <div>
-                      <h3 className="font-semibold text-stone-800">{role}</h3>
-                      <p className="text-sm text-stone-600">
-                        {role === "SysAdmin" || role === "Admin"
-                          ? "Full system access"
-                          : role === "Backoffice Operator"
-                            ? "General operational tasks"
-                            : role === "Product Data Clerk"
-                              ? "Product data management"
-                              : role === "Catalogue Officer"
-                                ? "Catalogue creation and deployment"
-                                : role === "Collections Officer"
-                                  ? "Subscription and collections management"
-                                  : role === "RPN Manager"
-                                    ? "RPN network management"
-                                    : role === "CAH Officer"
-                                      ? "Commerce Access Hub operations"
-                                      : role === "BI Analyst"
-                                        ? "Business intelligence and analytics"
-                                        : "Read-only access"}
-                      </p>
-                    </div>
-
-                    <div className="flex gap-2">
-                      {permissionService.canAssignRoleToStaff() && (
-                      <PrimaryButton
-                        onClick={() => {
-                          setApplyRoleConfig({ role });
-                          setIsApplyRoleModalOpen(true);
-                        }}
-                        className="text-xs px-3 py-1"
-                      >
-                        Apply to Staff
-                      </PrimaryButton>
-                      )}
-
-                      <SecondaryButton
-                        onClick={() => {
-                          setFormData({
-                            menuPermissions: {
-                              ...localRoleTemplates[role].menuPermissions,
-                            },
-                            actionPermissions: {
-                              ...localRoleTemplates[role].actionPermissions,
-                            },
-                          });
-                          setSelectedStaff({ role } as any);
-                          setEditedRoleName(role);
-                          setView("roleEdit");
-                          focusMainContent();
-                        }}
-                        className="text-xs px-3 py-1"
-                      >
-                        {permissionService.canEditRolePermissions() ? "Edit Permissions" : "View Permissions"}
-                      </SecondaryButton>
-                    </div>
-                 </div>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-                    {Object.entries(
-                      localRoleTemplates[role].menuPermissions || {},
-                    ).map(([key, level]) => (
-                      <div key={key} className="flex justify-between">
-                        <span className="text-stone-600">
-                          {PERMISSIONS.find((p) => p.id === key)?.label || key}:
-                        </span>
-                        <span
-                          className={`font-medium ${
-                            level === "full"
-                              ? "text-green-600"
-                              : level === "hidden"
-                                ? "text-red-600"
-                                : "text-blue-600"
-                          }`}
-                        >
-                          {level}
-                        </span>
+      {activeTab === "roles" &&
+        permissionService.canViewRolePermissions() &&
+        view === "list" && (
+          <div className="space-y-6">
+            {!permissionService.canEditRolePermissions() && (
+              <div className="p-4 bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm">
+                You can view role permissions, but you do not have authority to
+                edit them.
+              </div>
+            )}
+            <DataPanel
+              title="Role Templates"
+              actions={
+                permissionService.canCreateRoleTemplate() && (
+                  <PrimaryButton
+                    onClick={() => {
+                      setEditedRoleName("New Custom Role");
+                      setFormData({ menuPermissions: {} });
+                      setSelectedStaff({ role: "New Custom Role" } as any);
+                      setView("roleEdit");
+                      focusMainContent();
+                    }}
+                    className="text-xs px-3 py-1 flex items-center gap-1"
+                  >
+                    <Plus size={14} /> New Template
+                  </PrimaryButton>
+                )
+              }
+            >
+              <div className="space-y-4">
+                {Object.keys(localRoleTemplates).map((role) => (
+                  <div
+                    key={role}
+                    className="border border-stone-200 rounded-none p-4"
+                  >
+                    <div className="flex justify-between items-start mb-4">
+                      <div>
+                        <h3 className="font-semibold text-stone-800">{role}</h3>
+                        <p className="text-sm text-stone-600">
+                          {role === "SysAdmin" || role === "Admin"
+                            ? "Full system access"
+                            : role === "Backoffice Operator"
+                              ? "General operational tasks"
+                              : role === "Product Data Clerk"
+                                ? "Product data management"
+                                : role === "Catalogue Officer"
+                                  ? "Catalogue creation and deployment"
+                                  : role === "Collections Officer"
+                                    ? "Subscription and collections management"
+                                    : role === "RPN Manager"
+                                      ? "RPN network management"
+                                      : role === "CAH Officer"
+                                        ? "Commerce Access Hub operations"
+                                        : role === "BI Analyst"
+                                          ? "Business intelligence and analytics"
+                                          : "Read-only access"}
+                        </p>
                       </div>
-                    ))}
+
+                      <div className="flex gap-2">
+                        {permissionService.canAssignRoleToStaff() && (
+                          <PrimaryButton
+                            onClick={() => {
+                              setApplyRoleConfig({ role });
+                              setIsApplyRoleModalOpen(true);
+                            }}
+                            className="text-xs px-3 py-1"
+                          >
+                            Apply to Staff
+                          </PrimaryButton>
+                        )}
+
+                        <SecondaryButton
+                          onClick={() => {
+                            setFormData({
+                              menuPermissions: {
+                                ...localRoleTemplates[role].menuPermissions,
+                              },
+                              actionPermissions: {
+                                ...localRoleTemplates[role].actionPermissions,
+                              },
+                            });
+                            setSelectedStaff({ role } as any);
+                            setEditedRoleName(role);
+                            setView("roleEdit");
+                            focusMainContent();
+                          }}
+                          className="text-xs px-3 py-1"
+                        >
+                          {permissionService.canEditRolePermissions()
+                            ? "Edit Permissions"
+                            : "View Permissions"}
+                        </SecondaryButton>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                      {Object.entries(
+                        localRoleTemplates[role].menuPermissions || {},
+                      ).map(([key, level]) => (
+                        <div key={key} className="flex justify-between">
+                          <span className="text-stone-600">
+                            {PERMISSIONS.find((p) => p.id === key)?.label ||
+                              key}
+                            :
+                          </span>
+                          <span
+                            className={`font-medium ${
+                              level === "full"
+                                ? "text-green-600"
+                                : level === "hidden"
+                                  ? "text-red-600"
+                                  : "text-blue-600"
+                            }`}
+                          >
+                            {level}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          </DataPanel>
-        </div>
-      )}
-
-      {activeTab === "roles" && permissionService.canViewRolePermissions() && view === "roleEdit" && selectedStaff?.role && (
-        <div className="space-y-8">
-          <div className="flex justify-between items-center bg-stone-900 text-white p-6">
-            <h3 className="text-sm font-bold uppercase tracking-widest">
-              {permissionServici
-
-            <div className="flex gap-3">
-              <SecondaryButton
-                className="text-white border-white/20"
-              >
-                Cancel
-              </SecondaryButton>
-
-              {permissionService.canEditRolePermissions() && (
-                <>
-              <SecondaryButton
-                onClick={() => {
-                  const resetPerms =
-                    ROLE_TEMPLATES[selectedStaff.role as string] || {};
-                  setFormData((prev) => ({
-                    ...prev,
-                    menuPermissions: { ...resetPerms.menuPermissions },
-                    actionPermissions: { ...resetPerms.actionPermissions },
-                  }));
-                }}
-                className="text-stone-300 border-stone-600 hover:text-white"
-              >
-                Reset to Default
-              </SecondaryButton>
-
-              <PrimaryButton
-                onClick={() => {
-                  if (!permissionService.canEditRolePermissions()) {
-                    alert("You do not have permission to edit role permissions.");
-                    return;
-                  }
-                  const updatedRole = selectedStaff.role as string;
-                  const newRole = editedRoleName.trim() || updatedRole;
-                  const newTemplates = {
-                    ...localRoleTemplates,
-                  };
-                  if (updatedRole !== newRole) {
-                    newTemplates[newRole] = {
-                      menuPermissions:
-                        formData.menuPermissions as MenuPermissions,
-                      actionPermissions: formData.actionPermissions,
-                    };
-                    delete newTemplates[updatedRole];
-                  } else {
-                    newTemplates[updatedRole] = {
-                      menuPermissions:
-                        formData.menuPermissions as MenuPermissions,
-                      actionPermissions: formData.actionPermissions,
-                    };
-                  }
-
-                  staffService.saveRoleTemplates(newTemplates);
-                  setLocalRoleTemplates(newTemplates);
-
-                  analyticsService.logEvent({
-                    eventType: "ROLE_TEMPLATE_UPDATED",
-                    actorType: "admin",
-                    actorName: "SysAdmin",
-                    result: "updated",
-                    details: { role: updatedRole },
-                  });
-
-                  // Non-blocking staff audit logging
-                  try {
-                    void staffAuditService.logAction({
-                      eventType: "PERMISSION_CHANGED",
-                      module: "staff",
-                      action: "Updated role/menu/action permissions",
-                      severity: "critical",
-                      recordType: "role_template",
-                      recordName: newRole,
-                      beforeSnapshot: localRoleTemplates[updatedRole],
-                      afterSnapshot: newTemplates[newRole],
-                    });itErr) {
-                    console.error("Audit log failed", auditErr);
-                  }
-
-                  setView("list");
-                  focusMainContent();
-                }}
-              >
-                Save Role Permissions
-              </PrimaryButton>
-                </>
-              )}
-            </div>
+                ))}
+              </div>
+            </DataPanel>
           </div>
+        )}
 
-          {!permissionService.canEditRolePermissions() && (
-            <div className="p-4 bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm mt-4 mx-6">
-              You can view role permissions, but you do not have authority to edit them.
+      {activeTab === "roles" &&
+        permissionService.canViewRolePermissions() &&
+        view === "roleEdit" &&
+        selectedStaff?.role && (
+          <div className="space-y-8">
+            <div className="flex justify-between items-center bg-stone-900 text-white p-6">
+              <h3 className="text-sm font-bold uppercase tracking-widest">
+                {permissionService.canEditRolePermissions()
+                  ? "Edit Role Template"
+                  : "View Role Template"}{" "}
+                - {editedRoleName || selectedStaff.role}
+              </h3>
+
+              <div className="flex gap-3">
+                <SecondaryButton className="text-white border-white/20">
+                  Cancel
+                </SecondaryButton>
+
+                {permissionService.canEditRolePermissions() && (
+                  <>
+                    <SecondaryButton
+                      onClick={() => {
+                        const resetPerms =
+                          ROLE_TEMPLATES[selectedStaff.role as string] || {};
+                        setFormData((prev) => ({
+                          ...prev,
+                          menuPermissions: { ...resetPerms.menuPermissions },
+                          actionPermissions: {
+                            ...resetPerms.actionPermissions,
+                          },
+                        }));
+                      }}
+                      className="text-stone-300 border-stone-600 hover:text-white"
+                    >
+                      Reset to Default
+                    </SecondaryButton>
+
+                    <PrimaryButton
+                      onClick={() => {
+                        if (!permissionService.canEditRolePermissions()) {
+                          alert(
+                            "You do not have permission to edit role permissions.",
+                          );
+                          return;
+                        }
+                        const updatedRole = selectedStaff.role as string;
+                        const newRole = editedRoleName.trim() || updatedRole;
+                        const newTemplates = {
+                          ...localRoleTemplates,
+                        };
+                        if (updatedRole !== newRole) {
+                          newTemplates[newRole] = {
+                            menuPermissions:
+                              formData.menuPermissions as MenuPermissions,
+                            actionPermissions: formData.actionPermissions,
+                          };
+                          delete newTemplates[updatedRole];
+                        } else {
+                          newTemplates[updatedRole] = {
+                            menuPermissions:
+                              formData.menuPermissions as MenuPermissions,
+                            actionPermissions: formData.actionPermissions,
+                          };
+                        }
+
+                        staffService.saveRoleTemplates(newTemplates);
+                        setLocalRoleTemplates(newTemplates);
+
+                        analyticsService.logEvent({
+                          eventType: "ROLE_TEMPLATE_UPDATED",
+                          actorType: "admin",
+                          actorName: "SysAdmin",
+                          result: "updated",
+                          details: { role: updatedRole },
+                        });
+
+                        // Non-blocking staff audit logging
+                        try {
+                          void staffAuditService.logAction({
+                            eventType: "PERMISSION_CHANGED",
+                            module: "staff",
+                            action: "Updated role/menu/action permissions",
+                            severity: "critical",
+                            recordType: "role_template",
+                            recordName: newRole,
+                            beforeSnapshot: localRoleTemplates[updatedRole],
+                            afterSnapshot: newTemplates[newRole],
+                          });
+                        } catch (auditErr) {
+                          console.error("Audit log failed", auditErr);
+                        }
+
+                        setView("list");
+                        focusMainContent();
+                      }}
+                    >
+                      Save Role Permissions
+                    </PrimaryButton>
+                  </>
+                )}
+              </div>
             </div>
-          )}
 
-          <DataPanel title="Template Identity">
-            <div className="p-6">
-              <FormField label="Role / Template Name">
-                <input
-                  type="text"
-                  value={editedRoleName}
-                  onChange={(e) => setEditedRoleName(e.target.value)}
-                  className="form-input max-w-md"
-                  disabled={
-                    !permissionService.canEditRolePermissions() ||
-                    selectedStaff?.role === "SysAdmin" ||
-                    selectedStaff?.role === "Admin"
-                  }
-                />
-              </FormField>
-              {(selectedStafne-400 mt-2 italic">
-                  System roles cannot be renamed.
-                </p>
-              )}
-            </div>
-          </DataPanel>
+            {!permissionService.canEditRolePermissions() && (
+              <div className="p-4 bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm mt-4 mx-6">
+                You can view role permissions, but you do not have authority to
+                edit them.
+              </div>
+            )}
 
-          <DataPanel title="Role Template Permissions">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {MENU_KEYS.map((key) => (
-                <div
-                  key={key}
-                  className="flex items-center justify-between p-3 border border-stone-200 rounded-none"
-                >
-                  <span className="text-sm font-medium">
-                    {PERMISSIONS.find((p) => p.id === key)?.label || key}
-                  </span>
-
-                  <select
-                    value={formData.menuPermissions?.[key] || "hidden"}
-                    onChange={(e) =>
-                      handlePermissionChange(
-                        key,
-                        e.target.value as PermissionLevel,
-                      )
-                    }
+            <DataPanel title="Template Identity">
+              <div className="p-6">
+                <FormField label="Role / Template Name">
+                  <input
+                    type="text"
+                    value={editedRoleName}
+                    onChange={(e) => setEditedRoleName(e.target.value)}
+                    className="form-input max-w-md"
                     disabled={
                       !permissionService.canEditRolePermissions() ||
                       selectedStaff?.role === "SysAdmin" ||
                       selectedStaff?.role === "Admin"
                     }
-                    className="text-xs border border-stone-200 rounded-none px-2 py-1"
-                  >
-                    <option value="hidden">Hidden</option>
-                    <option value="view">View</option>
-                    <option van>
-                    <option value="approve">Approve</option>
-                    <option value="delete">Delete</option>
-                    <option value="export">Export</option>
-                    <option value="full">Full</option>
-                  </select>
-                </div>
-              ))}
-            </div>
-          </DataPanel>
+                  />
+                </FormField>
+                {(selectedStaff?.role === "SysAdmin" ||
+                  selectedStaff?.role === "Admin") && (
+                  <p className="text-xs text-stone-400 mt-2 italic">
+                    System roles cannot be renamed.
+                  </p>
+                )}
+              </div>
+            </DataPanel>
 
-          <DataPanel title="Action Permissions & Approval Rights">
-            <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {ACTION_GROUPS.map((group) => (
-                <div key={group.name} className="space-y-3">
-                  <h4 className="text-xs font-bold uppercase text-brand-orange border-b border-stone-100 pb-2">
-                    {group.name}
-                  </h4>
-                  {group.keys.map((key) => (
-                    <label
-                      key={key}
-                      className="flex items-center gap-2 text-xs text-stone-600 cursor-pointer"
+            <DataPanel title="Role Template Permissions">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {MENU_KEYS.map((key) => (
+                  <div
+                    key={key}
+                    className="flex items-center justify-between p-3 border border-stone-200 rounded-none"
+                  >
+                    <span className="text-sm font-medium">
+                      {PERMISSIONS.find((p) => p.id === key)?.label || key}
+                    </span>
+
+                    <select
+                      value={formData.menuPermissions?.[key] || "hidden"}
+                      onChange={(e) =>
+                        handlePermissionChange(
+                          key,
+                          e.target.value as PermissionLevel,
+                        )
+                      }
+                      disabled={
+                        !permissionService.canEditRolePermissions() ||
+                        selectedStaff?.role === "SysAdmin" ||
+                        selectedStaff?.role === "Admin"
+                      }
+                      className="text-xs border border-stone-200 rounded-none px-2 py-1"
                     >
-                      <input
-                        type="checkbox"
-                        className="accent-brand-orange"
-                        checked={
-                          !!formData.actionPermissions?.[
-                            key as ActionPermissionKey
-                          ]
-                        }
-                        onChange={(e) =>
-                          handleActionPermissionChange(
-                            key as ActionPermissionKey,
-                            e.target.checked,
-                          )
-                        }
-                        disabled={
-                          !permissionService.canEditRolePermissions() ||
-                          selectedStaff?.role === "SysAdmin" ||
-                          selectedStaff?.role === "Admin"
-                        }
-                      />
-                      {key.split(".")[1]}
-                    </label>
-                  ))}
-                </div>
-              ))}
-            </div>
-          </DataPanel>
-        </div>
-      )}
+                      <option value="hidden">Hidden</option>
+                      <option value="view">View</option>
+                      <option value="create">Create</option>
+                      <option value="submit">Submit</option>
+                      <option value="edit">Edit</option>
+                      <option value="approve">Approve</option>
+                      <option value="delete">Delete</option>
+                      <option value="export">Export</option>
+                      <option value="full">Full</option>
+                    </select>
+                  </div>
+                ))}
+              </div>
+            </DataPanel>
+
+            <DataPanel title="Action Permissions & Approval Rights">
+              <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {ACTION_GROUPS.map((group) => (
+                  <div key={group.name} className="space-y-3">
+                    <h4 className="text-xs font-bold uppercase text-brand-orange border-b border-stone-100 pb-2">
+                      {group.name}
+                    </h4>
+                    {group.keys.map((key) => (
+                      <label
+                        key={key}
+                        className="flex items-center gap-2 text-xs text-stone-600 cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          className="accent-brand-orange"
+                          checked={
+                            !!formData.actionPermissions?.[
+                              key as ActionPermissionKey
+                            ]
+                          }
+                          onChange={(e) =>
+                            handleActionPermissionChange(
+                              key as ActionPermissionKey,
+                              e.target.checked,
+                            )
+                          }
+                          disabled={
+                            !permissionService.canEditRolePermissions() ||
+                            selectedStaff?.role === "SysAdmin" ||
+                            selectedStaff?.role === "Admin"
+                          }
+                        />
+                        {key.split(".")[1]}
+                      </label>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </DataPanel>
+          </div>
+        )}
 
       {activeTab === "directory" &&
         (view === "list" || permissionService.isSysAdmin()) && (
@@ -1636,7 +1719,12 @@ export const StaffManagement: React.FC = () => {
                 Discard
               </SecondaryButton>
 
-              <PrimaryButton onClick={saveStaff}>Save Profile</PrimaryButton>
+              <PrimaryButton
+                onClick={saveStaff}
+                disabled={duplicates.length > 0}
+              >
+                Save Profile
+              </PrimaryButton>
             </div>
           </div>
 
@@ -1647,7 +1735,52 @@ export const StaffManagement: React.FC = () => {
               </div>
             )}
 
+            {duplicates.length > 0 && (
+              <div className="mb-4 p-4 border-t-4 border-t-red-500 bg-red-50/30 text-red-700">
+                <div className="flex gap-3 text-red-600">
+                  <AlertTriangle size={20} className="shrink-0" />
+                  <div>
+                    <h4 className="text-sm font-bold uppercase">
+                      Possible duplicate staff record found
+                    </h4>
+                    <p className="text-xs text-stone-600 mt-1">
+                      Another record shares the same staff code or email.
+                    </p>
+                    {hasDuplicateCode && permissionService.isSysAdmin() && (
+                      <PrimaryButton
+                        className="mt-3 text-xs px-3 py-1"
+                        onClick={async () => {
+                          let newCode = "";
+                          try {
+                            newCode =
+                              await staffService.generateUniqueStaffCodeFromFirebase();
+                          } catch (e) {
+                            newCode = staffService.generateStaffCode();
+                          }
+                          setFormData((prev) => ({
+                            ...prev,
+                            staffCode: newCode,
+                          }));
+                        }}
+                      >
+                        Regenerate Code
+                      </PrimaryButton>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <FormField label="Staff Code">
+                <input
+                  type="text"
+                  value={formData.staffCode || ""}
+                  disabled
+                  className="form-input bg-stone-100 text-stone-500 cursor-not-allowed"
+                />
+              </FormField>
+
               <FormField label="Full Name *" required>
                 <input
                   type="text"
@@ -1857,210 +1990,370 @@ export const StaffManagement: React.FC = () => {
             </div>
           </DataPanel>
 
-            <DataPanel title="Personal Details">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 p-6">
-                <FormField label="National ID">
-                  <input
-                    type="text"
-                    value={formData.personalDetails?.nationalId || ""}
-                    onChange={(e) => setFormData(prev => ({ ...prev, personalDetails: { ...(prev.personalDetails || {}), nationalId: e.target.value } }))}
-                    className="form-input"
-                    placeholder="At least 5 chars"
-                  />
-                </FormField>
-                <FormField label="Date of Birth">
-                  <input
-                    type="date"
-                    value={formData.personalDetails?.dateOfBirth || ""}
-                    onChange={(e) => setFormData(prev => ({ ...prev, personalDetails: { ...(prev.personalDetails || {}), dateOfBirth: e.target.value } }))}
-                    className="form-input"
-                  />
-                </FormField>
-                <FormField label="Gender">
-                  <select
-                    value={formData.personalDetails?.gender || ""}
-                    onChange={(e) => setFormData(prev => ({ ...prev, personalDetails: { ...(prev.personalDetails || {}), gender: e.target.value } }))}
-                    className="form-input"
-                  >
-                    <option value="">Select Gender</option>
-                    <option value="male">Male</option>
-                    <option value="female">Female</option>
-                    <option value="other">Other</option>
-                  </select>
-                </FormField>
-                <FormField label="Marital Status">
-                  <select
-                    value={formData.personalDetails?.maritalStatus || ""}
-                    onChange={(e) => setFormData(prev => ({ ...prev, personalDetails: { ...(prev.personalDetails || {}), maritalStatus: e.target.value } }))}
-                    className="form-input"
-                  >
-                    <option value="">Select Status</option>
-                    <option value="single">Single</option>
-                    <option value="married">Married</option>
-                    <option value="divorced">Divorced</option>
-                    <option value="widowed">Widowed</option>
-                  </select>
-                </FormField>
-                <FormField label="Next of Kin Name">
-                  <input
-                    type="text"
-                    value={formData.personalDetails?.nextOfKinName || ""}
-                    onChange={(e) => setFormData(prev => ({ ...prev, personalDetails: { ...(prev.personalDetails || {}), nextOfKinName: e.target.value } }))}
-                    className="form-input"
-                  />
-                </FormField>
-                <FormField label="Next of Kin Phone">
-                  <input
-                    type="tel"
-                    value={formData.personalDetails?.nextOfKinPhone || ""}
-                    onChange={(e) => setFormData(prev => ({ ...prev, personalDetails: { ...(prev.personalDetails || {}), nextOfKinPhone: e.target.value } }))}
-                    className="form-input"
-                    placeholder="+263..."
-                  />
-                </FormField>
-              </div>
-            </DataPanel>
+          <DataPanel title="Personal Details">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 p-6">
+              <FormField label="National ID">
+                <input
+                  type="text"
+                  value={formData.personalDetails?.nationalId || ""}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      personalDetails: {
+                        ...(prev.personalDetails || {}),
+                        nationalId: e.target.value,
+                      },
+                    }))
+                  }
+                  className="form-input"
+                  placeholder="At least 5 chars"
+                />
+              </FormField>
+              <FormField label="Date of Birth">
+                <input
+                  type="date"
+                  value={formData.personalDetails?.dateOfBirth || ""}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      personalDetails: {
+                        ...(prev.personalDetails || {}),
+                        dateOfBirth: e.target.value,
+                      },
+                    }))
+                  }
+                  className="form-input"
+                />
+              </FormField>
+              <FormField label="Gender">
+                <select
+                  value={formData.personalDetails?.gender || ""}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      personalDetails: {
+                        ...(prev.personalDetails || {}),
+                        gender: e.target.value,
+                      },
+                    }))
+                  }
+                  className="form-input"
+                >
+                  <option value="">Select Gender</option>
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                  <option value="other">Other</option>
+                </select>
+              </FormField>
+              <FormField label="Marital Status">
+                <select
+                  value={formData.personalDetails?.maritalStatus || ""}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      personalDetails: {
+                        ...(prev.personalDetails || {}),
+                        maritalStatus: e.target.value,
+                      },
+                    }))
+                  }
+                  className="form-input"
+                >
+                  <option value="">Select Status</option>
+                  <option value="single">Single</option>
+                  <option value="married">Married</option>
+                  <option value="divorced">Divorced</option>
+                  <option value="widowed">Widowed</option>
+                </select>
+              </FormField>
+              <FormField label="Next of Kin Name">
+                <input
+                  type="text"
+                  value={formData.personalDetails?.nextOfKinName || ""}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      personalDetails: {
+                        ...(prev.personalDetails || {}),
+                        nextOfKinName: e.target.value,
+                      },
+                    }))
+                  }
+                  className="form-input"
+                />
+              </FormField>
+              <FormField label="Next of Kin Phone">
+                <input
+                  type="tel"
+                  value={formData.personalDetails?.nextOfKinPhone || ""}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      personalDetails: {
+                        ...(prev.personalDetails || {}),
+                        nextOfKinPhone: e.target.value,
+                      },
+                    }))
+                  }
+                  className="form-input"
+                  placeholder="+263..."
+                />
+              </FormField>
+            </div>
+          </DataPanel>
 
-            <DataPanel title="Address Details">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 p-6">
-                <FormField label="Country">
-                  <input
-                    type="text"
-                    value={formData.addressDetails?.country || ""}
-                    onChange={(e) => setFormData(prev => ({ ...prev, addressDetails: { ...(prev.addressDetails || {}), country: e.target.value } }))}
-                    className="form-input"
+          <DataPanel title="Address Details">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 p-6">
+              <FormField label="Country">
+                <input
+                  type="text"
+                  value={formData.addressDetails?.country || ""}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      addressDetails: {
+                        ...(prev.addressDetails || {}),
+                        country: e.target.value,
+                      },
+                    }))
+                  }
+                  className="form-input"
+                />
+              </FormField>
+              <FormField label="Province">
+                <input
+                  type="text"
+                  value={formData.addressDetails?.province || ""}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      addressDetails: {
+                        ...(prev.addressDetails || {}),
+                        province: e.target.value,
+                      },
+                    }))
+                  }
+                  className="form-input"
+                />
+              </FormField>
+              <FormField label="City / Town">
+                <input
+                  type="text"
+                  value={formData.addressDetails?.cityTown || ""}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      addressDetails: {
+                        ...(prev.addressDetails || {}),
+                        cityTown: e.target.value,
+                      },
+                    }))
+                  }
+                  className="form-input"
+                />
+              </FormField>
+              <FormField label="District">
+                <input
+                  type="text"
+                  value={formData.addressDetails?.district || ""}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      addressDetails: {
+                        ...(prev.addressDetails || {}),
+                        district: e.target.value,
+                      },
+                    }))
+                  }
+                  className="form-input"
+                />
+              </FormField>
+              <FormField label="Suburb">
+                <input
+                  type="text"
+                  value={formData.addressDetails?.suburb || ""}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      addressDetails: {
+                        ...(prev.addressDetails || {}),
+                        suburb: e.target.value,
+                      },
+                    }))
+                  }
+                  className="form-input"
+                />
+              </FormField>
+              <FormField label="Street Address">
+                <input
+                  type="text"
+                  value={formData.addressDetails?.streetAddress || ""}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      addressDetails: {
+                        ...(prev.addressDetails || {}),
+                        streetAddress: e.target.value,
+                      },
+                    }))
+                  }
+                  className="form-input"
+                />
+              </FormField>
+              <div className="md:col-span-2 lg:col-span-3">
+                <FormField label="GPS Notes">
+                  <textarea
+                    value={formData.addressDetails?.gpsNotes || ""}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        addressDetails: {
+                          ...(prev.addressDetails || {}),
+                          gpsNotes: e.target.value,
+                        },
+                      }))
+                    }
+                    className="form-input min-h-[80px]"
+                    placeholder="Directions or landmarks..."
                   />
                 </FormField>
-                <FormField label="Province">
-                  <input
-                    type="text"
-                    value={formData.addressDetails?.province || ""}
-                    onChange={(e) => setFormData(prev => ({ ...prev, addressDetails: { ...(prev.addressDetails || {}), province: e.target.value } }))}
-                    className="form-input"
-                  />
-                </FormField>
-                <FormField label="City / Town">
-                  <input
-                    type="text"
-                    value={formData.addressDetails?.cityTown || ""}
-                    onChange={(e) => setFormData(prev => ({ ...prev, addressDetails: { ...(prev.addressDetails || {}), cityTown: e.target.value } }))}
-                    className="form-input"
-                  />
-                </FormField>
-                <FormField label="District">
-                  <input
-                    type="text"
-                    value={formData.addressDetails?.district || ""}
-                    onChange={(e) => setFormData(prev => ({ ...prev, addressDetails: { ...(prev.addressDetails || {}), district: e.target.value } }))}
-                    className="form-input"
-                  />
-                </FormField>
-                <FormField label="Suburb">
-                  <input
-                    type="text"
-                    value={formData.addressDetails?.suburb || ""}
-                    onChange={(e) => setFormData(prev => ({ ...prev, addressDetails: { ...(prev.addressDetails || {}), suburb: e.target.value } }))}
-                    className="form-input"
-                  />
-                </FormField>
-                <FormField label="Street Address">
-                  <input
-                    type="text"
-                    value={formData.addressDetails?.streetAddress || ""}
-                    onChange={(e) => setFormData(prev => ({ ...prev, addressDetails: { ...(prev.addressDetails || {}), streetAddress: e.target.value } }))}
-                    className="form-input"
-                  />
-                </FormField>
-                <div className="md:col-span-2 lg:col-span-3">
-                  <FormField label="GPS Notes">
-                    <textarea
-                      value={formData.addressDetails?.gpsNotes || ""}
-                      onChange={(e) => setFormData(prev => ({ ...prev, addressDetails: { ...(prev.addressDetails || {}), gpsNotes: e.target.value } }))}
-                      className="form-input min-h-[80px]"
-                      placeholder="Directions or landmarks..."
-                    />
-                  </FormField>
-                </div>
               </div>
-            </DataPanel>
+            </div>
+          </DataPanel>
 
-            <DataPanel title="KYC Details">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-6">
-                <FormField label="ID Type">
-                  <select
-                    value={formData.kycDetails?.idType || ""}
-                    onChange={(e) => setFormData(prev => ({ ...prev, kycDetails: { ...(prev.kycDetails || {}), idType: e.target.value } }))}
-                    className="form-input"
-                  >
-                    <option value="">Select ID Type</option>
-                    <option value="National ID">National ID</option>
-                    <option value="Passport">Passport</option>
-                    <option value="Driver's License">Driver's License</option>
-                  </select>
-                </FormField>
-                <FormField label="ID Number">
-                  <input
-                    type="text"
-                    value={formData.kycDetails?.idNumber || ""}
-                    onChange={(e) => setFormData(prev => ({ ...prev, kycDetails: { ...(prev.kycDetails || {}), idNumber: e.target.value } }))}
-                    className="form-input"
+          <DataPanel title="KYC Details">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-6">
+              <FormField label="ID Type">
+                <select
+                  value={formData.kycDetails?.idType || ""}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      kycDetails: {
+                        ...(prev.kycDetails || {}),
+                        idType: e.target.value,
+                      },
+                    }))
+                  }
+                  className="form-input"
+                >
+                  <option value="">Select ID Type</option>
+                  <option value="National ID">National ID</option>
+                  <option value="Passport">Passport</option>
+                  <option value="Driver's License">Driver's License</option>
+                </select>
+              </FormField>
+              <FormField label="ID Number">
+                <input
+                  type="text"
+                  value={formData.kycDetails?.idNumber || ""}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      kycDetails: {
+                        ...(prev.kycDetails || {}),
+                        idNumber: e.target.value,
+                      },
+                    }))
+                  }
+                  className="form-input"
+                />
+              </FormField>
+              <FormField label="KYC Status">
+                <select
+                  value={formData.kycDetails?.kycStatus || "not_started"}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      kycDetails: {
+                        ...(prev.kycDetails || {}),
+                        kycStatus: e.target.value as any,
+                      },
+                    }))
+                  }
+                  className="form-input font-bold"
+                >
+                  <option value="not_started">Not Started</option>
+                  <option value="pending">Pending Verification</option>
+                  <option value="verified">Verified</option>
+                  <option value="rejected">Rejected</option>
+                </select>
+              </FormField>
+              <div className="md:col-span-2">
+                <FormField label="KYC Notes">
+                  <textarea
+                    value={formData.kycDetails?.notes || ""}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        kycDetails: {
+                          ...(prev.kycDetails || {}),
+                          notes: e.target.value,
+                        },
+                      }))
+                    }
+                    className="form-input min-h-[80px]"
                   />
                 </FormField>
-                <FormField label="KYC Status">
-                  <select
-                    value={formData.kycDetails?.kycStatus || "not_started"}
-                    onChange={(e) => setFormData(prev => ({ ...prev, kycDetails: { ...(prev.kycDetails || {}), kycStatus: e.target.value as any } }))}
-                    className="form-input font-bold"
-                  >
-                    <option value="not_started">Not Started</option>
-                    <option value="pending">Pending Verification</option>
-                    <option value="verified">Verified</option>
-                    <option value="rejected">Rejected</option>
-                  </select>
-                </FormField>
-                <div className="md:col-span-2">
-                  <FormField label="KYC Notes">
-                    <textarea
-                      value={formData.kycDetails?.notes || ""}
-                      onChange={(e) => setFormData(prev => ({ ...prev, kycDetails: { ...(prev.kycDetails || {}), notes: e.target.value } }))}
-                      className="form-input min-h-[80px]"
-                    />
-                  </FormField>
-                </div>
               </div>
-            </DataPanel>
+            </div>
+          </DataPanel>
 
-            <DataPanel title="KYC Documents">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 p-6">
-                <FormField label="ID Document URL">
-                  <input
-                    type="text"
-                    value={formData.kycDocuments?.idDocumentUrl || ""}
-                    onChange={(e) => setFormData(prev => ({ ...prev, kycDocuments: { ...(prev.kycDocuments || {}), idDocumentUrl: e.target.value } }))}
-                    className="form-input"
-                    placeholder="Link to ID scan"
-                  />
-                </FormField>
-                <FormField label="Proof of Residence URL">
-                  <input
-                    type="text"
-                    value={formData.kycDocuments?.proofOfResidenceUrl || ""}
-                    onChange={(e) => setFormData(prev => ({ ...prev, kycDocuments: { ...(prev.kycDocuments || {}), proofOfResidenceUrl: e.target.value } }))}
-                    className="form-input"
-                    placeholder="Link to utility bill"
-                  />
-                </FormField>
-                <FormField label="Staff Photo URL">
-                  <input
-                    type="text"
-                    value={formData.kycDocuments?.photoUrl || ""}
-                    onChange={(e) => setFormData(prev => ({ ...prev, kycDocuments: { ...(prev.kycDocuments || {}), photoUrl: e.target.value } }))}
-                    className="form-input"
-                    placeholder="Link to portrait"
-                  />
-                </FormField>
-              </div>
-            </DataPanel>
+          <DataPanel title="KYC Documents">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 p-6">
+              <FormField label="ID Document URL">
+                <input
+                  type="text"
+                  value={formData.kycDocuments?.idDocumentUrl || ""}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      kycDocuments: {
+                        ...(prev.kycDocuments || {}),
+                        idDocumentUrl: e.target.value,
+                      },
+                    }))
+                  }
+                  className="form-input"
+                  placeholder="Link to ID scan"
+                />
+              </FormField>
+              <FormField label="Proof of Residence URL">
+                <input
+                  type="text"
+                  value={formData.kycDocuments?.proofOfResidenceUrl || ""}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      kycDocuments: {
+                        ...(prev.kycDocuments || {}),
+                        proofOfResidenceUrl: e.target.value,
+                      },
+                    }))
+                  }
+                  className="form-input"
+                  placeholder="Link to utility bill"
+                />
+              </FormField>
+              <FormField label="Staff Photo URL">
+                <input
+                  type="text"
+                  value={formData.kycDocuments?.photoUrl || ""}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      kycDocuments: {
+                        ...(prev.kycDocuments || {}),
+                        photoUrl: e.target.value,
+                      },
+                    }))
+                  }
+                  className="form-input"
+                  placeholder="Link to portrait"
+                />
+              </FormField>
+            </div>
+          </DataPanel>
         </div>
       )}
 
@@ -2068,7 +2361,10 @@ export const StaffManagement: React.FC = () => {
         <div className="space-y-8">
           <div className="flex justify-between items-center bg-stone-900 text-white p-6">
             <h3 className="text-sm font-bold uppercase tracking-widest">
-              {permissionService.canEditRolePermissions() ? "Edit Staff Permissions" : "View Staff Permissions"} - {selectedStaff?.displayName}
+              {permissionService.canEditRolePermissions()
+                ? "Edit Staff Permissions"
+                : "View Staff Permissions"}{" "}
+              - {selectedStaff?.displayName}
             </h3>
 
             <div className="flex gap-3">
@@ -2079,76 +2375,86 @@ export const StaffManagement: React.FC = () => {
                 Cancel
               </SecondaryButton>
 
-              t&imaryButton
-                onClick={async () => {
-                  if (!permissionService.canEditRolePermissions()) {
-                    alert("You do not have permission to edit role permissions.");
-                    return;
-                  }
-                  if (selectedStaff) {
-                    try {
-                      await staffService.saveStaff({
-                        ...selectedStaff,
-                        menuPermissions: formData.menuPermissions,
-                        actionPermissions: formData.actionPermissions,
-                        updatedAt: new Date().toISOString(),
-                        updatedBy: "SysAdmin",
-                      });
-
-                      analyticsService.logEvent({
-                        eventType: "STAFF_PERMISSIONS_UPDATED",
-                        actorType: "admin",
-                        actorName: "SysAdmin",
-                        actorId: selectedStaff.id,
-                        result: "updated",
-                        details: { staffId: selectedStaff.id },
-                      });
-
-                      // Non-blocking staff audit logging
-                      try {
-                        void staffAuditService.logAction({
-                          eventType: "PERMISSION_CHANGED",
-                          module: "staff",
-                          action: "Updated role/menu/action permissions",
-                          severity: "critical",
-                          recordType: "staff",
-                          recordId: selectedStaff.id,
-                          recordName: selectedStaff.displayName,
-                          beforeSnapshot: { menuPermissions: selectedStaff.menuPermissions, actionPermissions: selectedStaff.actionPermissions },
-                          afterSnapshot: { menuPermissions: formData.menuPermissions, actionPermissions: formData.actionPermissions },
-                        });
-                      } catch (auditErr) {
-                        console.error("Audit log failed", auditErr);
-                      }
-
-
-                      window.setTimeout(() => {
-                        void loadStaff();
-                        void loadLogs();
-                      }, 800);
-
-                      setView("list");
-                      focusMainContent();
-                      setFormSuccess("Staff saved to Firebase/local cache");
-                      setTimeout(() => setFormSuccess(""), 3000);
-                    } catch (error) {
-                      console.error("Failed to save permissions.", error);
-                      setFormError(
-                        "Failed to save staff profile to Firebase. Check console for details.",
+              {permissionService.canEditRolePermissions() && (
+                <PrimaryButton
+                  onClick={async () => {
+                    if (!permissionService.canEditRolePermissions()) {
+                      alert(
+                        "You do not have permission to edit role permissions.",
                       );
+                      return;
                     }
-                  }
-                }}
-              >
-                Save Permissions
-              </PrimaryButton>
+                    if (selectedStaff) {
+                      try {
+                        await staffService.saveStaff({
+                          ...selectedStaff,
+                          menuPermissions: formData.menuPermissions,
+                          actionPermissions: formData.actionPermissions,
+                          updatedAt: new Date().toISOString(),
+                          updatedBy: "SysAdmin",
+                        });
+
+                        analyticsService.logEvent({
+                          eventType: "STAFF_PERMISSIONS_UPDATED",
+                          actorType: "admin",
+                          actorName: "SysAdmin",
+                          actorId: selectedStaff.id,
+                          result: "updated",
+                          details: { staffId: selectedStaff.id },
+                        });
+
+                        // Non-blocking staff audit logging
+                        try {
+                          void staffAuditService.logAction({
+                            eventType: "PERMISSION_CHANGED",
+                            module: "staff",
+                            action: "Updated role/menu/action permissions",
+                            severity: "critical",
+                            recordType: "staff",
+                            recordId: selectedStaff.id,
+                            recordName: selectedStaff.displayName,
+                            beforeSnapshot: {
+                              menuPermissions: selectedStaff.menuPermissions,
+                              actionPermissions:
+                                selectedStaff.actionPermissions,
+                            },
+                            afterSnapshot: {
+                              menuPermissions: formData.menuPermissions,
+                              actionPermissions: formData.actionPermissions,
+                            },
+                          });
+                        } catch (auditErr) {
+                          console.error("Audit log failed", auditErr);
+                        }
+
+                        window.setTimeout(() => {
+                          void loadStaff();
+                          void loadLogs();
+                        }, 800);
+
+                        setView("list");
+                        focusMainContent();
+                        setFormSuccess("Staff saved to Firebase/local cache");
+                        setTimeout(() => setFormSuccess(""), 3000);
+                      } catch (error) {
+                        console.error("Failed to save permissions.", error);
+                        setFormError(
+                          "Failed to save staff profile to Firebase. Check console for details.",
+                        );
+                      }
+                    }
+                  }}
+                >
+                  Save Permissions
+                </PrimaryButton>
               )}
             </div>
           </div>
 
           {!permissionService.canEditRolePermissions() && (
             <div className="p-4 bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm mt-4 mx-6">
-              You can view staff permissions, but you do not have authority to edit them.
+              You can view staff permissions, but you do not have authority to
+              edit them.
             </div>
           )}
 

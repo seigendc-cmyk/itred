@@ -60,6 +60,7 @@ import {
   Vendor,
 } from "../types.ts";
 import { asArray } from "../utils/safeData.ts";
+import { staffAuditService } from "../services/staffAuditService.ts";
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -86,6 +87,27 @@ const COLLECTION_STATUSES: CollectionStatus[] = [
   "rejected",
   "needs clarification",
 ];
+
+const stripUndefinedDeep = <T,>(obj: T): T => {
+  if (obj === null || obj === undefined) return obj;
+  if (Array.isArray(obj)) return obj.map(stripUndefinedDeep) as unknown as T;
+  if (typeof obj === "object") {
+    const cleaned: any = {};
+    for (const [key, val] of Object.entries(obj)) {
+      if (val !== undefined) cleaned[key] = stripUndefinedDeep(val);
+    }
+    return cleaned;
+  }
+  return obj;
+};
+
+const normalizeDateInput = (value: string | undefined | null) => {
+  if (!value) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString().slice(0, 10);
+};
 
 export const RPNManagement: React.FC = () => {
   // View State
@@ -211,25 +233,58 @@ export const RPNManagement: React.FC = () => {
     setView("form");
   };
 
+  const updateNestedField = (
+    section:
+      | "personalDetails"
+      | "addressDetails"
+      | "kycDetails"
+      | "kycDocuments",
+    field: string,
+    value: string,
+  ) => {
+    setRpnFormData((prev) => ({
+      ...prev,
+      [section]: { ...((prev as any)[section] || {}), [field]: value },
+    }));
+  };
+
   const saveRPN = () => {
     if (!rpnFormData.name || !rpnFormData.phone) {
-      alert("identity and contact required for node deployment.");
+      alert("Identity and contact required for node deployment.");
       return;
     }
-    const rpnToSave = {
+    const rpnToSave = stripUndefinedDeep({
       ...rpnFormData,
       updatedAt: new Date().toISOString(),
-    } as RPN;
+    }) as RPN;
+
     rpnService.update(rpnToSave);
+
+    const isNew = !rpns.find((r) => r.id === rpnToSave.id);
+
     analyticsService.logEvent({
-      eventType: selectedRPN ? "RPN_UPDATED" : "RPN_CREATED",
+      eventType: isNew ? "RPN_CREATED" : "RPN_UPDATED",
       actorType: "admin",
       actorName: "System Admin",
       rpnId: rpnToSave.id,
       details: { name: rpnToSave.name, level: rpnToSave.level },
     });
+
+    if (!isNew) {
+      void staffAuditService.logAction({
+        eventType: "RECORD_UPDATED",
+        module: "staff",
+        severity: "high",
+        action: "Updated RPN agent profile",
+        recordType: "rpn_agent",
+        recordId: rpnToSave.id,
+        recordName: rpnToSave.name,
+      });
+    }
+
     loadData();
     setView("list");
+    alert("Agent Personal, Address & KYC details saved.");
   };
 
   const startCollectionRecord = (rpnId?: string) => {
@@ -299,14 +354,16 @@ export const RPNManagement: React.FC = () => {
             <ChevronRight size={14} className="rotate-180" /> Back to List
           </button>
           <h3 className="text-sm font-bold uppercase tracking-tight text-brand-charcoal">
-            Add New Agent: {rpnFormData.id}
+            {rpnFormData.createdAt
+              ? `Edit RPN Agent: ${rpnFormData.id}`
+              : `Add New Agent: ${rpnFormData.id}`}
           </h3>
-          {permissionService.canCreate("rpnManagement") && ( // Use rpnManagement for general RPN creation
+          {permissionService.canCreateRpnAgent() && (
             <PrimaryButton
               onClick={saveRPN}
               className="flex items-center gap-2"
             >
-              Add Agent
+              {rpnFormData.createdAt ? "Update Agent" : "Add Agent"}
             </PrimaryButton>
           )}
         </div>
@@ -426,20 +483,29 @@ export const RPNManagement: React.FC = () => {
                 Personal, Address & KYC Details
               </h4>
 
+              {!permissionService.canEditStaffKycDetails() && (
+                <div className="p-3 mb-4 bg-yellow-50 border border-yellow-200 text-yellow-800 text-xs font-bold uppercase tracking-widest text-center">
+                  You do not have permission to edit Personal, Address & KYC
+                  Details.
+                </div>
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className="text-[10px] uppercase font-bold text-stone-400">
                     Sex
                   </label>
                   <select
-                    className="w-full border-2 border-stone-100 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange"
-                    value={(rpnFormData as any)?.sex || ""}
+                    className="w-full border-2 border-stone-100 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange disabled:bg-stone-50 disabled:text-stone-400"
+                    value={rpnFormData.personalDetails?.gender || ""}
                     onChange={(e) =>
-                      setrpnFormData({
-                        ...rpnFormData,
-                        sex: e.target.value,
-                      } as any)
+                      updateNestedField(
+                        "personalDetails",
+                        "gender",
+                        e.target.value,
+                      )
                     }
+                    disabled={!permissionService.canEditStaffKycDetails()}
                   >
                     <option value="">Select Sex...</option>
                     <option value="male">Male</option>
@@ -453,14 +519,18 @@ export const RPNManagement: React.FC = () => {
                   </label>
                   <input
                     type="date"
-                    className="w-full border-2 border-stone-100 p-3 text-xs font-bold outline-none focus:border-brand-orange"
-                    value={(rpnFormData as any)?.dateOfBirth || ""}
+                    className="w-full border-2 border-stone-100 p-3 text-xs font-bold outline-none focus:border-brand-orange disabled:bg-stone-50 disabled:text-stone-400"
+                    value={normalizeDateInput(
+                      rpnFormData.personalDetails?.dateOfBirth,
+                    )}
                     onChange={(e) =>
-                      setrpnFormData({
-                        ...rpnFormData,
-                        dateOfBirth: e.target.value,
-                      } as any)
+                      updateNestedField(
+                        "personalDetails",
+                        "dateOfBirth",
+                        e.target.value,
+                      )
                     }
+                    disabled={!permissionService.canEditStaffKycDetails()}
                   />
                 </div>
 
@@ -469,15 +539,17 @@ export const RPNManagement: React.FC = () => {
                     National ID Number
                   </label>
                   <input
-                    className="w-full border-2 border-stone-100 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange"
-                    value={(rpnFormData as any)?.nationalIdNumber || ""}
+                    className="w-full border-2 border-stone-100 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange disabled:bg-stone-50 disabled:text-stone-400"
+                    value={rpnFormData.personalDetails?.nationalId || ""}
                     onChange={(e) =>
-                      setrpnFormData({
-                        ...rpnFormData,
-                        nationalIdNumber: e.target.value,
-                      } as any)
+                      updateNestedField(
+                        "personalDetails",
+                        "nationalId",
+                        e.target.value,
+                      )
                     }
                     placeholder="e.g. 63-123456-A-00"
+                    disabled={!permissionService.canEditStaffKycDetails()}
                   />
                 </div>
 
@@ -486,15 +558,17 @@ export const RPNManagement: React.FC = () => {
                     Passport Number
                   </label>
                   <input
-                    className="w-full border-2 border-stone-100 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange"
-                    value={(rpnFormData as any)?.passportNumber || ""}
+                    className="w-full border-2 border-stone-100 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange disabled:bg-stone-50 disabled:text-stone-400"
+                    value={rpnFormData.kycDetails?.idNumber || ""}
                     onChange={(e) =>
-                      setrpnFormData({
-                        ...rpnFormData,
-                        passportNumber: e.target.value,
-                      } as any)
+                      updateNestedField(
+                        "kycDetails",
+                        "idNumber",
+                        e.target.value,
+                      )
                     }
                     placeholder="Optional"
+                    disabled={!permissionService.canEditStaffKycDetails()}
                   />
                 </div>
 
@@ -503,14 +577,16 @@ export const RPNManagement: React.FC = () => {
                     Highest Education
                   </label>
                   <select
-                    className="w-full border-2 border-stone-100 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange"
-                    value={(rpnFormData as any)?.highestEducation || ""}
+                    className="w-full border-2 border-stone-100 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange disabled:bg-stone-50 disabled:text-stone-400"
+                    value={rpnFormData.personalDetails?.highestEducation || ""}
                     onChange={(e) =>
-                      setrpnFormData({
-                        ...rpnFormData,
-                        highestEducation: e.target.value,
-                      } as any)
+                      updateNestedField(
+                        "personalDetails",
+                        "highestEducation",
+                        e.target.value,
+                      )
                     }
+                    disabled={!permissionService.canEditStaffKycDetails()}
                   >
                     <option value="">Select Education Level...</option>
                     <option value="primary">Primary</option>
@@ -529,15 +605,17 @@ export const RPNManagement: React.FC = () => {
                     Occupation / Skills
                   </label>
                   <input
-                    className="w-full border-2 border-stone-100 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange"
-                    value={(rpnFormData as any)?.skills || ""}
+                    className="w-full border-2 border-stone-100 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange disabled:bg-stone-50 disabled:text-stone-400"
+                    value={rpnFormData.personalDetails?.skills || ""}
                     onChange={(e) =>
-                      setrpnFormData({
-                        ...rpnFormData,
-                        skills: e.target.value,
-                      } as any)
+                      updateNestedField(
+                        "personalDetails",
+                        "skills",
+                        e.target.value,
+                      )
                     }
                     placeholder="Phone use, sales, training, stocktake..."
+                    disabled={!permissionService.canEditStaffKycDetails()}
                   />
                 </div>
 
@@ -546,15 +624,17 @@ export const RPNManagement: React.FC = () => {
                     Residential Address
                   </label>
                   <input
-                    className="w-full border-2 border-stone-100 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange"
-                    value={(rpnFormData as any)?.residentialAddress || ""}
+                    className="w-full border-2 border-stone-100 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange disabled:bg-stone-50 disabled:text-stone-400"
+                    value={rpnFormData.addressDetails?.streetAddress || ""}
                     onChange={(e) =>
-                      setrpnFormData({
-                        ...rpnFormData,
-                        residentialAddress: e.target.value,
-                      } as any)
+                      updateNestedField(
+                        "addressDetails",
+                        "streetAddress",
+                        e.target.value,
+                      )
                     }
                     placeholder="House number, street, area"
+                    disabled={!permissionService.canEditStaffKycDetails()}
                   />
                 </div>
 
@@ -563,14 +643,16 @@ export const RPNManagement: React.FC = () => {
                     Suburb / Village
                   </label>
                   <input
-                    className="w-full border-2 border-stone-100 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange"
-                    value={(rpnFormData as any)?.suburbOrVillage || ""}
+                    className="w-full border-2 border-stone-100 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange disabled:bg-stone-50 disabled:text-stone-400"
+                    value={rpnFormData.addressDetails?.suburb || ""}
                     onChange={(e) =>
-                      setrpnFormData({
-                        ...rpnFormData,
-                        suburbOrVillage: e.target.value,
-                      } as any)
+                      updateNestedField(
+                        "addressDetails",
+                        "suburb",
+                        e.target.value,
+                      )
                     }
+                    disabled={!permissionService.canEditStaffKycDetails()}
                   />
                 </div>
 
@@ -579,14 +661,16 @@ export const RPNManagement: React.FC = () => {
                     District
                   </label>
                   <input
-                    className="w-full border-2 border-stone-100 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange"
-                    value={(rpnFormData as any)?.district || ""}
+                    className="w-full border-2 border-stone-100 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange disabled:bg-stone-50 disabled:text-stone-400"
+                    value={rpnFormData.addressDetails?.district || ""}
                     onChange={(e) =>
-                      setrpnFormData({
-                        ...rpnFormData,
-                        district: e.target.value,
-                      } as any)
+                      updateNestedField(
+                        "addressDetails",
+                        "district",
+                        e.target.value,
+                      )
                     }
+                    disabled={!permissionService.canEditStaffKycDetails()}
                   />
                 </div>
 
@@ -595,14 +679,16 @@ export const RPNManagement: React.FC = () => {
                     Province
                   </label>
                   <input
-                    className="w-full border-2 border-stone-100 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange"
-                    value={(rpnFormData as any)?.province || ""}
+                    className="w-full border-2 border-stone-100 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange disabled:bg-stone-50 disabled:text-stone-400"
+                    value={rpnFormData.addressDetails?.province || ""}
                     onChange={(e) =>
-                      setrpnFormData({
-                        ...rpnFormData,
-                        province: e.target.value,
-                      } as any)
+                      updateNestedField(
+                        "addressDetails",
+                        "province",
+                        e.target.value,
+                      )
                     }
+                    disabled={!permissionService.canEditStaffKycDetails()}
                   />
                 </div>
 
@@ -611,14 +697,16 @@ export const RPNManagement: React.FC = () => {
                     Country
                   </label>
                   <input
-                    className="w-full border-2 border-stone-100 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange"
-                    value={(rpnFormData as any)?.country || "Zimbabwe"}
+                    className="w-full border-2 border-stone-100 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange disabled:bg-stone-50 disabled:text-stone-400"
+                    value={rpnFormData.addressDetails?.country || "Zimbabwe"}
                     onChange={(e) =>
-                      setrpnFormData({
-                        ...rpnFormData,
-                        country: e.target.value,
-                      } as any)
+                      updateNestedField(
+                        "addressDetails",
+                        "country",
+                        e.target.value,
+                      )
                     }
+                    disabled={!permissionService.canEditStaffKycDetails()}
                   />
                 </div>
 
@@ -627,14 +715,16 @@ export const RPNManagement: React.FC = () => {
                     Next of Kin Full Name
                   </label>
                   <input
-                    className="w-full border-2 border-stone-100 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange"
-                    value={(rpnFormData as any)?.nextOfKinName || ""}
+                    className="w-full border-2 border-stone-100 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange disabled:bg-stone-50 disabled:text-stone-400"
+                    value={rpnFormData.personalDetails?.nextOfKinName || ""}
                     onChange={(e) =>
-                      setrpnFormData({
-                        ...rpnFormData,
-                        nextOfKinName: e.target.value,
-                      } as any)
+                      updateNestedField(
+                        "personalDetails",
+                        "nextOfKinName",
+                        e.target.value,
+                      )
                     }
+                    disabled={!permissionService.canEditStaffKycDetails()}
                   />
                 </div>
 
@@ -643,15 +733,17 @@ export const RPNManagement: React.FC = () => {
                     Next of Kin Phone Number
                   </label>
                   <input
-                    className="w-full border-2 border-stone-100 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange"
-                    value={(rpnFormData as any)?.nextOfKinPhone || ""}
+                    className="w-full border-2 border-stone-100 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange disabled:bg-stone-50 disabled:text-stone-400"
+                    value={rpnFormData.personalDetails?.nextOfKinPhone || ""}
                     onChange={(e) =>
-                      setrpnFormData({
-                        ...rpnFormData,
-                        nextOfKinPhone: e.target.value,
-                      } as any)
+                      updateNestedField(
+                        "personalDetails",
+                        "nextOfKinPhone",
+                        e.target.value,
+                      )
                     }
                     placeholder="+263..."
+                    disabled={!permissionService.canEditStaffKycDetails()}
                   />
                 </div>
 
@@ -660,15 +752,19 @@ export const RPNManagement: React.FC = () => {
                     Next of Kin Relationship
                   </label>
                   <input
-                    className="w-full border-2 border-stone-100 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange"
-                    value={(rpnFormData as any)?.nextOfKinRelationship || ""}
+                    className="w-full border-2 border-stone-100 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange disabled:bg-stone-50 disabled:text-stone-400"
+                    value={
+                      rpnFormData.personalDetails?.nextOfKinRelationship || ""
+                    }
                     onChange={(e) =>
-                      setrpnFormData({
-                        ...rpnFormData,
-                        nextOfKinRelationship: e.target.value,
-                      } as any)
+                      updateNestedField(
+                        "personalDetails",
+                        "nextOfKinRelationship",
+                        e.target.value,
+                      )
                     }
                     placeholder="Parent, spouse, sibling..."
+                    disabled={!permissionService.canEditStaffKycDetails()}
                   />
                 </div>
 
@@ -679,28 +775,38 @@ export const RPNManagement: React.FC = () => {
                   <input
                     type="file"
                     accept="image/*"
-                    className="w-full border-2 border-stone-100 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange bg-white"
+                    className="w-full border-2 border-stone-100 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange bg-white disabled:bg-stone-50 disabled:text-stone-400"
+                    disabled={!permissionService.canEditStaffKycDetails()}
                     onChange={async (e) => {
                       const file = e.target.files?.[0];
                       if (!file) return;
                       const base64 = await fileToBase64(file);
-                      setrpnFormData({
-                        ...rpnFormData,
-                        passportPhotoUrl: base64,
-                        passportPhotoName: file.name,
-                        passportPhotoUpdatedAt: new Date().toISOString(),
-                      } as any);
+                      updateNestedField(
+                        "kycDocuments",
+                        "passportPhotoUrl",
+                        base64,
+                      );
+                      updateNestedField(
+                        "kycDocuments",
+                        "passportPhotoName",
+                        file.name,
+                      );
+                      updateNestedField(
+                        "kycDocuments",
+                        "passportPhotoUpdatedAt",
+                        new Date().toISOString(),
+                      );
                     }}
                   />
-                  {(rpnFormData as any)?.passportPhotoUrl && (
+                  {rpnFormData.kycDocuments?.passportPhotoUrl && (
                     <div className="mt-2 flex items-center gap-3">
                       <img
-                        src={(rpnFormData as any).passportPhotoUrl}
+                        src={rpnFormData.kycDocuments.passportPhotoUrl}
                         alt="RPN passport size"
                         className="w-16 h-16 object-cover border border-stone-200"
                       />
                       <span className="text-[9px] font-bold uppercase text-stone-400">
-                        {(rpnFormData as any)?.passportPhotoName ||
+                        {rpnFormData.kycDocuments?.passportPhotoName ||
                           "Image uploaded"}
                       </span>
                     </div>
@@ -713,15 +819,17 @@ export const RPNManagement: React.FC = () => {
                   </label>
                   <textarea
                     rows={3}
-                    className="w-full border-2 border-stone-100 p-3 text-xs font-medium outline-none focus:border-brand-orange"
-                    value={(rpnFormData as any)?.vettingNotes || ""}
+                    className="w-full border-2 border-stone-100 p-3 text-xs font-medium outline-none focus:border-brand-orange disabled:bg-stone-50 disabled:text-stone-400"
+                    value={rpnFormData.kycDetails?.vettingNotes || ""}
                     onChange={(e) =>
-                      setrpnFormData({
-                        ...rpnFormData,
-                        vettingNotes: e.target.value,
-                      } as any)
+                      updateNestedField(
+                        "kycDetails",
+                        "vettingNotes",
+                        e.target.value,
+                      )
                     }
                     placeholder="Interview notes, reference checks, field suitability..."
+                    disabled={!permissionService.canEditStaffKycDetails()}
                   />
                 </div>
               </div>
@@ -1039,12 +1147,14 @@ export const RPNManagement: React.FC = () => {
               >
                 Back
               </SecondaryButton>
-              <PrimaryButton
-                onClick={() => setView("form")}
-                className="bg-brand-orange hover:bg-brand-orange/90 border-0"
-              >
-                Edit Agent
-              </PrimaryButton>
+              {permissionService.canEditRpnAgent() && (
+                <PrimaryButton
+                  onClick={() => setView("form")}
+                  className="bg-brand-orange hover:bg-brand-orange/90 border-0"
+                >
+                  Edit Agent
+                </PrimaryButton>
+              )}
             </div>
           </div>
         </div>
@@ -1257,8 +1367,8 @@ export const RPNManagement: React.FC = () => {
             >
               <LayoutDashboard size={14} /> Network Overview
             </SecondaryButton>
-            {permissionService.canCreate("addNewAgent") && (
-              <PrimaryButton // Use rpnManagement for general RPN creation
+            {permissionService.canCreateRpnAgent() && (
+              <PrimaryButton
                 onClick={startNewRPN}
                 className="flex items-center gap-2"
               >
@@ -1408,10 +1518,39 @@ export const RPNManagement: React.FC = () => {
                 </td>
                 <td className="px-6 py-4 text-right">
                   <div className="flex justify-end gap-2 p-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    {permissionService.canView("rpnManagement") && (
+                    <button
+                      onClick={() => {
+                        if (permissionService.canEditRpnAgent()) {
+                          setRpnFormData({ ...rpn });
+                          setView("form");
+                        } else {
+                          alert(
+                            "You do not have permission to edit RPN agents.",
+                          );
+                          void staffAuditService.logAction({
+                            eventType: "ACCESS_DENIED",
+                            module: "staff",
+                            severity: "high",
+                            action:
+                              "Attempted to edit RPN agent without permission",
+                          });
+                        }
+                      }}
+                      disabled={!permissionService.canEditRpnAgent()}
+                      className={`p-1.5 border border-stone-200 transition-all bg-white ${permissionService.canEditRpnAgent() ? "text-stone-400 hover:text-brand-orange" : "text-stone-200 cursor-not-allowed"}`}
+                      title={
+                        permissionService.canEditRpnAgent()
+                          ? "Edit Agent"
+                          : "No permission to edit agent"
+                      }
+                    >
+                      <Edit2 size={12} />
+                    </button>
+                    {permissionService.canViewRpnAgents() && (
                       <button
                         onClick={() => openRPNProfile(rpn)}
                         className="p-1.5 border border-stone-200 text-stone-400 hover:text-brand-charcoal transition-all bg-white"
+                        title="View Profile"
                       >
                         <ChevronRight size={12} />
                       </button>
