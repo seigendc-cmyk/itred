@@ -59,6 +59,7 @@ const APPEND_ONLY_KEYS = [
   "staff_access_logs",
   "inventory_ledger",
   "pos_events",
+  "itred_staff_audit_logs",
 ];
 
 const SINGLETON_KEYS = [

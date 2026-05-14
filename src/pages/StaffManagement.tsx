@@ -39,10 +39,13 @@ import {
   DeskType,
   ActivityLog,
   MenuPermissions,
+  ActionPermissions,
+  ActionPermissionKey,
 } from "../types.ts";
 import { asArray } from "../utils/safeData.ts";
 import { pdfService } from "../services/pdfService.ts";
 import { focusMainContent } from "../utils/uiHelpers.ts";
+import { staffAuditService } from "../services/staffAuditService.ts";
 
 const DESKS: DeskType[] = [
   "SysAdmin Desk",
@@ -116,7 +119,132 @@ const PERMISSIONS = [
   { id: "staffAccessLogs", label: "Staff Access Logs" },
   { id: "systemSettings", label: "System Settings" },
   { id: "howTo", label: "How To & Help" },
+  { id: "approvalQueue", label: "Approval Queue" },
+  { id: "notifications", label: "Notifications" },
+  { id: "staffTasks", label: "Staff Tasks" },
 ];
+
+const ACTION_GROUPS = [
+  {
+    name: "Vendor Operations",
+    keys: [
+      "vendor.view",
+      "vendor.createDraft",
+      "vendor.submitApproval",
+      "vendor.approve",
+      "vendor.publish",
+      "vendor.delete",
+    ],
+  },
+  {
+    name: "Product Operations",
+    keys: [
+      "product.view",
+      "product.createDraft",
+      "product.submitApproval",
+      "product.approve",
+      "product.publish",
+      "product.changePrice",
+      "product.delete",
+    ],
+  },
+  {
+    name: "Catalogue Operations",
+    keys: [
+      "catalogue.view",
+      "catalogue.generate",
+      "catalogue.submitApproval",
+      "catalogue.approveDeploy",
+      "catalogue.download",
+      "catalogue.archive",
+    ],
+  },
+  {
+    name: "Commerce Access Hub",
+    keys: [
+      "cah.view",
+      "cah.createLink",
+      "cah.submitApproval",
+      "cah.approveLink",
+    ],
+  },
+  {
+    name: "WhatsApp Activity",
+    keys: [
+      "whatsapp.view",
+      "whatsapp.logActivity",
+      "whatsapp.verifyConversion",
+    ],
+  },
+  {
+    name: "Finance & Subscriptions",
+    keys: ["pricing.view", "pricing.submitApproval", "pricing.approve"],
+  },
+  {
+    name: "Notifications",
+    keys: [
+      "notifications.viewOwn",
+      "notifications.viewTeam",
+      "notifications.resolve",
+    ],
+  },
+  {
+    name: "Approval Queue",
+    keys: ["approvalQueue.view", "approvalQueue.approve"],
+  },
+  {
+    name: "Staff Tasks",
+    keys: ["staffTasks.viewOwn", "staffTasks.assign", "staffTasks.complete"],
+  },
+] as const;
+
+const JUNIOR_STAFF_PERMS: ActionPermissions = {
+  "vendor.view": true,
+  "vendor.createDraft": true,
+  "vendor.submitApproval": true,
+  "product.view": true,
+  "product.createDraft": true,
+  "product.submitApproval": true,
+  "catalogue.view": true,
+  "catalogue.generate": true,
+  "catalogue.submitApproval": true,
+  "cah.view": true,
+  "cah.createLink": true,
+  "cah.submitApproval": true,
+  "pricing.view": true,
+  "pricing.submitApproval": true,
+  "whatsapp.view": true,
+  "whatsapp.logActivity": true,
+  "notifications.viewOwn": true,
+  "staffTasks.viewOwn": true,
+  "staffTasks.complete": true,
+};
+
+const MANAGER_PERMS: ActionPermissions = {
+  ...JUNIOR_STAFF_PERMS,
+  "vendor.approve": true,
+  "product.approve": true,
+  "product.changePrice": true,
+  "catalogue.approveDeploy": true,
+  "cah.approveLink": true,
+  "pricing.approve": true,
+  "whatsapp.verifyConversion": true,
+  "notifications.viewTeam": true,
+  "notifications.resolve": true,
+  "approvalQueue.view": true,
+  "approvalQueue.approve": true,
+  "staffTasks.assign": true,
+};
+
+const SUPER_ADMIN_PERMS: ActionPermissions = {
+  ...MANAGER_PERMS,
+  "vendor.publish": true,
+  "vendor.delete": true,
+  "product.publish": true,
+  "product.delete": true,
+  "catalogue.download": true,
+  "catalogue.archive": true,
+};
 
 export const StaffManagement: React.FC = () => {
   const [staffList, setStaffList] = useState<Staff[]>([]);
@@ -149,8 +277,40 @@ export const StaffManagement: React.FC = () => {
   const [applyRoleConfig, setApplyRoleConfig] = useState<{
     role: string;
   } | null>(null);
-  const [localRoleTemplates, setLocalRoleTemplates] =
-    useState<Record<string, MenuPermissions>>(ROLE_TEMPLATES);
+  const [localRoleTemplates, setLocalRoleTemplates] = useState<
+    Record<
+      string,
+      {
+        menuPermissions: MenuPermissions;
+        actionPermissions?: ActionPermissions;
+      }
+    >
+  >(() => {
+    const base: Record<string, any> = { ...ROLE_TEMPLATES };
+    Object.keys(base).forEach((k) => {
+      if (!base[k].menuPermissions) {
+        base[k] = { menuPermissions: base[k], actionPermissions: {} };
+      }
+    });
+    base["Junior Staff"] = {
+      menuPermissions: { dashboard: "view" },
+      actionPermissions: JUNIOR_STAFF_PERMS,
+    };
+    base["Manager"] = {
+      menuPermissions: {
+        dashboard: "full",
+        vendorManagement: "approve",
+        productManagement: "approve",
+        createCatalogue: "approve",
+      },
+      actionPermissions: MANAGER_PERMS,
+    };
+    base["Super Admin"] = {
+      menuPermissions: { dashboard: "full" },
+      actionPermissions: SUPER_ADMIN_PERMS,
+    };
+    return base;
+  });
   const [editedRoleName, setEditedRoleName] = useState("");
   const [passcodeModalConfig, setPasscodeModalConfig] = useState<{
     staff: Staff;
@@ -309,7 +469,10 @@ export const StaffManagement: React.FC = () => {
       status: "active",
       role: "Backoffice Operator",
       desk: "Backoffice Desk",
-      menuPermissions: localRoleTemplates["Backoffice Operator"] || {},
+      menuPermissions:
+        localRoleTemplates["Backoffice Operator"]?.menuPermissions || {},
+      actionPermissions:
+        localRoleTemplates["Backoffice Operator"]?.actionPermissions || {},
       mustChangePasscode: true,
       passcode: "",
       failedAttemptCount: 0,
@@ -359,9 +522,11 @@ export const StaffManagement: React.FC = () => {
     }
 
     const defaultPermissions =
-      localRoleTemplates[formData.role as string] ||
-      localRoleTemplates["Viewer"] ||
+      localRoleTemplates[formData.role as string]?.menuPermissions ||
+      localRoleTemplates["Viewer"]?.menuPermissions ||
       {};
+    const defaultActions =
+      localRoleTemplates[formData.role as string]?.actionPermissions || {};
 
     const now = new Date().toISOString();
     const staffCode = selectedStaff
@@ -379,6 +544,9 @@ export const StaffManagement: React.FC = () => {
       menuPermissions: !selectedStaff
         ? defaultPermissions
         : formData.menuPermissions || defaultPermissions,
+      actionPermissions: !selectedStaff
+        ? defaultActions
+        : formData.actionPermissions || defaultActions,
       failedAttemptCount: !selectedStaff
         ? 0
         : formData.failedAttemptCount || selectedStaff.failedAttemptCount || 0,
@@ -641,6 +809,19 @@ export const StaffManagement: React.FC = () => {
     }));
   };
 
+  const handleActionPermissionChange = (
+    key: ActionPermissionKey,
+    level: boolean,
+  ) => {
+    setFormData((prev) => ({
+      ...prev,
+      actionPermissions: {
+        ...prev?.actionPermissions,
+        [key]: level,
+      },
+    }));
+  };
+
   return (
     <div className="space-y-8 pb-20">
       <div
@@ -729,7 +910,12 @@ export const StaffManagement: React.FC = () => {
                       <SecondaryButton
                         onClick={() => {
                           setFormData({
-                            menuPermissions: { ...localRoleTemplates[role] },
+                            menuPermissions: {
+                              ...localRoleTemplates[role].menuPermissions,
+                            },
+                            actionPermissions: {
+                              ...localRoleTemplates[role].actionPermissions,
+                            },
                           });
                           setSelectedStaff({ role } as any);
                           setEditedRoleName(role);
@@ -744,28 +930,26 @@ export const StaffManagement: React.FC = () => {
                   </div>
 
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-                    {Object.entries(localRoleTemplates[role]).map(
-                      ([key, level]) => (
-                        <div key={key} className="flex justify-between">
-                          <span className="text-stone-600">
-                            {PERMISSIONS.find((p) => p.id === key)?.label ||
-                              key}
-                            :
-                          </span>
-                          <span
-                            className={`font-medium ${
-                              level === "full"
-                                ? "text-green-600"
-                                : level === "hidden"
-                                  ? "text-red-600"
-                                  : "text-blue-600"
-                            }`}
-                          >
-                            {level}
-                          </span>
-                        </div>
-                      ),
-                    )}
+                    {Object.entries(
+                      localRoleTemplates[role].menuPermissions || {},
+                    ).map(([key, level]) => (
+                      <div key={key} className="flex justify-between">
+                        <span className="text-stone-600">
+                          {PERMISSIONS.find((p) => p.id === key)?.label || key}:
+                        </span>
+                        <span
+                          className={`font-medium ${
+                            level === "full"
+                              ? "text-green-600"
+                              : level === "hidden"
+                                ? "text-red-600"
+                                : "text-blue-600"
+                          }`}
+                        >
+                          {level}
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 </div>
               ))}
@@ -795,7 +979,8 @@ export const StaffManagement: React.FC = () => {
                     ROLE_TEMPLATES[selectedStaff.role as string] || {};
                   setFormData((prev) => ({
                     ...prev,
-                    menuPermissions: { ...resetPerms },
+                    menuPermissions: { ...resetPerms.menuPermissions },
+                    actionPermissions: { ...resetPerms.actionPermissions },
                   }));
                 }}
                 className="text-stone-300 border-stone-600 hover:text-white"
@@ -811,12 +996,18 @@ export const StaffManagement: React.FC = () => {
                     ...localRoleTemplates,
                   };
                   if (updatedRole !== newRole) {
-                    newTemplates[newRole] =
-                      formData.menuPermissions as MenuPermissions;
+                    newTemplates[newRole] = {
+                      menuPermissions:
+                        formData.menuPermissions as MenuPermissions,
+                      actionPermissions: formData.actionPermissions,
+                    };
                     delete newTemplates[updatedRole];
                   } else {
-                    newTemplates[updatedRole] =
-                      formData.menuPermissions as MenuPermissions;
+                    newTemplates[updatedRole] = {
+                      menuPermissions:
+                        formData.menuPermissions as MenuPermissions,
+                      actionPermissions: formData.actionPermissions,
+                    };
                   }
 
                   staffService.saveRoleTemplates(newTemplates);
@@ -829,6 +1020,20 @@ export const StaffManagement: React.FC = () => {
                     result: "updated",
                     details: { role: updatedRole },
                   });
+
+                  // Non-blocking staff audit logging
+                  try {
+                    void staffAuditService.logAction({
+                      eventType: "PERMISSION_CHANGED",
+                      module: "staff",
+                      action: `Updated role template permissions for ${newRole}`,
+                      severity: "critical",
+                      recordType: "role_template",
+                      recordName: newRole,
+                    });
+                  } catch (auditErr) {
+                    console.error("Audit log failed", auditErr);
+                  }
 
                   setView("list");
                   focusMainContent();
@@ -890,12 +1095,52 @@ export const StaffManagement: React.FC = () => {
                     <option value="hidden">Hidden</option>
                     <option value="view">View</option>
                     <option value="create">Create</option>
+                    <option value="submit">Submit</option>
                     <option value="edit">Edit</option>
                     <option value="approve">Approve</option>
                     <option value="delete">Delete</option>
                     <option value="export">Export</option>
                     <option value="full">Full</option>
                   </select>
+                </div>
+              ))}
+            </div>
+          </DataPanel>
+
+          <DataPanel title="Action Permissions & Approval Rights">
+            <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {ACTION_GROUPS.map((group) => (
+                <div key={group.name} className="space-y-3">
+                  <h4 className="text-xs font-bold uppercase text-brand-orange border-b border-stone-100 pb-2">
+                    {group.name}
+                  </h4>
+                  {group.keys.map((key) => (
+                    <label
+                      key={key}
+                      className="flex items-center gap-2 text-xs text-stone-600 cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        className="accent-brand-orange"
+                        checked={
+                          !!formData.actionPermissions?.[
+                            key as ActionPermissionKey
+                          ]
+                        }
+                        onChange={(e) =>
+                          handleActionPermissionChange(
+                            key as ActionPermissionKey,
+                            e.target.checked,
+                          )
+                        }
+                        disabled={
+                          selectedStaff?.role === "SysAdmin" ||
+                          selectedStaff?.role === "Admin"
+                        }
+                      />
+                      {key.split(".")[1]}
+                    </label>
+                  ))}
                 </div>
               ))}
             </div>
@@ -1338,7 +1583,10 @@ export const StaffManagement: React.FC = () => {
                       role,
                       desk:
                         (staffService as any).ROLE_TO_DESK_MAP?.[role] || "",
-                      menuPermissions: localRoleTemplates[role] || {},
+                      menuPermissions:
+                        localRoleTemplates[role]?.menuPermissions || {},
+                      actionPermissions:
+                        localRoleTemplates[role]?.actionPermissions || {},
                     });
                   }}
                   className="form-input"
@@ -1533,6 +1781,7 @@ export const StaffManagement: React.FC = () => {
                       await staffService.saveStaff({
                         ...selectedStaff,
                         menuPermissions: formData.menuPermissions,
+                        actionPermissions: formData.actionPermissions,
                         updatedAt: new Date().toISOString(),
                         updatedBy: "SysAdmin",
                       });
@@ -1545,6 +1794,21 @@ export const StaffManagement: React.FC = () => {
                         result: "updated",
                         details: { staffId: selectedStaff.id },
                       });
+
+                      // Non-blocking staff audit logging
+                      try {
+                        void staffAuditService.logAction({
+                          eventType: "PERMISSION_CHANGED",
+                          module: "staff",
+                          action: `Updated individual permissions for ${selectedStaff.displayName}`,
+                          severity: "critical",
+                          recordType: "staff",
+                          recordId: selectedStaff.id,
+                          recordName: selectedStaff.displayName,
+                        });
+                      } catch (auditErr) {
+                        console.error("Audit log failed", auditErr);
+                      }
 
                       setStaffList(asArray<Staff>(staffService.getAllStaff()));
 
@@ -1595,12 +1859,47 @@ export const StaffManagement: React.FC = () => {
                     <option value="hidden">Hidden</option>
                     <option value="view">View</option>
                     <option value="create">Create</option>
+                    <option value="submit">Submit</option>
                     <option value="edit">Edit</option>
                     <option value="approve">Approve</option>
                     <option value="delete">Delete</option>
                     <option value="export">Export</option>
                     <option value="full">Full</option>
                   </select>
+                </div>
+              ))}
+            </div>
+          </DataPanel>
+          <DataPanel title="Action Permissions & Approval Rights">
+            <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {ACTION_GROUPS.map((group) => (
+                <div key={group.name} className="space-y-3">
+                  <h4 className="text-xs font-bold uppercase text-brand-orange border-b border-stone-100 pb-2">
+                    {group.name}
+                  </h4>
+                  {group.keys.map((key) => (
+                    <label
+                      key={key}
+                      className="flex items-center gap-2 text-xs text-stone-600 cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        className="accent-brand-orange"
+                        checked={
+                          !!formData.actionPermissions?.[
+                            key as ActionPermissionKey
+                          ]
+                        }
+                        onChange={(e) =>
+                          handleActionPermissionChange(
+                            key as ActionPermissionKey,
+                            e.target.checked,
+                          )
+                        }
+                      />
+                      {key.split(".")[1]}
+                    </label>
+                  ))}
                 </div>
               ))}
             </div>
@@ -1806,7 +2105,12 @@ export const StaffManagement: React.FC = () => {
                 for (const staff of staffToUpdate) {
                   await staffService.saveStaff({
                     ...staff,
-                    menuPermissions: localRoleTemplates[applyRoleConfig.role],
+                    menuPermissions:
+                      localRoleTemplates[applyRoleConfig.role]
+                        ?.menuPermissions || {},
+                    actionPermissions:
+                      localRoleTemplates[applyRoleConfig.role]
+                        ?.actionPermissions || {},
                     updatedAt: new Date().toISOString(),
                     updatedBy: "SysAdmin",
                   });

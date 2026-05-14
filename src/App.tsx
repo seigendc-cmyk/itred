@@ -155,6 +155,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       "staff-access-logs": "staffAccessLogs",
       "system-settings": "systemSettings",
       "contact-hub-settings": "systemSettings", // Treated as a system setting globally
+      "approval-queue": "approvalQueue",
+      notifications: "notifications",
+      "staff-tasks": "staffTasks",
       "how-to": "howTo",
       dashboard: "dashboard",
       // Add other specific mappings if routes don't directly match MenuKey
@@ -352,7 +355,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           path="/role-menu-permissions"
           element={
             checkAccess("role-menu-permissions") ? (
-              <StaffManagement />
+              <RoleMenuPermissions />
             ) : (
               <RestrictedAccess />
             )
@@ -383,6 +386,36 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           element={
             checkAccess("contact-hub-settings") ? (
               <ContactHubSettings />
+            ) : (
+              <RestrictedAccess />
+            )
+          }
+        />
+        <Route
+          path="/approval-queue"
+          element={
+            checkAccess("approval-queue") ? (
+              <AdminDashboard onNavigate={handleNavigate} />
+            ) : (
+              <RestrictedAccess />
+            )
+          }
+        />
+        <Route
+          path="/notifications"
+          element={
+            checkAccess("notifications") ? (
+              <AdminDashboard onNavigate={handleNavigate} />
+            ) : (
+              <RestrictedAccess />
+            )
+          }
+        />
+        <Route
+          path="/staff-tasks"
+          element={
+            checkAccess("staff-tasks") ? (
+              <AdminDashboard onNavigate={handleNavigate} />
             ) : (
               <RestrictedAccess />
             )

@@ -3,60 +3,85 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { AppNotification, NotificationStatus } from "../types.ts";
+import { ITredNotification, NotificationStatus } from "../types.ts";
+import { getStorageAdapter } from "./storageService.ts";
 
 const STORAGE_KEY = "itred_notifications";
 
 export const notificationService = {
-  getNotifications(): AppNotification[] {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      const parsed = raw ? JSON.parse(raw) : [];
-      return Array.isArray(parsed) ? parsed : [];
-    } catch (e) {
-      console.error("Failed to parse notifications", e);
-      return [];
-    }
+  getAll: async (): Promise<ITredNotification[]> => {
+    const data =
+      await getStorageAdapter().getItem<ITredNotification[]>(STORAGE_KEY);
+    return data || [];
   },
 
-  addNotification(
-    notif: Omit<AppNotification, "id" | "createdAt" | "status">,
-  ): void {
-    const notifications = this.getNotifications();
+  getById: async (id: string): Promise<ITredNotification | undefined> => {
+    const all = await notificationService.getAll();
+    return all.find((n) => n.id === id);
+  },
 
-    const isDuplicate = notifications.some(
-      (n) =>
-        n.status === "OPEN" &&
-        n.relatedRecordId === notif.relatedRecordId &&
-        n.type === notif.type &&
-        n.severity === notif.severity &&
-        n.title === notif.title,
-    );
-
-    if (isDuplicate) return;
-
-    const newNotif: AppNotification = {
-      ...notif,
-      id: `NOTIF-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      status: "OPEN",
-      createdAt: new Date().toISOString(),
-    };
-
-    notifications.push(newNotif);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(notifications));
+  create: async (notif: ITredNotification): Promise<void> => {
+    const all = await notificationService.getAll();
+    all.push(notif);
+    await getStorageAdapter().setItem(STORAGE_KEY, all);
     window.dispatchEvent(new Event("itred_notifications_updated"));
   },
 
-  updateStatus(id: string, status: NotificationStatus): void {
-    const notifications = this.getNotifications();
-    const index = notifications.findIndex((n) => n.id === id);
+  updateStatus: async (
+    id: string,
+    status: NotificationStatus,
+  ): Promise<void> => {
+    const all = await notificationService.getAll();
+    const index = all.findIndex((n) => n.id === id);
     if (index >= 0) {
-      notifications[index].status = status;
-      if (status === "RESOLVED")
-        notifications[index].resolvedAt = new Date().toISOString();
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(notifications));
+      all[index].status = status;
+      if (status === "resolved")
+        all[index].resolvedAt = new Date().toISOString();
+      if (status === "read") all[index].readAt = new Date().toISOString();
+      await getStorageAdapter().setItem(STORAGE_KEY, all);
       window.dispatchEvent(new Event("itred_notifications_updated"));
     }
+  },
+
+  delete: async (id: string): Promise<void> => {
+    const all = await notificationService.getAll();
+    await getStorageAdapter().setItem(
+      STORAGE_KEY,
+      all.filter((n) => n.id !== id),
+    );
+    window.dispatchEvent(new Event("itred_notifications_updated"));
+  },
+
+  createNotification: async (
+    notif: Omit<ITredNotification, "id" | "createdAt" | "status">,
+  ): Promise<void> => {
+    const newNotif: ITredNotification = {
+      ...notif,
+      id: `NOTIF-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      status: "unread",
+      createdAt: new Date().toISOString(),
+    };
+    await notificationService.create(newNotif);
+  },
+
+  getUnreadNotifications: async (): Promise<ITredNotification[]> => {
+    const all = await notificationService.getAll();
+    return all.filter((n) => n.status === "unread");
+  },
+
+  markAsRead: async (id: string): Promise<void> => {
+    await notificationService.updateStatus(id, "read");
+  },
+
+  markAsResolved: async (id: string): Promise<void> => {
+    await notificationService.updateStatus(id, "resolved");
+  },
+
+  getNotificationsForStaff: async (
+    staffId: string,
+  ): Promise<ITredNotification[]> => {
+    const all = await notificationService.getAll();
+    return all.filter((n) => n.assignedToStaffId === staffId);
   },
 
   toast(message: string, type: "success" | "info" = "success") {
@@ -65,13 +90,14 @@ export const notificationService = {
     );
   },
 
-  notifySyncError(details: string) {
-    this.addNotification({
-      type: "SYSTEM",
-      severity: "SYSTEM",
+  notifySyncError: async (details: string) => {
+    await notificationService.createNotification({
+      type: "system_alert",
+      priority: "high",
       title: "Firebase Sync Warning",
       message: `Data saved locally but not synced to Firebase. ${details}`,
-      relatedModule: "Storage Engine",
+      recordType: "Storage Engine",
+      recordId: "sync_error",
     });
   },
 };

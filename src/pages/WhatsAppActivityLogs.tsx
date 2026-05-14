@@ -43,6 +43,7 @@ import { staffService } from "../services/staffService.ts";
 import { RPN } from "../types.ts";
 import { focusMainContent } from "../utils/uiHelpers.ts";
 import { whatsappSourceService } from "../services/whatsappSourceService.ts";
+import { staffAuditService } from "../services/staffAuditService.ts";
 
 export const WhatsAppActivityLogs: React.FC = () => {
   const [logs, setLogs] = useState<WhatsAppActivityLog[]>([]);
@@ -212,6 +213,20 @@ export const WhatsAppActivityLogs: React.FC = () => {
     };
     whatsappActivityService.saveLog(newLog);
     loadData();
+
+    // Non-blocking staff audit logging
+    try {
+      void staffAuditService.logAction({
+        eventType: "WHATSAPP_ACTIVITY_LOGGED",
+        module: "whatsapp",
+        action: `Follow-up marked done for log ${log.id}`,
+        severity: "info",
+        recordType: "whatsapp_log",
+        recordId: log.id,
+      });
+    } catch (auditErr) {
+      console.error("Audit log failed", auditErr);
+    }
   };
 
   const handleSave = () => {
@@ -253,6 +268,41 @@ export const WhatsAppActivityLogs: React.FC = () => {
     };
 
     whatsappActivityService.saveLog(cleanObj(logToSave));
+
+    // Non-blocking staff audit logging
+    try {
+      let severity: "info" | "high" = "info";
+      if (
+        logToSave.activityType === "COMPLAINT_RECEIVED" ||
+        logToSave.priority === "HIGH" ||
+        logToSave.priority === "CRITICAL"
+      )
+        severity = "high";
+
+      void staffAuditService.logAction({
+        eventType: "WHATSAPP_ACTIVITY_LOGGED",
+        module: "whatsapp",
+        action: `Logged WhatsApp activity: ${logToSave.activityType}`,
+        severity,
+        recordType: "whatsapp_log",
+        recordId: logToSave.id,
+        afterSnapshot: logToSave,
+      });
+
+      if (logToSave.leadStatus === "CONVERTED") {
+        void staffAuditService.logAction({
+          eventType: "LEAD_FOLLOWED_UP",
+          module: "whatsapp",
+          action: `Lead converted in log ${logToSave.id}`,
+          severity: "info",
+          recordType: "whatsapp_log",
+          recordId: logToSave.id,
+        });
+      }
+    } catch (auditErr) {
+      console.error("Audit log failed", auditErr);
+    }
+
     loadData();
     setIsFormOpen(false);
     setFormData({});

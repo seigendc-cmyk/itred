@@ -55,6 +55,7 @@ import { contactHubService } from "../services/contactHubService.ts";
 import { settingsService } from "../services/settingsService.ts";
 import { focusMainContent } from "../utils/uiHelpers.ts";
 import { WhatsAppActivityQuickLog } from "../components/WhatsAppActivityQuickLog.tsx";
+import { staffAuditService } from "../services/staffAuditService.ts";
 
 async function assetUrlToDataUri(url: string): Promise<string> {
   const response = await fetch(url);
@@ -520,6 +521,17 @@ export const SectorCatalogueGenerator: React.FC = () => {
 
       const hostedUrl = "";
 
+      const resolveFeedbackNumber = () => {
+        const routes = (systemSettings?.feedbackWhatsAppRoutes || []).filter(r => r.isActive).sort((a,b) => b.priority - a.priority);
+        let match = routes.find(r => r.sector === config.sector && r.category === config.category);
+        if (match) return match.whatsappNumber;
+        match = routes.find(r => r.sector === config.sector);
+        if (match) return match.whatsappNumber;
+        match = routes.find(r => r.purpose === "DEFAULT");
+        if (match) return match.whatsappNumber;
+        return systemSettings?.defaultFeedbackWhatsAppNumber || "";
+      };
+
       const html = generateCatalogueHtml(
         selectedVendors,
         allSelectedProducts,
@@ -527,6 +539,99 @@ export const SectorCatalogueGenerator: React.FC = () => {
         plans,
         {
           serialNumber: config.serialNumber,
+Build controlled survey popup engine for exported catalogues and storefronts.
+
+Files:
+src/lib/catalogueTemplate.ts
+src/lib/storefrontTemplate.ts
+
+Objective:
+Add lightweight, non-noisy survey prompts that collect commerce impact feedback from customers.
+
+Required popups:
+
+1. Welcome Back popup
+Trigger:
+- user has opened this catalogue/storefront before
+- not shown in last 24 hours
+
+Text must include English, Shona, and Ndebele:
+
+Welcome back to iTred.
+Search products, contact vendors, and tell us if this catalogue helped you.
+
+Mauya zvakare pa iTred.
+Tsvagai zvigadzirwa, taurai nevatengesi, mutibatsirewo kutizivisa kana catalogue iri kubatsira.
+
+Siyalamukela futhi ku iTred.
+Dingani impahla, xhumanani labathengisi, lisitshele ukuthi ikhathalogu iyalinceda yini.
+
+Buttons:
+- Continue
+- Give Feedback
+
+2. Helpfulness survey
+Trigger:
+- after 2 product views OR 2 searches
+- only once per 24 hours
+
+Question:
+Is this catalogue helping you find what you need?
+
+Answers:
+- Yes, it helped
+- Partly helped
+- No, I did not find what I wanted
+- I need assistance
+
+Optional comment:
+What product/vendor are you looking for?
+
+3. Expiry survey
+Trigger:
+- catalogue/storefront is within 48 hours of expiry OR already expired
+- only once
+
+Question:
+This catalogue is about to expire. Did it help you connect with vendors or products?
+
+Answers:
+- Yes
+- Partly
+- No
+- I need updated catalogue
+
+4. No-results demand survey
+Trigger:
+- search returns zero results twice in one session
+
+Question:
+We could not find that product. Do you want seiGEN Commerce to help source it?
+
+Fields:
+- Product needed
+- Location
+- Budget optional
+- Contact optional
+
+5. Survey frequency rules:
+- maximum 1 popup per session
+- always show Not Now
+- never block catalogue usage
+- store dismissal in localStorage
+
+6. Every survey answer must call logOfflineEvent with:
+SURVEY_ANSWERED or EXPIRY_SURVEY_OPENED or LEAD_FOLLOWUP_ANSWERED
+
+7. Add button:
+Send Feedback to seiGEN Commerce on WhatsApp
+This opens wa.me with a prefilled summary.
+
+8. Do not silently send WhatsApp.
+Customer must tap send.
+
+9. Do not break product rendering/search/tabs.
+10. Run npm run build.          catalogueId: finalId,
           sector: config.sector,
           category: config.category,
           expiryDate: expiry.toISOString(),
@@ -538,6 +643,8 @@ export const SectorCatalogueGenerator: React.FC = () => {
           companyLogoUrl: contactSettings?.companyLogoUrl,
           systemLogoUrl: contactSettings?.systemLogoUrl,
           hostedUrl,
+          feedbackWhatsAppNumber: resolveFeedbackNumber(),
+          syncEndpointUrl: systemSettings?.syncEndpointUrl || "",
         },
       );
 
@@ -602,6 +709,21 @@ export const SectorCatalogueGenerator: React.FC = () => {
         await catalogueService.saveCatalogue(catalogueData);
       }
 
+      // Non-blocking staff audit logging
+      try {
+        void staffAuditService.logAction({
+          eventType: "CATALOGUE_GENERATED",
+          module: "catalogue",
+          action: `Generated catalogue ${finalId}`,
+          severity: "info",
+          recordType: "catalogue",
+          recordId: finalId,
+          recordName: config.serialNumber
+        });
+      } catch (auditErr) {
+        console.error("Audit log failed", auditErr);
+      }
+
       setLastGenerated({
         html,
         id: finalId,
@@ -630,6 +752,20 @@ export const SectorCatalogueGenerator: React.FC = () => {
       await catalogueService.markAsDeployed(id);
       refreshHistory();
       alert("Catalogue deployed. Lifecycle tracking active.");
+      
+      // Non-blocking staff audit logging
+      try {
+        void staffAuditService.logAction({
+          eventType: "CATALOGUE_DEPLOYED",
+          module: "catalogue",
+          action: `Deployed catalogue ${id}`,
+          severity: "high",
+          recordType: "catalogue",
+          recordId: id
+        });
+      } catch (auditErr) {
+        console.error("Audit log failed", auditErr);
+      }
     } catch (err) {
       console.error(err);
       alert("Failed to deploy catalogue.");
@@ -745,6 +881,20 @@ export const SectorCatalogueGenerator: React.FC = () => {
       actorName: "System Admin",
       details: { filename },
     });
+
+    // Non-blocking staff audit logging
+    try {
+      void staffAuditService.logAction({
+        eventType: "EXPORT_DOWNLOADED",
+        module: "catalogue",
+        action: `Downloaded catalogue HTML: ${filename}`,
+        severity: "info",
+        recordType: "file",
+        recordName: filename
+      });
+    } catch (auditErr) {
+      console.error("Audit log failed", auditErr);
+    }
   };
 
   return (

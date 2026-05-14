@@ -31,6 +31,7 @@ import { permissionService } from "../services/permissionService.ts";
 import { analyticsService } from "../services/analyticsService.ts";
 import { PricingPlan, Vendor, Product } from "../types.ts";
 import { asArray } from "../utils/safeData.ts";
+import { staffAuditService } from "../services/staffAuditService.ts";
 
 export const PricingPlans: React.FC = () => {
   const [plans, setPlans] = useState<PricingPlan[]>([]);
@@ -114,6 +115,7 @@ export const PricingPlans: React.FC = () => {
     setIsSavingPlan(true);
 
     try {
+      const oldPlan = safePlans.find((p) => p.id === editingPlan.id);
       const planToSave = {
         ...editingPlan,
         id: editingPlan.id || `plan-${Date.now()}`,
@@ -171,6 +173,41 @@ export const PricingPlans: React.FC = () => {
           price: planToSave.monthlyPrice,
         },
       });
+
+      // Non-blocking staff audit logging
+      try {
+        if (oldPlan) {
+          void staffAuditService.logUpdate(
+            "pricing",
+            "pricing_plan",
+            planToSave.id,
+            planToSave.name,
+            oldPlan,
+            planToSave,
+          );
+          if (oldPlan.monthlyPrice !== planToSave.monthlyPrice) {
+            void staffAuditService.logAction({
+              eventType: "PRICE_CHANGED",
+              module: "pricing",
+              action: `Plan price changed for ${planToSave.name}`,
+              severity: "critical",
+              recordType: "pricing_plan",
+              recordId: planToSave.id,
+              recordName: planToSave.name,
+            });
+          }
+        } else {
+          void staffAuditService.logCreate(
+            "pricing",
+            "pricing_plan",
+            planToSave.id,
+            planToSave.name,
+            planToSave,
+          );
+        }
+      } catch (auditErr) {
+        console.error("Audit log failed", auditErr);
+      }
 
       await loadData();
       setIsFormOpen(false);

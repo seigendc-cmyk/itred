@@ -39,6 +39,9 @@ export const generateCatalogueHtml = (
     systemLogoUrl?: string;
     hostedUrl?: string;
     recommendedOpenMode?: "hosted" | "offline";
+    feedbackWhatsAppNumber?: string;
+    catalogueId?: string;
+    syncEndpointUrl?: string;
   },
 ): string => {
   const activeProducts = products.filter(
@@ -440,6 +443,16 @@ export const generateCatalogueHtml = (
             z-index: 1;
             background: #fff;
         }
+        .svy-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9999; display:none; align-items:center; justify-content:center; padding:16px; font-family:system-ui, sans-serif; }
+        .svy-box { background:var(--brand-silver, #fff); width:100%; max-width:400px; padding:24px; position:relative; color:var(--brand-charcoal, #333); max-height:90vh; overflow-y:auto; }
+        .svy-close { position:absolute; right:12px; top:12px; background:none; border:none; font-size:24px; cursor:pointer; color:#888; }
+        .svy-btn { display:block; width:100%; padding:14px; margin-bottom:8px; border:1px solid #ddd; background:#f9f9f9; text-align:left; font-size:14px; font-weight:bold; cursor:pointer; color:var(--brand-charcoal, #333); }
+        .svy-btn:hover { border-color:var(--brand-orange, #FF6B00); color:var(--brand-orange, #FF6B00); background:#fff3ed; }
+        .svy-input { width:100%; padding:12px; border:1px solid #ddd; margin-bottom:12px; font-size:14px; font-family:inherit; }
+        .svy-wa { display:block; width:100%; padding:14px; background:#16a34a; color:#fff; text-align:center; font-weight:bold; text-decoration:none; margin-top:16px; border:none; cursor:pointer; }
+        .svy-h3 { margin-top:0; font-size:18px; margin-bottom:12px; color:var(--brand-charcoal, #111); line-height:1.2; }
+        .svy-p { font-size:13px; color:#555; margin-top:0; margin-bottom:16px; line-height:1.4; }
+        .svy-link { display:block; background:none; border:none; color:#888; font-size:12px; cursor:pointer; text-decoration:underline; width:100%; text-align:center; padding:12px; margin-top:8px; }
     </style>
 </head>
 <body>
@@ -596,9 +609,316 @@ export const generateCatalogueHtml = (
         </div>
     </div>
 
+    <div id="svyOverlay" class="svy-overlay">
+      <div class="svy-box">
+        <button class="svy-close" onclick="closeSurvey()">×</button>
+        <div id="svyContent"></div>
+      </div>
+    </div>
+
     <!-- CAH LINKS EXPORTED: ${jsonData.cahLinks.length} -->
     <script>
+        // --- Commerce Intelligence Core ---
+        const ITRED_EVENTS_KEY = 'itred_offline_commerce_events';
+        const ITRED_LEADS_KEY = 'itred_pending_leads';
+        const ITRED_SESSION_KEY = 'itred_device_session_id';
+        const FEEDBACK_WA = ${JSON.stringify(metadata.feedbackWhatsAppNumber || "")};
+        const SYNC_ENDPOINT = ${JSON.stringify(metadata.syncEndpointUrl || "")};
+
+        function getFeedbackUrl(encodedText) {
+            if (FEEDBACK_WA) {
+                return "https://wa.me/" + FEEDBACK_WA.replace(/[^0-9]/g, '') + "?text=" + encodedText;
+            }
+            return "https://wa.me/?text=" + encodedText;
+        }
+
+        function safeLocalStorageGet(key) {
+          try {
+            return localStorage.getItem(key);
+          } catch (e) {
+            console.warn('localStorage not available.', e);
+            return null;
+          }
+        }
+
+        function safeLocalStorageSet(key, value) {
+          try {
+            localStorage.setItem(key, value);
+          } catch (e) {
+            console.warn('localStorage not available.', e);
+          }
+        }
+
+        function getDeviceSessionId() {
+          let sessionId = safeLocalStorageGet(ITRED_SESSION_KEY);
+          if (!sessionId) {
+            sessionId = 'SESS-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+            safeLocalStorageSet(ITRED_SESSION_KEY, sessionId);
+          }
+          return sessionId;
+        }
+
+        function logOfflineEvent(event) {
+          try {
+            const events = JSON.parse(safeLocalStorageGet(ITRED_EVENTS_KEY) || '[]');
+            const newEvent = {
+              ...event,
+              eventId: 'EVT-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9),
+              timestamp: new Date().toISOString(),
+              synced: false,
+              deviceSessionId: getDeviceSessionId(),
+            };
+            events.push(newEvent);
+            safeLocalStorageSet(ITRED_EVENTS_KEY, JSON.stringify(events));
+          } catch(e) { console.warn('Failed to log event', e); }
+        }
+
+        function syncOfflineEvents() {
+            if (!navigator.onLine || !SYNC_ENDPOINT) return;
+            try {
+                const events = JSON.parse(safeLocalStorageGet(ITRED_EVENTS_KEY) || '[]');
+                const unsynced = events.filter(function(e) { return !e.synced; });
+                if (unsynced.length === 0) return;
+                
+                const payload = {
+                    source: "itred_offline_catalogue",
+                    catalogueId: CATALOGUE_ID,
+                    deviceSessionId: getDeviceSessionId(),
+                    events: unsynced
+                };
+
+                fetch(SYNC_ENDPOINT, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                }).then(function(response) {
+                    if (response.ok) {
+                        const syncedIds = unsynced.map(function(e) { return e.eventId; });
+                        const updatedEvents = events.map(function(e) {
+                            if (syncedIds.includes(e.eventId)) e.synced = true;
+                            return e;
+                        });
+                        safeLocalStorageSet(ITRED_EVENTS_KEY, JSON.stringify(updatedEvents));
+                    }
+                }).catch(function(err) {
+                    console.warn('Sync failed, will retry later', err);
+                });
+            } catch (err) {}
+        }
+
+        function storePendingLead(lead) {
+          try {
+            const leads = JSON.parse(safeLocalStorageGet(ITRED_LEADS_KEY) || '[]');
+            leads.push(lead);
+            safeLocalStorageSet(ITRED_LEADS_KEY, JSON.stringify(leads));
+          } catch(e) {}
+        }
+
+        function getPendingLeads() {
+          try {
+            return JSON.parse(safeLocalStorageGet(ITRED_LEADS_KEY) || '[]');
+          } catch(e) { return []; }
+        }
+
+        function markLeadAnswered(leadRef) {
+          try {
+            const leads = getPendingLeads();
+            const updated = leads.map(function(l) { return l.leadRef === leadRef ? Object.assign({}, l, { answered: true }) : l; });
+            safeLocalStorageSet(ITRED_LEADS_KEY, JSON.stringify(updated));
+          } catch(e) {}
+        }
+        
+        // --- Survey Engine ---
+        const ITRED_LAST_WELCOME = 'itred_last_welcome_back';
+        const ITRED_LAST_HELP = 'itred_last_helpfulness';
+        const ITRED_EXPIRY_SHOWN = 'itred_expiry_shown';
+        
+        let popupsShownThisSession = 0;
+        let sessionProductViews = 0;
+        let sessionSearches = 0;
+        let sessionEmptySearches = 0;
+
+        function canShowPopup(key, hours) {
+          if (popupsShownThisSession > 0) return false;
+          if (!key) return true;
+          const last = safeLocalStorageGet(key);
+          if (!last) return true;
+          if (Date.now() - parseInt(last) > hours * 3600000) return true;
+          return false;
+        }
+
+        function showSurveyHtml(html) {
+          const el = document.getElementById('svyContent');
+          if(el) {
+            el.innerHTML = html;
+            document.getElementById('svyOverlay').style.display = 'flex';
+            popupsShownThisSession++;
+          }
+        }
+
+        function closeSurvey() {
+          const el = document.getElementById('svyOverlay');
+          if(el) el.style.display = 'none';
+        }
+
+        function triggerWelcomeBack() {
+          if (canShowPopup(ITRED_LAST_WELCOME, 24)) {
+            safeLocalStorageSet(ITRED_LAST_WELCOME, Date.now());
+            const html = \`
+              <h3 class="svy-h3">Welcome back to iTred.</h3>
+              <p class="svy-p">Search products, contact vendors, and tell us if this catalogue helped you.</p>
+              <h3 class="svy-h3" style="font-size:15px; margin-bottom:8px;">Mauya zvakare pa iTred.</h3>
+              <p class="svy-p" style="font-size:12px;">Tsvagai zvigadzirwa, taurai nevatengesi, mutibatsirewo kutizivisa kana catalogue iri kubatsira.</p>
+              <h3 class="svy-h3" style="font-size:15px; margin-bottom:8px;">Siyalamukela futhi ku iTred.</h3>
+              <p class="svy-p" style="font-size:12px; margin-bottom:24px;">Dingani impahla, xhumanani labathengisi, lisitshele ukuthi ikhathalogu iyalinceda yini.</p>
+              <button class="svy-btn" onclick="closeSurvey()">Continue</button>
+              <button class="svy-btn" onclick="triggerHelpfulnessSurvey(true)">Give Feedback</button>
+            \`;
+            showSurveyHtml(html);
+          }
+        }
+
+        function triggerHelpfulnessSurvey(force = false) {
+          if (force || canShowPopup(ITRED_LAST_HELP, 24)) {
+            safeLocalStorageSet(ITRED_LAST_HELP, Date.now());
+            const html = \`
+              <h3 class="svy-h3" style="margin-bottom:20px;">Is this catalogue helping you find what you need?</h3>
+              <button class="svy-btn" onclick="submitHelpfulness('Yes, it helped')">Yes, it helped</button>
+              <button class="svy-btn" onclick="submitHelpfulness('Partly helped')">Partly helped</button>
+              <button class="svy-btn" onclick="submitHelpfulness('No, I did not find what I wanted')">No, I did not find what I wanted</button>
+              <button class="svy-btn" onclick="submitHelpfulness('I need assistance')">I need assistance</button>
+              <div style="margin-top:20px;">
+                <label style="font-size:12px; font-weight:bold; display:block; margin-bottom:6px;">Optional comment:</label>
+                <input type="text" id="helpComment" placeholder="What product/vendor are you looking for?" class="svy-input" />
+              </div>
+              <button class="svy-link" onclick="closeSurvey()">Not Now</button>
+            \`;
+            showSurveyHtml(html);
+          }
+        }
+
+        function submitHelpfulness(answer) {
+          const commentEl = document.getElementById('helpComment');
+          const comment = commentEl ? commentEl.value : '';
+          logOfflineEvent({ eventType: 'SURVEY_ANSWERED', sourceType: 'catalogue', payload: { survey: 'helpfulness', answer: answer, comment: comment } });
+          const text = encodeURIComponent("Feedback: " + answer + "\\nComment: " + comment);
+          document.getElementById('svyContent').innerHTML = \`
+            <h3 class="svy-h3">Thank you for your feedback!</h3>
+            <button class="svy-wa" onclick="window.open(getFeedbackUrl('\${text}'))">Send Feedback to seiGEN Commerce on WhatsApp</button>
+            <button class="svy-link" onclick="closeSurvey()">Close</button>\`;
+        }
+
+        function triggerExpirySurvey() {
+          if (canShowPopup(ITRED_EXPIRY_SHOWN, 999999)) {
+            safeLocalStorageSet(ITRED_EXPIRY_SHOWN, "true");
+            showSurveyHtml(\`
+              <h3 class="svy-h3" style="margin-bottom:20px;">This catalogue is about to expire. Did it help you connect with vendors or products?</h3>
+              <button class="svy-btn" onclick="submitExpiry('Yes')">Yes</button>
+              <button class="svy-btn" onclick="submitExpiry('Partly')">Partly</button>
+              <button class="svy-btn" onclick="submitExpiry('No')">No</button>
+              <button class="svy-btn" onclick="submitExpiry('I need updated catalogue')">I need updated catalogue</button>
+              <button class="svy-link" onclick="closeSurvey()">Not Now</button>\`);
+            logOfflineEvent({ eventType: 'EXPIRY_SURVEY_OPENED', sourceType: 'catalogue', payload: { status: 'opened' } });
+          }
+        }
+
+        function submitExpiry(answer) {
+          logOfflineEvent({ eventType: 'SURVEY_ANSWERED', sourceType: 'catalogue', payload: { survey: 'expiry', answer: answer } });
+          const text = encodeURIComponent("Expiry Feedback: " + answer);
+          document.getElementById('svyContent').innerHTML = \`<h3 class="svy-h3">Thank you for your feedback!</h3><button class="svy-wa" onclick="window.open(getFeedbackUrl('\${text}'))">Send Feedback to seiGEN Commerce on WhatsApp</button><button class="svy-link" onclick="closeSurvey()">Close</button>\`;
+        }
+
+        function triggerNoResultsSurvey() {
+          if (canShowPopup('', 0)) {
+            showSurveyHtml(\`<h3 class="svy-h3">We could not find that product.</h3><p class="svy-p" style="margin-bottom:20px;">Do you want seiGEN Commerce to help source it?</p><input type="text" id="nrProduct" placeholder="Product needed" class="svy-input" /><input type="text" id="nrLocation" placeholder="Location" class="svy-input" /><input type="text" id="nrBudget" placeholder="Budget (optional)" class="svy-input" /><input type="text" id="nrContact" placeholder="Contact (optional)" class="svy-input" /><button class="svy-btn" style="background:#111; color:#fff; text-align:center; margin-top:8px;" onclick="submitNoResults()">Submit Sourcing Request</button><button class="svy-link" onclick="closeSurvey()">Not Now</button>\`);
+          }
+        }
+
+        function submitNoResults() {
+          const product = document.getElementById('nrProduct') ? document.getElementById('nrProduct').value : '';
+          const location = document.getElementById('nrLocation') ? document.getElementById('nrLocation').value : '';
+          if (!product || !location) { alert('Please provide product and location'); return; }
+          logOfflineEvent({ eventType: 'LEAD_FOLLOWUP_ANSWERED', sourceType: 'catalogue', payload: { survey: 'sourcing_request', product: product, location: location, budget: document.getElementById('nrBudget') ? document.getElementById('nrBudget').value : '', contact: document.getElementById('nrContact') ? document.getElementById('nrContact').value : '' } });
+          const text = encodeURIComponent("Sourcing Request\\nProduct: " + product + "\\nLocation: " + location + "\\nBudget: " + (document.getElementById('nrBudget') ? document.getElementById('nrBudget').value : '') + "\\nContact: " + (document.getElementById('nrContact') ? document.getElementById('nrContact').value : ''));
+          document.getElementById('svyContent').innerHTML = \`<h3 class="svy-h3">Request Prepared!</h3><button class="svy-wa" onclick="window.open(getFeedbackUrl('\${text}'))">Send Request to seiGEN Commerce on WhatsApp</button><button class="svy-link" onclick="closeSurvey()">Close</button>\`;
+        }
+
+        function checkExpiry() {
+          const e = db.metadata.expiryDate; if (e) { const hoursLeft = (new Date(e).getTime() - Date.now()) / 3600000; if (hoursLeft <= 48) { triggerExpirySurvey(); return true; } } return false;
+        }
+
+        function checkPendingLeads() {
+          if (popupsShownThisSession > 0) return false;
+          const leads = getPendingLeads();
+          const now = Date.now();
+          const dueLead = leads.find(function(l) { return !l.answered && l.followUpDueAt <= now; });
+          
+          if (dueLead) {
+            triggerLeadFollowUpSurvey(dueLead);
+            return true;
+          } else {
+            const nextLead = leads.find(function(l) { return !l.answered && l.followUpDueAt > now; });
+            if (nextLead) {
+              setTimeout(checkPendingLeads, nextLead.followUpDueAt - now);
+            }
+          }
+          return false;
+        }
+
+        function triggerLeadFollowUpSurvey(lead) {
+          if (popupsShownThisSession > 0) return;
+          const html = 
+            '<h3 class="svy-h3" style="margin-bottom:20px;">Were you helped by the vendor?</h3>' +
+            '<p class="svy-p" style="margin-bottom:12px;">Regarding: <strong>' + escapeHtml(lead.productName) + '</strong> from <strong>' + escapeHtml(lead.vendorName) + '</strong></p>' +
+            '<button class="svy-btn" onclick="submitLeadFollowUp(\\'' + lead.leadRef + '\\', \\'Yes, I was helped\\')">Yes, I was helped</button>' +
+            '<button class="svy-btn" onclick="submitLeadFollowUp(\\'' + lead.leadRef + '\\', \\'Vendor did not respond\\')">Vendor did not respond</button>' +
+            '<button class="svy-btn" onclick="submitLeadFollowUp(\\'' + lead.leadRef + '\\', \\'Product was unavailable\\')">Product was unavailable</button>' +
+            '<button class="svy-btn" onclick="submitLeadFollowUp(\\'' + lead.leadRef + '\\', \\'Price was different\\')">Price was different</button>' +
+            '<button class="svy-btn" onclick="submitLeadFollowUp(\\'' + lead.leadRef + '\\', \\'I still need help\\')">I still need help</button>' +
+            '<div style="margin-top:20px;">' +
+              '<label style="font-size:12px; font-weight:bold; display:block; margin-bottom:6px;">Optional comment:</label>' +
+              '<input type="text" id="leadComment" placeholder="Any additional details?" class="svy-input" />' +
+            '</div>' +
+            '<button class="svy-link" onclick="closeSurvey()">Not Now</button>';
+          showSurveyHtml(html);
+        }
+
+        function submitLeadFollowUp(leadRef, answer) {
+          const commentEl = document.getElementById('leadComment');
+          const comment = commentEl ? commentEl.value : '';
+          
+          const leads = getPendingLeads();
+          const lead = leads.find(function(l) { return l.leadRef === leadRef; });
+          if (!lead) { closeSurvey(); return; }
+
+          markLeadAnswered(leadRef);
+
+          logOfflineEvent({
+            eventType: 'LEAD_FOLLOWUP_ANSWERED',
+            sourceType: 'catalogue',
+            catalogueId: lead.catalogueId,
+            vendorId: lead.vendorId,
+            vendorName: lead.vendorName,
+            productId: lead.productId,
+            productName: lead.productName,
+            leadRef: leadRef,
+            payload: { survey: 'lead_followup', answer: answer, comment: comment }
+          });
+
+          const text = "SCI CUSTOMER FEEDBACK\\n\\nLead Ref: " + leadRef + "\\nCatalogue/Storefront: " + lead.catalogueId + "\\nVendor: " + lead.vendorName + "\\nProduct: " + lead.productName + "\\nCustomer answer: " + answer + "\\nComment: " + comment + "\\nTime: " + new Date().toISOString() + "\\n\\nPlease follow up.";
+          const encodedText = encodeURIComponent(text);
+
+          document.getElementById('svyContent').innerHTML = 
+            '<h3 class="svy-h3">Thank you for your feedback!</h3>' +
+            '<button class="svy-wa" onclick="window.open(getFeedbackUrl(\\'' + encodedText + '\\'))">Send Feedback to seiGEN Commerce</button>' +
+            '<button class="svy-link" onclick="closeSurvey()">Close</button>';
+        }
+        // --- End Commerce Intelligence Core ---
+
         const db = ${JSON.stringify(jsonData)};
+        const CATALOGUE_ID = db.metadata.serialNumber;
+        const SECTOR = db.metadata.sector;
+        const CATEGORY = db.metadata.category;
 
         const products = Array.isArray(db.products) ? db.products : [];
         const vendors = Array.isArray(db.vendors) ? db.vendors : [];
@@ -668,6 +988,21 @@ export const generateCatalogueHtml = (
             return "";
         }
 
+        function logHubClick(linkId) {
+            const link = cahLinks.find(l => l.id === linkId);
+            if (!link) return;
+            logOfflineEvent({
+                eventType: 'HUB_LINK_CLICKED',
+                sourceType: 'catalogue',
+                catalogueId: CATALOGUE_ID,
+                sector: SECTOR,
+                category: CATEGORY,
+                payload: { linkId: link.id, linkName: link.name, linkUrl: getHubUrl(link) }
+            });
+            // The default <a> tag action will handle opening the link
+            return true;
+        }
+
         function renderHub() {
             const grid = document.getElementById('hubGrid');
             if(cahLinks.length === 0) {
@@ -697,7 +1032,7 @@ export const generateCatalogueHtml = (
                 const hasAdditional = Array.isArray(l.additionalWhatsappGroups) && l.additionalWhatsappGroups.length > 0;
                 
                 let cardHtml = '<div>';
-                cardHtml += '<a href="' + href + '" class="hub-link" target="_blank" style="' + (hasAdditional ? 'margin-bottom:0; border-bottom:none;' : 'margin-bottom:12px;') + '">' +
+                cardHtml += '<a href="' + href + '" class="hub-link" target="_blank" onclick="logHubClick(\''+l.id+'\')" style="' + (hasAdditional ? 'margin-bottom:0; border-bottom:none;' : 'margin-bottom:12px;') + '">' +
                        '<div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px;">' +
                            '<div class="hub-type">' + typeLabel + '</div>' +
                            '<div style="font-size:8px; font-weight:900; color:#888; text-transform:uppercase;">' + metaText + '</div>' +
@@ -768,6 +1103,34 @@ export const generateCatalogueHtml = (
             return score;
         }
 
+        let searchTimeout;
+        let lastQuery = '';
+        const debouncedSearchLog = () => {
+            const rawQuery = document.getElementById('searchInput').value.toLowerCase().trim();
+            if (rawQuery.length < 2 || rawQuery === lastQuery) return;
+            lastQuery = rawQuery;
+
+            const grid = document.getElementById('productGrid');
+            const matchCount = grid.querySelectorAll('.card').length;
+
+            sessionSearches++;
+            if (matchCount === 0) {
+              sessionEmptySearches++;
+              if (sessionEmptySearches >= 2) { setTimeout(triggerNoResultsSurvey, 1500); }
+            } else if (sessionSearches >= 2) {
+              setTimeout(triggerHelpfulnessSurvey, 2000);
+            }
+
+            logOfflineEvent({
+                eventType: matchCount > 0 ? 'SEARCH_PERFORMED' : 'NO_RESULTS_SEARCH',
+                sourceType: 'catalogue',
+                catalogueId: CATALOGUE_ID,
+                payload: { query: rawQuery, results: matchCount }
+            });
+        };
+
+        window.addEventListener("online", syncOfflineEvents);
+
         function renderProducts() {
             const grid = document.getElementById('productGrid');
             const stats = document.getElementById('searchStats');
@@ -835,6 +1198,73 @@ export const generateCatalogueHtml = (
             }).join('');
         }
 
+        function logWaClick(productId) {
+            const p = products.find(x => x.id === productId);
+            if (!p) return;
+            const vendor = getVendor(p.vendorId);
+            const leadRef = 'ITRED-' + 
+            storePendingLead({
+              leadRef: leadRef,
+              timestamp: new Date().toISOString(),
+              vendorId: p.vendorId,
+              vendorName: vendor ? vendor.name : p.vendorName,
+              productId: p.id,
+              productName: p.name,
+              catalogueId: CATALOGUE_ID,
+              sector: SECTOR,
+              category: CATEGORY,
+              actionType: 'WHATSAPP',
+              followUpDueAt: Date.now() + 30 * 60000,
+              answered: false
+            });
+
+            logOfflineEvent({
+                eventType: 'WHATSAPP_VENDOR_CLICKED',
+                sourceType: 'catalogue',
+                catalogueId: CATALOGUE_ID,
+                vendorId: p.vendorId,
+                vendorName: vendor ? vendor.name : p.vendorName,
+                productId: p.id,
+                productName: p.name,
+                leadRef: leadRef,
+                payload: { price: p.sellingPrice }
+            });
+        }
+
+        function logCallClick(productId) {
+            const p = products.find(x => x.id === productId);
+            if (!p) return;
+            const vendor = getVendor(p.vendorId);
+            const leadRef = 'ITRED-' + CATALOGUE_ID + '-' + p.vendorId + '-' + p.id;
+
+            storePendingLead({
+              leadRef: leadRef,
+              timestamp: new Date().toISOString(),
+              vendorId: p.vendorId,
+              vendorName: vendor ? vendor.name : p.vendorName,
+              productId: p.id,
+              productName: p.name,
+              catalogueId: CATALOGUE_ID,
+              sector: SECTOR,
+              category: CATEGORY,
+              actionType: 'CALL',
+              followUpDueAt: Date.now() + 30 * 60000,
+              answered: false
+            });
+
+            logOfflineEvent({
+                eventType: 'CALL_VENDOR_CLICKED',
+                sourceType: 'catalogue',
+                catalogueId: CATALOGUE_ID,
+                vendorId: p.vendorId,
+                vendorName: vendor ? vendor.name : p.vendorName,
+                productId: p.id,
+                productName: p.name,
+                leadRef: leadRef,
+                payload: { price: p.sellingPrice }
+            });
+        }
+
         window.openProduct = function(id) {
             const p = products.find(function(x) { return x.id === id; });
             if(!p) return;
@@ -844,6 +1274,24 @@ export const generateCatalogueHtml = (
             document.getElementById('modalImageContainer').innerHTML = p.imageUrl 
                 ? "<img src=\\"" + p.imageUrl + "\\" class=\\"m-image\\">"
                 : "<div class=\\"m-image\\" style=\\"display:flex;align-items:center;justify-content:center;color:#ccc;font-weight:900;\\">NO IMAGE</div>";
+
+            logOfflineEvent({
+                eventType: 'PRODUCT_VIEWED',
+                sourceType: 'catalogue',
+                catalogueId: CATALOGUE_ID,
+                vendorId: p.vendorId,
+                vendorName: vendor ? vendor.name : p.vendorName,
+                productId: p.id,
+                productName: p.name,
+                sector: p.sector,
+                category: p.category,
+                payload: { price: p.sellingPrice }
+            });
+
+            sessionProductViews++;
+            if (sessionProductViews >= 2) {
+              setTimeout(triggerHelpfulnessSurvey, 2000);
+            }
 
             const vendorName = vendor?.name || p.vendorName || 'Vendor';
 
@@ -875,13 +1323,13 @@ export const generateCatalogueHtml = (
             let actions = '';
             const phone = branch?.phone || vendor?.mainPhone;
             const wa = branch?.whatsapp || vendor?.whatsappNumber;
-            const msg = encodeURIComponent("Hi, I'm interested in " + p.name + " (SKU: " + (p.sku || 'N/A') + ") priced at $" + (p.sellingPrice||0).toFixed(2) + " from the iTred Catalogue.");
+            const leadRef = 'ITRED-' + CATALOGUE_ID + '-' + p.vm\ngPrice||0).toFixed(2) + "\\nRef: " + leadRef + "\\n\\nPlease confirm availability.");
             
             if(wa) {
-                actions += "<a href=\\"https://wa.me/" + wa.replace(/[^0-9]/g, '') + "?text=" + msg + "\\" class=\\"c-btn wa\\" target=\\"_blank\\">Order on WhatsApp</a>";
+                actions += "<a href=\\"https://wa.me/" + wa.replace(/[^0-9]/g, '') + "?text=" + msg + "\\" class=\\"c-btn wa\\" target=\\"_blank\\" onclick=\\"logWaClick('" + p.id + "')\\">Order on WhatsApp</a>";
             }
             if(phone) {
-                actions += "<a href=\\"tel:" + phone + "\\" class=\\"c-btn\\" target=\\"_blank\\">Call Procurement</a>";
+                actions += "<a href=\\"tel:" + phone + "\\" class=\\"c-btn\\" target=\\"_blank\\" onclick=\\"logCallClick('" + p.id + "')\\">Call Procurement</a>";
             }
             document.getElementById('m-actions').innerHTML = actions;
 
@@ -938,15 +1386,38 @@ export const generateCatalogueHtml = (
             });
         }
 
-        document.getElementById('searchInput').addEventListener('input', renderProducts);
+        document.getElementById('searchInput').addEventListener('input', function() {
+            renderProducts();
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(debouncedSearchLog, 900);
+        });
         
         document.addEventListener("DOMContentLoaded", function () {
             try {
+                const isReturn = !!safeLocalStorageGet(ITRED_SESSION_KEY);
+                logOfflineEvent({
+                    eventType: isReturn ? 'RETURN_VISIT' : 'CATALOGUE_OPENED',
+                    sourceType: 'catalogue',
+                    catalogueId: CATALOGUE_ID,
+                    sector: SECTOR,
+                    category: CATEGORY,
+                    payload: { userAgent: navigator.userAgent }
+                });
                 renderProducts();
                 renderVendors();
                 renderHub();
                 if (typeof initIosGate === "function") initIosGate();
                 if (typeof initBrowserGate === "function") initBrowserGate();
+
+                setTimeout(syncOfflineEvents, 2000);
+
+                setTimeout(() => {
+                  let shown = checkExpiry();
+                  if (!shown) shown = checkPendingLeads();
+                  if (!shown && isReturn) {
+                    triggerWelcomeBack();
+                  }
+                }, 2500);
             } catch (error) {
                 console.error("Catalogue render failed", error);
                 var grid = document.getElementById("productGrid");

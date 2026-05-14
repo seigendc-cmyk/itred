@@ -52,6 +52,7 @@ import { pricingPlanService } from "../services/pricingPlanService.ts";
 import { pdfService } from "../services/pdfService.ts";
 import { permissionService } from "../services/permissionService.ts";
 import { staffService } from "../services/staffService.ts";
+import { staffAuditService } from "../services/staffAuditService.ts";
 import {
   Vendor,
   RPN,
@@ -65,6 +66,8 @@ import {
 import { asArray } from "../utils/safeData.ts";
 import { optimizeImageToWebP } from "../utils/imageOptimizer.ts";
 import { vendorAssetService } from "../services/vendorAssetService.ts";
+import { findSimilarVendors } from "../utils/duplicateDetection.ts";
+import { approvalService } from "../services/approvalService.ts";
 
 const SECTORS = [
   "General Retail",
@@ -160,6 +163,7 @@ export const VendorManagement: React.FC = () => {
     staff: [],
     deliveryStaff: [],
   });
+  const [isManagerOverride, setIsManagerOverride] = useState(false);
 
   // Asset Upload State
   const [logoStatus, setLogoStatus] = useState<string>("");
@@ -261,6 +265,7 @@ export const VendorManagement: React.FC = () => {
     setLogoStatus("");
     setBannerStatus("");
     setShowManualUrls(false);
+    setIsManagerOverride(false);
     setFormError("");
     setFormSuccess("");
     setFormData({
@@ -287,6 +292,7 @@ export const VendorManagement: React.FC = () => {
     setLogoStatus("");
     setBannerStatus("");
     setShowManualUrls(false);
+    setIsManagerOverride(false);
     setFormError("");
     setFormSuccess("");
     setFormData({ ...vendor });
@@ -310,6 +316,9 @@ export const VendorManagement: React.FC = () => {
     }
 
     setIsSaving(true);
+    const oldVendor = vendors.find(
+      (v) => v.id === (selectedVendor?.id || formData.id),
+    );
     try {
       const now = new Date().toISOString();
       const vendorToSave = {
@@ -329,6 +338,41 @@ export const VendorManagement: React.FC = () => {
         vendorName: vendorToSave.name,
         details: { action: selectedVendor ? "update" : "creation" },
       });
+
+      // Non-blocking staff audit logging
+      try {
+        if (oldVendor) {
+          await staffAuditService.logUpdate(
+            "vendor",
+            "vendor",
+            vendorToSave.id,
+            vendorToSave.name,
+            oldVendor,
+            vendorToSave,
+          );
+          if (oldVendor.status !== vendorToSave.status) {
+            await staffAuditService.logAction({
+              eventType: "RECORD_UPDATED",
+              module: "vendor",
+              action: `Vendor status changed from ${oldVendor.status} to ${vendorToSave.status}`,
+              severity: "warning",
+              recordType: "vendor",
+              recordId: vendorToSave.id,
+              recordName: vendorToSave.name,
+            });
+          }
+        } else {
+          await staffAuditService.logCreate(
+            "vendor",
+            "vendor",
+            vendorToSave.id,
+            vendorToSave.name,
+            vendorToSave,
+          );
+        }
+      } catch (auditErr) {
+        console.error("Audit log failed", auditErr);
+      }
 
       await loadData();
       setFormSuccess("Vendor saved successfully.");
@@ -463,6 +507,54 @@ export const VendorManagement: React.FC = () => {
     }
   };
 
+  const duplicates = useMemo(() => {
+    if (
+      view !== "form" ||
+      (!formData.name &&
+        !formData.tradingName &&
+        !formData.catalogueDisplayName)
+    )
+      return [];
+    // Filter out the current vendor we are editing
+    const otherVendors = vendors.filter((v) => v.id !== formData.id);
+    return findSimilarVendors(formData, otherVendors);
+  }, [
+    formData.name,
+    formData.tradingName,
+    formData.catalogueDisplayName,
+    vendors,
+    view,
+    formData.id,
+  ]);
+
+  const hasCriticalDuplicate = duplicates.some(
+    (d) => d.similarity.level === "exact" || d.similarity.level === "high",
+  );
+  const canManagerOverride = permissionService.canApprove("vendorManagement");
+  const isSaveBlocked = hasCriticalDuplicate && !isManagerOverride;
+
+  const handleOverrideRequest = async () => {
+    try {
+      await approvalService.submitApprovalRequest({
+        requestType: "Duplicate Vendor Override",
+        recordType: "vendor",
+        recordId: formData.id || "new",
+        submittedByStaffId: "STAFF-ADM", // Uses session ID in production
+        submittedByName: "Backend Staff",
+        riskLevel: "medium",
+        beforeSnapshot: null,
+        afterSnapshot: formData,
+      });
+      setFormSuccess(
+        "Override approval submitted to managers. You will be notified when reviewed.",
+      );
+      setTimeout(() => setView("list"), 2000);
+    } catch (e) {
+      console.error(e);
+      setFormError("Failed to submit approval request.");
+    }
+  };
+
   if (view === "form") {
     const currentStaff = staffService.getStaffById(
       formData.assignedStaffId || "STAFF-ADM",
@@ -489,8 +581,8 @@ export const VendorManagement: React.FC = () => {
           {permissionService.canEdit("vendorManagement") && (
             <PrimaryButton
               onClick={saveVendor}
-              disabled={isSaving}
-              className={`flex items-center gap-2 ${!permissionService.canEdit("vendorManagement") || isSaving ? "opacity-50 cursor-not-allowed" : ""}`}
+              disabled={isSaving || isSaveBlocked}
+              className={`flex items-center gap-2 ${!permissionService.canEdit("vendorManagement") || isSaving || isSaveBlocked ? "opacity-50 cursor-not-allowed" : ""}`}
             >
               <Save size={14} /> {isSaving ? "Saving..." : "Save Changes"}
             </PrimaryButton>
@@ -509,6 +601,86 @@ export const VendorManagement: React.FC = () => {
                 <CheckCircle2 size={16} /> {formSuccess}
               </div>
             )}
+
+            {/* Duplicate Intelligence */}
+            {duplicates.length > 0 && (
+              <DataPanel
+                title="Duplicate Intelligence"
+                className="border-t-4 border-t-red-500 shadow-sm bg-red-50/30"
+              >
+                <div className="p-6 space-y-4">
+                  <div className="flex gap-3 text-red-600">
+                    <AlertTriangle size={20} className="shrink-0" />
+                    <div>
+                      <h4 className="text-sm font-bold uppercase">
+                        Potential Duplicates Detected
+                      </h4>
+                      <p className="text-xs text-stone-600 mt-1">
+                        The following registry records share strong naming
+                        similarities with your input.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="space-y-3 mt-4">
+                    {duplicates.map((dup, idx) => (
+                      <div
+                        key={idx}
+                        className="p-4 border border-red-200 bg-white flex flex-col md:flex-row gap-4 justify-between md:items-center"
+                      >
+                        <div>
+                          <p className="text-xs font-bold uppercase text-brand-charcoal">
+                            {dup.record.name}{" "}
+                            <span className="text-[10px] text-stone-400 font-mono">
+                              [{dup.record.systemCode}]
+                            </span>
+                          </p>
+                          <p
+                            className={`text-[10px] font-bold mt-1 uppercase ${dup.similarity.level === "exact" || dup.similarity.level === "high" ? "text-red-500" : "text-stone-500"}`}
+                          >
+                            Match: {dup.similarity.score}% -{" "}
+                            {dup.similarity.level} ({dup.similarity.reason})
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2 shrink-0">
+                          <SecondaryButton
+                            size="sm"
+                            onClick={() => startEditVendor(dup.record)}
+                          >
+                            Use Existing Vendor
+                          </SecondaryButton>
+                          <SecondaryButton
+                            size="sm"
+                            onClick={() => startEditVendor(dup.record)}
+                          >
+                            Create Branch Instead
+                          </SecondaryButton>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {hasCriticalDuplicate && !isManagerOverride && (
+                    <div className="flex gap-3 mt-6 pt-4 border-t border-red-200">
+                      {!canManagerOverride ? (
+                        <PrimaryButton
+                          size="sm"
+                          onClick={handleOverrideRequest}
+                        >
+                          Submit Override Approval
+                        </PrimaryButton>
+                      ) : (
+                        <PrimaryButton
+                          size="sm"
+                          onClick={() => setIsManagerOverride(true)}
+                        >
+                          Continue Anyway (Manager Override)
+                        </PrimaryButton>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </DataPanel>
+            )}
+
             {/* Basic Identity */}
             <DataPanel title="General Information">
               <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">

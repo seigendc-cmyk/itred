@@ -28,6 +28,9 @@ export enum AppRoute {
   WHATSAPP_ACTIVITY = "whatsapp-activity",
   COMMUNITY_BI = "whatsapp-community-bi",
   WHATSAPP_REPORTS = "whatsapp-performance-reports",
+  APPROVAL_QUEUE = "approval-queue",
+  NOTIFICATIONS = "notifications",
+  STAFF_TASKS = "staff-tasks",
 }
 export type DeskType =
   | "SysAdmin Desk"
@@ -44,6 +47,7 @@ export type PermissionLevel =
   | "hidden"
   | "view"
   | "create"
+  | "submit"
   | "edit"
   | "approve"
   | "delete"
@@ -78,9 +82,53 @@ export type MenuKey =
   | "systemSettings"
   | "howTo"
   | "whatsappActivity"
-  | "whatsappCommunityBI";
+  | "whatsappCommunityBI"
+  | "approvalQueue"
+  | "notifications"
+  | "staffTasks";
 
 export type MenuPermissions = Partial<Record<MenuKey, PermissionLevel>>;
+
+export type ActionPermissionKey =
+  | "vendor.view"
+  | "vendor.createDraft"
+  | "vendor.submitApproval"
+  | "vendor.approve"
+  | "vendor.publish"
+  | "vendor.delete"
+  | "product.view"
+  | "product.createDraft"
+  | "product.submitApproval"
+  | "product.approve"
+  | "product.publish"
+  | "product.changePrice"
+  | "product.delete"
+  | "catalogue.view"
+  | "catalogue.generate"
+  | "catalogue.submitApproval"
+  | "catalogue.approveDeploy"
+  | "catalogue.download"
+  | "catalogue.archive"
+  | "whatsapp.view"
+  | "whatsapp.logActivity"
+  | "whatsapp.verifyConversion"
+  | "cah.view"
+  | "cah.createLink"
+  | "cah.submitApproval"
+  | "cah.approveLink"
+  | "pricing.view"
+  | "pricing.submitApproval"
+  | "pricing.approve"
+  | "notifications.viewOwn"
+  | "notifications.viewTeam"
+  | "notifications.resolve"
+  | "approvalQueue.view"
+  | "approvalQueue.approve"
+  | "staffTasks.viewOwn"
+  | "staffTasks.assign"
+  | "staffTasks.complete";
+
+export type ActionPermissions = Partial<Record<ActionPermissionKey, boolean>>;
 
 export interface NavItem {
   id: AppRoute;
@@ -130,6 +178,7 @@ export interface Staff {
   lastLogoutDate?: string;
   // Permissions are now an object mapping MenuKey to PermissionLevel
   menuPermissions: MenuPermissions;
+  actionPermissions?: ActionPermissions;
   createdBy: string;
   updatedBy: string;
   createdAt: string;
@@ -525,6 +574,7 @@ export interface VendorStorefront {
   productCount: number;
   imageCount: number;
   htmlFileName: string;
+  fileName?: string;
   htmlContent?: string;
   updatedAt?: string;
 }
@@ -1013,35 +1063,176 @@ export interface CAHBoothAsset {
 }
 
 export type NotificationType =
-  | "WHATSAPP"
-  | "VENDOR"
-  | "CATALOGUE"
-  | "STOREFRONT"
-  | "RPN"
-  | "SYSTEM"
-  | "SUBSCRIPTION";
-export type NotificationSeverity = "INFO" | "WARNING" | "CRITICAL" | "SYSTEM";
-export type NotificationStatus =
-  | "OPEN"
-  | "ACKNOWLEDGED"
-  | "RESOLVED"
-  | "DISMISSED";
+  | "approval_request"
+  | "task_due"
+  | "lead_followup"
+  | "catalogue_warning"
+  | "customer_feedback"
+  | "system_alert";
+export type NotificationPriority = "low" | "medium" | "high" | "critical";
+export type NotificationStatus = "unread" | "read" | "resolved" | "dismissed";
 
-export interface AppNotification {
+export interface ITredNotification {
   id: string;
-  type: NotificationType;
-  severity: NotificationSeverity;
   title: string;
   message: string;
-  relatedModule?: string;
-  relatedRecordId?: string;
-  actionPath?: string;
+  type: NotificationType;
+  priority: NotificationPriority;
+  targetRole?: string;
+  assignedToStaffId?: string;
+  createdByStaffId?: string;
+  recordType: string;
+  recordId: string;
   status: NotificationStatus;
   createdAt: string;
+  readAt?: string;
   resolvedAt?: string;
+}
+
+export type ApprovalRequestStatus =
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "returned_for_correction"
+  | "cancelled";
+export type RequestRiskLevel = "low" | "medium" | "high" | "critical";
+
+export interface ApprovalRequest {
+  id: string;
+  requestType: string;
+  recordType: string;
+  recordId: string;
+  submittedByStaffId: string;
+  submittedByName: string;
+  assignedManagerId?: string;
+  assignedManagerName?: string;
+  status: ApprovalRequestStatus;
+  riskLevel: RequestRiskLevel;
+  beforeSnapshot?: any;
+  afterSnapshot?: any;
+  managerComment?: string;
+  correctionNotes?: string;
+  submittedAt: string;
+  reviewedAt?: string;
+  reviewedByStaffId?: string;
+}
+
+export type StaffTaskType =
+  | "vendor_cleanup"
+  | "product_image_fix"
+  | "price_confirmation"
+  | "lead_followup"
+  | "catalogue_review"
+  | "customer_feedback_followup";
+export type StaffTaskStatus =
+  | "open"
+  | "in_progress"
+  | "completed"
+  | "overdue"
+  | "cancelled";
+export type StaffTaskPriority = "low" | "medium" | "high" | "critical";
+
+export interface StaffTask {
+  id: string;
+  title: string;
+  description: string;
+  taskType: StaffTaskType;
+  assignedToStaffId: string;
+  assignedByStaffId: string;
+  relatedRecordType?: string;
+  relatedRecordId?: string;
+  status: StaffTaskStatus;
+  priority: StaffTaskPriority;
+  dueAt?: string;
+  completedAt?: string;
+  createdAt: string;
+}
+
+export interface FeedbackWhatsAppRoute {
+  id: string;
+  deskName: string;
+  whatsappNumber: string;
+  purpose:
+    | "SURVEY_FEEDBACK"
+    | "LEAD_FOLLOWUP"
+    | "COMPLAINTS"
+    | "CATALOGUE_IMPACT"
+    | "DEFAULT";
+  sector?: string;
+  category?: string;
+  province?: string;
+  cityTown?: string;
+  isActive: boolean;
+  priority: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface SystemSettings {
   seigenLogoUrl?: string;
+  feedbackWhatsAppRoutes?: FeedbackWhatsAppRoute[];
+  defaultFeedbackWhatsAppNumber?: string;
+  syncEndpointUrl?: string;
   updatedAt?: string;
+}
+
+export interface StaffAuditLog {
+  id: string;
+  eventType:
+    | "LOGIN_SUCCESS"
+    | "LOGIN_FAILED"
+    | "LOGOUT"
+    | "PAGE_VIEWED"
+    | "ACCESS_DENIED"
+    | "RECORD_CREATED"
+    | "RECORD_UPDATED"
+    | "RECORD_DELETED"
+    | "APPROVAL_SUBMITTED"
+    | "APPROVAL_APPROVED"
+    | "APPROVAL_REJECTED"
+    | "APPROVAL_RETURNED"
+    | "CATALOGUE_GENERATED"
+    | "CATALOGUE_DEPLOYED"
+    | "STOREFRONT_GENERATED"
+    | "WHATSAPP_ACTIVITY_LOGGED"
+    | "LEAD_FOLLOWED_UP"
+    | "PRICE_CHANGED"
+    | "STOCK_CHANGED"
+    | "SUBSCRIPTION_CHANGED"
+    | "PERMISSION_CHANGED"
+    | "EXPORT_DOWNLOADED"
+    | "SYSTEM_SETTING_CHANGED";
+  severity: "info" | "warning" | "high" | "critical";
+  staffId: string;
+  staffName: string;
+  staffRole?: string;
+  module:
+    | "auth"
+    | "vendor"
+    | "product"
+    | "catalogue"
+    | "storefront"
+    | "cah"
+    | "whatsapp"
+    | "pricing"
+    | "subscription"
+    | "staff"
+    | "approval"
+    | "settings"
+    | "analytics";
+  action: string;
+  recordType?: string;
+  recordId?: string;
+  recordName?: string;
+  beforeSnapshot?: any;
+  afterSnapshot?: any;
+  reason?: string;
+  managerComment?: string;
+  deviceInfo?: {
+    userAgent?: string;
+    platform?: string;
+    language?: string;
+  };
+  sessionId?: string;
+  createdAt: string;
 }

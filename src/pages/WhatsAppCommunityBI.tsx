@@ -434,13 +434,13 @@ export const WhatsAppCommunityBI: React.FC = () => {
   useEffect(() => {
     bi.communities.forEach((c) => {
       if (c.healthStatus === "Critical") {
-        notificationService.addNotification({
-          type: "WHATSAPP",
-          severity: "CRITICAL",
+        void notificationService.createNotification({
+          type: "system_alert",
+          priority: "critical",
           title: "Community Health Critical",
           message: `Source "${c.sourceName}" requires immediate operational attention.`,
-          relatedModule: "Community BI",
-          relatedRecordId: `comm-critical-${c.sourceId || c.sourceName}`,
+          recordType: "Community BI",
+          recordId: `comm-critical-${c.sourceId || c.sourceName}`,
         });
       }
     });

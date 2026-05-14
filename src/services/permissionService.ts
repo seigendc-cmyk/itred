@@ -3,7 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { MenuKey, MenuPermissions, Staff } from "../types.ts";
+import {
+  MenuKey,
+  MenuPermissions,
+  Staff,
+  ActionPermissionKey,
+  ActionPermissions,
+} from "../types.ts";
 
 const SESSION_KEY = "activeStaffSession";
 
@@ -14,6 +20,17 @@ export const permissionService = {
     try {
       const session = JSON.parse(sessionStr);
       return session.menuPermissions || {}; // Ensure this is always an object
+    } catch (e) {
+      return {};
+    }
+  },
+
+  getActionPermissions: (): ActionPermissions => {
+    const sessionStr = localStorage.getItem(SESSION_KEY);
+    if (!sessionStr) return {};
+    try {
+      const session = JSON.parse(sessionStr);
+      return session.actionPermissions || {};
     } catch (e) {
       return {};
     }
@@ -73,16 +90,65 @@ export const permissionService = {
     );
   },
 
-  canApprove: (menuKey: MenuKey): boolean => {
+  hasActionPermission: (key: ActionPermissionKey): boolean => {
     if (permissionService.isSysAdmin()) return true;
-    const level = permissionService.getPermissions()[menuKey];
+    return !!permissionService.getActionPermissions()[key];
+  },
+
+  canSubmitApproval: (module: string): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return permissionService.hasActionPermission(
+      `${module}.submitApproval` as ActionPermissionKey,
+    );
+  },
+
+  canApprove: (moduleOrMenuKey: MenuKey | string): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    if (moduleOrMenuKey === "catalogue")
+      return permissionService.hasActionPermission("catalogue.approveDeploy");
+    if (moduleOrMenuKey === "cah")
+      return permissionService.hasActionPermission("cah.approveLink");
+    if (
+      ["vendor", "product", "pricing", "approvalQueue"].includes(
+        moduleOrMenuKey as string,
+      )
+    ) {
+      return permissionService.hasActionPermission(
+        `${moduleOrMenuKey}.approve` as ActionPermissionKey,
+      );
+    }
+    const level =
+      permissionService.getPermissions()[moduleOrMenuKey as MenuKey];
     return level === "approve" || level === "full"; // Only approve or full
   },
 
-  canDelete: (menuKey: MenuKey): boolean => {
+  canPublish: (module: string): boolean => {
     if (permissionService.isSysAdmin()) return true;
-    const level = permissionService.getPermissions()[menuKey];
+    return permissionService.hasActionPermission(
+      `${module}.publish` as ActionPermissionKey,
+    );
+  },
+
+  canDelete: (moduleOrMenuKey: MenuKey | string): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    if (["vendor", "product"].includes(moduleOrMenuKey as string)) {
+      return permissionService.hasActionPermission(
+        `${moduleOrMenuKey}.delete` as ActionPermissionKey,
+      );
+    }
+    const level =
+      permissionService.getPermissions()[moduleOrMenuKey as MenuKey];
     return level === "delete" || level === "full"; // Only delete or full
+  },
+
+  canResolveNotification: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return permissionService.hasActionPermission("notifications.resolve");
+  },
+
+  canAssignTask: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return permissionService.hasActionPermission("staffTasks.assign");
   },
 
   canOverridePasscode: (menuKey: MenuKey): boolean => {

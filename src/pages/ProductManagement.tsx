@@ -62,6 +62,9 @@ import { vendorService } from "../services/vendorService.ts";
 import { rpnService } from "../services/rpnService.ts";
 import { logService } from "../services/logService.ts";
 import { compressImage, formatSize } from "../lib/imageUtils.ts";
+import { findSimilarProducts } from "../utils/duplicateDetection.ts";
+import { approvalService } from "../services/approvalService.ts";
+import { staffAuditService } from "../services/staffAuditService.ts";
 
 const PRODUCT_STATUSES: ProductStatus[] = [
   "active",
@@ -96,6 +99,7 @@ export const ProductManagement: React.FC = () => {
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [rpns, setRpns] = useState<RPN[]>([]);
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
+  const [isManagerOverride, setIsManagerOverride] = useState(false);
 
   // Filter states
   const [search, setSearch] = useState("");
@@ -266,11 +270,13 @@ export const ProductManagement: React.FC = () => {
 
   // Handlers
   const handleEditProduct = (product: Product) => {
+    setIsManagerOverride(false);
     setEditingProduct(product);
     setIsFormOpen(true);
   };
 
   const handleAddNewProduct = () => {
+    setIsManagerOverride(false);
     setEditingProduct({
       id: `PRD-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
       status: "active",
@@ -296,6 +302,8 @@ export const ProductManagement: React.FC = () => {
       alert("Incomplete record. Vendor identity and item name required.");
       return;
     }
+
+    const oldProduct = safeProducts.find((p) => p.id === editingProduct.id);
 
     const targetVendor = safeVendors.find(
       (v) => v.id === editingProduct.vendorId,
@@ -364,6 +372,52 @@ export const ProductManagement: React.FC = () => {
           },
         });
       }
+    }
+
+    // Non-blocking staff audit logging
+    try {
+      if (oldProduct) {
+        void staffAuditService.logUpdate(
+          "product",
+          "product",
+          productToSave.id,
+          productToSave.name,
+          oldProduct,
+          productToSave,
+        );
+        if (oldProduct.sellingPrice !== productToSave.sellingPrice) {
+          void staffAuditService.logAction({
+            eventType: "PRICE_CHANGED",
+            module: "product",
+            action: `Price changed for ${productToSave.name} from ${oldProduct.sellingPrice} to ${productToSave.sellingPrice}`,
+            severity: "high",
+            recordType: "product",
+            recordId: productToSave.id,
+            recordName: productToSave.name,
+          });
+        }
+        if (oldProduct.stockQuantity !== productToSave.stockQuantity) {
+          void staffAuditService.logAction({
+            eventType: "STOCK_CHANGED",
+            module: "product",
+            action: `Stock changed for ${productToSave.name} from ${oldProduct.stockQuantity} to ${productToSave.stockQuantity}`,
+            severity: "warning",
+            recordType: "product",
+            recordId: productToSave.id,
+            recordName: productToSave.name,
+          });
+        }
+      } else {
+        void staffAuditService.logCreate(
+          "product",
+          "product",
+          productToSave.id,
+          productToSave.name,
+          productToSave,
+        );
+      }
+    } catch (auditErr) {
+      console.error("Audit log failed", auditErr);
     }
 
     loadData();
@@ -477,6 +531,48 @@ export const ProductManagement: React.FC = () => {
     loadData();
     setIsBulkUpdateOpen(false);
     setSelectedProductIds([]);
+  };
+
+  const duplicates = useMemo(() => {
+    if (
+      !isFormOpen ||
+      (!editingProduct?.name &&
+        !editingProduct?.brand &&
+        !editingProduct?.category)
+    )
+      return [];
+    const otherProducts = safeProducts.filter(
+      (p) => p.id !== editingProduct?.id,
+    );
+    return findSimilarProducts(editingProduct, otherProducts);
+  }, [editingProduct, safeProducts, isFormOpen]);
+
+  const hasCriticalDuplicate = duplicates.some(
+    (d) => d.similarity.level === "exact" || d.similarity.level === "high",
+  );
+  const canManagerOverride = permissionService.canApprove("productManagement");
+  const isSaveBlocked = hasCriticalDuplicate && !isManagerOverride;
+
+  const handleOverrideRequest = async () => {
+    try {
+      await approvalService.submitApprovalRequest({
+        requestType: "Duplicate Product Override",
+        recordType: "product",
+        recordId: editingProduct?.id || "new",
+        submittedByStaffId: "STAFF-ADM", // Uses session ID in production
+        submittedByName: "Backend Staff",
+        riskLevel: "medium",
+        beforeSnapshot: null,
+        afterSnapshot: editingProduct,
+      });
+      alert(
+        "Override approval submitted to managers. You will be notified when reviewed.",
+      );
+      setIsFormOpen(false);
+    } catch (e) {
+      console.error(e);
+      alert("Failed to submit approval request.");
+    }
   };
 
   return (
@@ -1026,6 +1122,81 @@ export const ProductManagement: React.FC = () => {
             </div>
 
             <div className="flex-1 overflow-y-auto p-8 space-y-10">
+              {/* Duplicate Intelligence */}
+              {duplicates.length > 0 && (
+                <DataPanel
+                  title="Duplicate Intelligence"
+                  className="border-t-4 border-t-red-500 shadow-sm bg-red-50/30"
+                >
+                  <div className="p-6 space-y-4">
+                    <div className="flex gap-3 text-red-600">
+                      <AlertTriangle size={20} className="shrink-0" />
+                      <div>
+                        <h4 className="text-sm font-bold uppercase">
+                          Potential Duplicates Detected
+                        </h4>
+                        <p className="text-xs text-stone-600 mt-1">
+                          Similar product already exists. Link this vendor to
+                          existing product instead of creating duplicate.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="space-y-3 mt-4">
+                      {duplicates.map((dup, idx) => (
+                        <div
+                          key={idx}
+                          className="p-4 border border-red-200 bg-white flex flex-col md:flex-row gap-4 justify-between md:items-center"
+                        >
+                          <div>
+                            <p className="text-xs font-bold uppercase text-brand-charcoal">
+                              {dup.record.name}{" "}
+                              <span className="text-[10px] text-stone-400 font-mono">
+                                [{dup.record.sku || dup.record.id}]
+                              </span>
+                            </p>
+                            <p
+                              className={`text-[10px] font-bold mt-1 uppercase ${dup.similarity.level === "exact" || dup.similarity.level === "high" ? "text-red-500" : "text-stone-500"}`}
+                            >
+                              Match: {dup.similarity.score}% -{" "}
+                              {dup.similarity.level} ({dup.similarity.reason})
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap gap-2 shrink-0">
+                            <SecondaryButton
+                              size="sm"
+                              onClick={() =>
+                                alert("Linking to master registry coming soon.")
+                              }
+                            >
+                              Link to Existing Product
+                            </SecondaryButton>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {hasCriticalDuplicate && !isManagerOverride && (
+                      <div className="flex gap-3 mt-6 pt-4 border-t border-red-200">
+                        {!canManagerOverride ? (
+                          <PrimaryButton
+                            size="sm"
+                            onClick={handleOverrideRequest}
+                          >
+                            Submit for Approval
+                          </PrimaryButton>
+                        ) : (
+                          <PrimaryButton
+                            size="sm"
+                            onClick={() => setIsManagerOverride(true)}
+                          >
+                            Continue as New Product
+                          </PrimaryButton>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </DataPanel>
+              )}
+
               {/* Phase 1: Identity & Assignment */}
               <div className="space-y-6">
                 <h4 className="text-[11px] uppercase font-bold text-brand-orange border-b border-orange-100 pb-2 flex items-center gap-2">
@@ -1933,9 +2104,10 @@ export const ProductManagement: React.FC = () => {
                 className="flex-1 py-4 text-xs"
                 onClick={handleSaveProduct}
                 disabled={
-                  editingProduct?.createdAt
+                  (editingProduct?.createdAt
                     ? !permissionService.canEdit("productManagement")
-                    : !permissionService.canCreate("productManagement")
+                    : !permissionService.canCreate("productManagement")) ||
+                  isSaveBlocked
                 }
               >
                 Save

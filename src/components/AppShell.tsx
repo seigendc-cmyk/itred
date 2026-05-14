@@ -34,7 +34,7 @@ import {
   Wallet,
   X,
 } from "lucide-react";
-import { AppRoute, AppNotification } from "../types.ts";
+import { AppRoute, ITredNotification } from "../types.ts";
 import { motion, AnimatePresence } from "motion/react";
 import { permissionService } from "../services/permissionService.ts";
 import { notificationService } from "../services/notificationService.ts";
@@ -145,6 +145,13 @@ const MENU_GROUPS: {
         adminOnly: true,
       },
       {
+        id: AppRoute.APPROVAL_QUEUE,
+        label: "Approval Queue",
+        icon: CheckCircle2,
+      },
+      { id: AppRoute.NOTIFICATIONS, label: "Notifications", icon: Bell },
+      { id: AppRoute.STAFF_TASKS, label: "Staff Tasks", icon: ClipboardCheck },
+      {
         id: AppRoute.STAFF_ACCESS_LOGS,
         label: "Staff Access Logs",
         icon: History,
@@ -178,7 +185,7 @@ export const AppShell: React.FC<AppShellProps> = ({
 }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [openGroupId, setOpenGroupId] = useState<string | null>(null);
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [notifications, setNotifications] = useState<ITredNotification[]>([]);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [toasts, setToasts] = useState<
     { id: number; message: string; type: string }[]
@@ -186,8 +193,8 @@ export const AppShell: React.FC<AppShellProps> = ({
   const [sessionIgnored, setSessionIgnored] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    const loadNotifs = () =>
-      setNotifications(notificationService.getNotifications());
+    const loadNotifs = async () =>
+      setNotifications(await notificationService.getAll());
     loadNotifs();
 
     const handleUpdate = () => loadNotifs();
@@ -244,6 +251,9 @@ export const AppShell: React.FC<AppShellProps> = ({
       [AppRoute.ROLE_MENU_PERMISSIONS]: "roleMenuPermissions",
       [AppRoute.STAFF_ACCESS_LOGS]: "staffAccessLogs",
       [AppRoute.SYSTEM_SETTINGS]: "systemSettings",
+      [AppRoute.APPROVAL_QUEUE]: "approvalQueue",
+      [AppRoute.NOTIFICATIONS]: "notifications",
+      [AppRoute.STAFF_TASKS]: "staffTasks",
       [AppRoute.DASHBOARD]: "dashboard",
       [AppRoute.HOW_TO]: "howTo",
     };
@@ -258,16 +268,16 @@ export const AppShell: React.FC<AppShellProps> = ({
 
   const openAlertsCount = notifications.filter(
     (n) =>
-      n.status === "OPEN" &&
-      (n.severity === "CRITICAL" ||
-        n.severity === "WARNING" ||
-        n.severity === "SYSTEM"),
+      n.status === "unread" &&
+      (n.priority === "critical" ||
+        n.priority === "high" ||
+        n.priority === "medium"),
   ).length;
 
   const criticalAlert = notifications.find(
     (n) =>
-      n.status === "OPEN" &&
-      (n.severity === "CRITICAL" || n.severity === "SYSTEM") &&
+      n.status === "unread" &&
+      (n.priority === "critical" || n.priority === "high") &&
       !sessionIgnored.has(n.id),
   );
 
@@ -550,8 +560,8 @@ export const AppShell: React.FC<AppShellProps> = ({
                 <h3 className="text-lg font-black uppercase text-brand-charcoal leading-tight pr-4">
                   {criticalAlert.title}
                 </h3>
-                <p className="text-[10px] font-bold text-stone-400 uppercase tracking-widest mt-1">
-                  Severity: {criticalAlert.severity}
+                <p className="text-[10px] font-bold text-brand-orange uppercase tracking-widest mt-1">
+                  Priority: {criticalAlert.priority}
                 </p>
               </div>
             </div>
@@ -572,10 +582,11 @@ export const AppShell: React.FC<AppShellProps> = ({
               <button
                 className="flex-1 p-3 bg-brand-orange text-white text-[10px] tracking-wider font-bold uppercase hover:bg-brand-orange/90 transition-colors"
                 onClick={() =>
-                  notificationService.updateStatus(
-                    criticalAlert.id,
-                    "ACKNOWLEDGED",
-                  )
+                  notificationService
+                    .markAsRead(criticalAlert.id)
+                    .then(async () =>
+                      setNotifications(await notificationService.getAll()),
+                    )
                 }
               >
                 Acknowledge
@@ -609,7 +620,7 @@ export const AppShell: React.FC<AppShellProps> = ({
             </div>
             <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
               {notifications.filter(
-                (n) => n.status === "OPEN" || n.status === "ACKNOWLEDGED",
+                (n) => n.status === "unread" || n.status === "read",
               ).length === 0 ? (
                 <div className="text-center p-10">
                   <CheckCircle2
@@ -622,9 +633,7 @@ export const AppShell: React.FC<AppShellProps> = ({
                 </div>
               ) : (
                 notifications
-                  .filter(
-                    (n) => n.status === "OPEN" || n.status === "ACKNOWLEDGED",
-                  )
+                  .filter((n) => n.status === "unread" || n.status === "read")
                   .sort(
                     (a, b) =>
                       new Date(b.createdAt).getTime() -
@@ -633,7 +642,7 @@ export const AppShell: React.FC<AppShellProps> = ({
                   .map((n) => (
                     <div
                       key={n.id}
-                      className={`p-4 bg-white border-l-4 shadow-sm ${n.severity === "CRITICAL" || n.severity === "SYSTEM" ? "border-red-500" : n.severity === "WARNING" ? "border-brand-orange" : "border-blue-500"}`}
+                      className={`p-4 bg-white border-l-4 shadow-sm ${n.priority === "critical" || n.priority === "high" ? "border-red-500" : n.priority === "medium" ? "border-brand-orange" : "border-blue-500"}`}
                     >
                       <div className="flex justify-between items-start mb-2">
                         <h4 className="text-[11px] font-bold uppercase text-brand-charcoal leading-tight pr-2">
@@ -650,13 +659,16 @@ export const AppShell: React.FC<AppShellProps> = ({
                         {n.message}
                       </p>
                       <div className="flex gap-2">
-                        {n.status === "OPEN" && (
+                        {n.status === "unread" && (
                           <button
                             onClick={() =>
-                              notificationService.updateStatus(
-                                n.id,
-                                "ACKNOWLEDGED",
-                              )
+                              notificationService
+                                .markAsRead(n.id)
+                                .then(async () =>
+                                  setNotifications(
+                                    await notificationService.getAll(),
+                                  ),
+                                )
                             }
                             className="text-[9px] font-bold uppercase tracking-wider bg-stone-100 text-stone-600 px-3 py-1.5 hover:bg-stone-200 transition-colors"
                           >
@@ -665,7 +677,13 @@ export const AppShell: React.FC<AppShellProps> = ({
                         )}
                         <button
                           onClick={() =>
-                            notificationService.updateStatus(n.id, "RESOLVED")
+                            notificationService
+                              .markAsResolved(n.id)
+                              .then(async () =>
+                                setNotifications(
+                                  await notificationService.getAll(),
+                                ),
+                              )
                           }
                           className="text-[9px] font-bold uppercase tracking-wider bg-orange-50 text-brand-orange border border-orange-200 px-3 py-1.5 hover:bg-brand-orange hover:text-white transition-colors"
                         >

@@ -206,34 +206,34 @@ export const WhatsAppPerformanceReports: React.FC = () => {
 
   useEffect(() => {
     if (execSummary.overdueFollowUps > 0) {
-      notificationService.addNotification({
-        type: "WHATSAPP",
-        severity: "CRITICAL",
+      void notificationService.createNotification({
+        type: "task_due",
+        priority: "critical",
         title: "Overdue Follow-ups Detected",
         message: `${execSummary.overdueFollowUps} follow-ups are currently overdue across the network.`,
-        relatedModule: "WhatsApp Reports",
-        relatedRecordId: "bi-overdue-followups",
+        recordType: "WhatsApp Reports",
+        recordId: "bi-overdue-followups",
       });
     }
     if (execSummary.highPriority > 0) {
-      notificationService.addNotification({
-        type: "WHATSAPP",
-        severity: "CRITICAL",
+      void notificationService.createNotification({
+        type: "lead_followup",
+        priority: "critical",
         title: "High Priority Issues Pending",
         message: `${execSummary.highPriority} critical priority items remain unresolved.`,
-        relatedModule: "WhatsApp Reports",
-        relatedRecordId: "bi-high-priority",
+        recordType: "WhatsApp Reports",
+        recordId: "bi-high-priority",
       });
     }
     vendorReports.forEach((v) => {
       if (v.missedResponses >= 2) {
-        notificationService.addNotification({
-          type: "VENDOR",
-          severity: "WARNING",
+        void notificationService.createNotification({
+          type: "customer_feedback",
+          priority: "medium",
           title: "Repeated Missed Responses",
           message: `${v.vendorName} has missed ${v.missedResponses} responses.`,
-          relatedModule: "WhatsApp Reports",
-          relatedRecordId: `vendor-missed-${v.vendorId}`,
+          recordType: "WhatsApp Reports",
+          recordId: `vendor-missed-${v.vendorId}`,
         });
       }
     });

@@ -30,6 +30,7 @@ import {
   ShieldCheck,
   Layers,
   MessageSquare,
+  RefreshCcw,
 } from "lucide-react";
 import { vendorService } from "../services/vendorService.ts";
 import { productService } from "../services/productService.ts";
@@ -49,6 +50,7 @@ import {
   Staff,
   DeliveryStaff,
   WhatsAppActivityLog,
+  SystemSettings,
 } from "../types.ts";
 import { asArray } from "../utils/safeData.ts";
 import { focusMainContent } from "../utils/uiHelpers.ts";
@@ -70,6 +72,9 @@ export const VendorStorefrontBuilder: React.FC = () => {
   const [cahLinks, setCahLinks] = useState<CAHLink[]>([]);
   const [plans, setPlans] = useState<PricingPlan[]>([]);
   const [storefronts, setStorefronts] = useState<VendorStorefront[]>([]);
+  const [systemSettings, setSystemSettings] = useState<SystemSettings | null>(
+    null,
+  );
 
   const [selectedVendorId, setSelectedVendorId] = useState("");
   const [title, setTitle] = useState("");
@@ -80,6 +85,7 @@ export const VendorStorefrontBuilder: React.FC = () => {
   const [selectedStaffIds, setSelectedStaffIds] = useState<string[]>([]);
   const [selectedDeliveryIds, setSelectedDeliveryIds] = useState<string[]>([]);
   const [selectedCAHLinkIds, setSelectedCAHLinkIds] = useState<string[]>([]);
+  const [storefrontId, setStorefrontId] = useState<string | null>(null);
   const [generatedHtml, setGeneratedHtml] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [activeStorefrontId, setActiveStorefrontId] = useState<string | null>(
@@ -101,20 +107,28 @@ export const VendorStorefrontBuilder: React.FC = () => {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [rawVendors, rawProducts, rawCahLinks, rawPlans, rawStorefronts] =
-          await Promise.all([
-            vendorService.getVendors(),
-            productService.getProducts(),
-            cahService.getLinks(),
-            pricingPlanService.getPlans(),
-            storefrontService.getAllStorefronts(),
-          ]);
+        const [
+          rawVendors,
+          rawProducts,
+          rawCahLinks,
+          rawPlans,
+          rawStorefronts,
+          rawSettings,
+        ] = await Promise.all([
+          vendorService.getVendors(),
+          productService.getProducts(),
+          cahService.getLinks(),
+          pricingPlanService.getPlans(),
+          storefrontService.getAllStorefronts(),
+          settingsService.getSettings(),
+        ]);
 
         setVendors(asArray<Vendor>(rawVendors));
         setProducts(asArray<Product>(rawProducts));
         setCahLinks(asArray<CAHLink>(rawCahLinks));
         setPlans(asArray<PricingPlan>(rawPlans));
         setStorefronts(asArray<VendorStorefront>(rawStorefronts));
+        setSystemSettings(rawSettings);
       } catch (error) {
         console.warn(
           "Vendor Storefront Builder data failed to load. Using empty arrays.",
@@ -236,6 +250,7 @@ export const VendorStorefrontBuilder: React.FC = () => {
     [activeStorefrontId, safeStorefronts],
   );
   const selectedHtml = generatedStorefront?.htmlContent || generatedHtml;
+  const currentStorefrontId = generatedStorefront?.id || storefrontId;
 
   let defaultFilename = "Vendor_Storefront.html";
   if (selectedVendor && selectedVendor.name) {
@@ -303,6 +318,7 @@ export const VendorStorefrontBuilder: React.FC = () => {
       productCount: selectedProducts.length,
       imageCount: selectedImages.length,
       htmlFileName: `${safeFileName}.html`,
+      fileName: `${safeFileName}.html`,
       htmlContent: html,
     };
   };
@@ -333,6 +349,20 @@ export const VendorStorefrontBuilder: React.FC = () => {
     setIsGenerating(true);
     focusMainContent();
     setTimeout(() => {
+      const resolveFeedbackNumber = () => {
+        const routes = (systemSettings?.feedbackWhatsAppRoutes || [])
+          .filter((r) => r.isActive)
+          .sort((a, b) => b.priority - a.priority);
+        let match = routes.find((r) => r.sector === selectedVendor.sector);
+        if (match) return match.whatsappNumber;
+        match = routes.find((r) => r.purpose === "DEFAULT");
+        if (match) return match.whatsappNumber;
+        return systemSettings?.defaultFeedbackWhatsAppNumber || "";
+      };
+
+      const newStorefrontId = `SF-${Date.now().toString().slice(-8)}`;
+      setStorefrontId(newStorefrontId);
+
       const html = generateVendorStorefrontHtml(
         selectedVendor,
         selectedProducts,
@@ -343,14 +373,17 @@ export const VendorStorefrontBuilder: React.FC = () => {
         title || `${selectedVendor.name} Storefront`,
         slogan || selectedVendor.catalogueSlogan || "",
         new Date().toISOString(),
+        newStorefrontId,
         expiryDate || undefined,
         selectedVendorPlan?.isVendorStorefrontWhatsAppButtonEnabled ?? false,
         selectedVendorPlan?.isVendorStorefrontDirectCallButtonEnabled ?? false,
         selectedVendor.id,
+        resolveFeedbackNumber(),
+        systemSettings?.syncEndpointUrl || "",
       );
 
       setGeneratedHtml(html);
-      const storefront = getStorefrontRecord(html);
+      const storefront = getStorefrontRecord(html, newStorefrontId);
       if (storefront) {
         storefrontService.saveStorefront(storefront);
         const updatedStorefronts = storefrontService.getAllStorefronts();
@@ -462,6 +495,7 @@ export const VendorStorefrontBuilder: React.FC = () => {
       setSelectedStaffIds(
         selectedVendor.staff?.slice(0, 2).map((s) => s.id) || [],
       );
+      setStorefrontId(null);
       setSelectedDeliveryIds(
         selectedVendor.deliveryStaff?.slice(0, 2).map((d) => d.id) || [],
       );
@@ -471,6 +505,7 @@ export const VendorStorefrontBuilder: React.FC = () => {
       setSelectedBranchIds([]);
       setSelectedStaffIds([]);
       setSelectedDeliveryIds([]);
+      setStorefrontId(null);
       setSelectedCAHLinkIds([]);
     }
   }, [selectedVendorId]);
@@ -853,6 +888,27 @@ export const VendorStorefrontBuilder: React.FC = () => {
               <div className="p-5 space-y-6">
                 <div>
                   <h4 className="text-[10px] uppercase font-bold text-brand-orange tracking-widest border-b border-orange-100 pb-2 mb-3">
+                    Storefront Readiness Score
+                  </h4>
+                  <div className="flex items-center gap-4">
+                    <div className="text-2xl font-black text-brand-charcoal">
+                      {readinessScore}%
+                    </div>
+                    <div className="flex-1 h-2 bg-stone-100 w-full overflow-hidden">
+                      <div
+                        className={`h-full ${readinessScore === 100 ? "bg-emerald-500" : readinessScore >= 70 ? "bg-brand-orange" : "bg-red-500"}`}
+                        style={{ width: `${readinessScore}%` }}
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-stone-500 mt-2 font-bold uppercase">
+                    {readinessScore === 100
+                      ? "Ready for deployment"
+                      : "Missing key assets or data"}
+                  </p>
+                </div>
+                <div>
+                  <h4 className="text-[10px] uppercase font-bold text-brand-orange tracking-widest border-b border-orange-100 pb-2 mb-3">
                     Storefront Limits
                   </h4>
                   <ul className="space-y-2 text-xs font-medium text-stone-600">
@@ -942,7 +998,20 @@ export const VendorStorefrontBuilder: React.FC = () => {
               className="shadow-sm border border-stone-200 rounded-none bg-white"
             >
               <div className="p-5 space-y-6">
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+                  <SecondaryButton
+                    onClick={() => {
+                      const newWin = window.open("", "_blank");
+                      if (newWin && selectedHtml) {
+                        newWin.document.open();
+                        newWin.document.write(selectedHtml);
+                        newWin.document.close();
+                      }
+                    }}
+                    disabled={!selectedHtml}
+                  >
+                    <Eye className="w-4 h-4 mr-2" /> Preview
+                  </SecondaryButton>
                   <PrimaryButton
                     onClick={() => {
                       if (permissionService.canExport("createStorefront")) {
@@ -976,6 +1045,45 @@ export const VendorStorefrontBuilder: React.FC = () => {
                     <Copy className="w-4 h-4 mr-2" /> Copy HTML
                   </SecondaryButton>
                   <SecondaryButton
+                    onClick={() =>
+                      generatedStorefront && handleDeploy(generatedStorefront)
+                    }
+                    disabled={
+                      !generatedStorefront ||
+                      generatedStorefront.status === "deployed" ||
+                      !permissionService.canApprove("createStorefront")
+                    }
+                  >
+                    <CheckCircle2 className="w-4 h-4 mr-2" /> Mark Deployed
+                  </SecondaryButton>
+                  <SecondaryButton
+                    onClick={generateHtml}
+                    disabled={
+                      !selectedVendor ||
+                      selectedProducts.length === 0 ||
+                      isGenerating ||
+                      !permissionService.canCreate("createStorefront")
+                    }
+                  >
+                    <RefreshCcw className="w-4 h-4 mr-2" /> Regenerate
+                  </SecondaryButton>
+                  <SecondaryButton
+                    onClick={() =>
+                      generatedStorefront && handleArchive(generatedStorefront)
+                    }
+                    disabled={
+                      !generatedStorefront ||
+                      generatedStorefront.status === "archived" ||
+                      !permissionService.canDelete("createStorefront")
+                    }
+                    className="text-red-500 hover:bg-red-50 hover:text-red-600 hover:border-red-200"
+                  >
+                    <Archive className="w-4 h-4 mr-2" /> Archive
+                  </SecondaryButton>
+                </div>
+
+                <div className="pt-4 border-t border-stone-100">
+                  <SecondaryButton
                     onClick={() => {
                       setQuickLogData({
                         activityType: "STOREFRONT_SHARED",
@@ -989,27 +1097,11 @@ export const VendorStorefrontBuilder: React.FC = () => {
                       setIsQuickLogOpen(true);
                     }}
                     disabled={!generatedStorefront}
+                    className="w-full"
                   >
-                    <MessageSquare className="w-4 h-4 mr-2" /> Log Share
+                    <MessageSquare className="w-4 h-4 mr-2" /> Log WhatsApp
+                    Share
                   </SecondaryButton>
-                </div>
-                <div className="pt-4 border-t border-stone-100">
-                  <p className="text-[9px] uppercase font-bold tracking-widest text-stone-400 mb-3">
-                    View controls
-                  </p>
-                  <div className="grid grid-cols-1">
-                    {permissionService.canView("createStorefront") && (
-                      <SecondaryButton
-                        onClick={() =>
-                          setActiveStorefrontId(generatedStorefront?.id || null)
-                        }
-                        disabled={!generatedStorefront}
-                      >
-                        <Eye className="w-4 h-4 mr-2" /> Last generated
-                        storefront
-                      </SecondaryButton>
-                    )}
-                  </div>
                 </div>
                 <div className="pt-4 border-t border-stone-100 space-y-3">
                   <p className="text-[9px] uppercase font-bold tracking-widest text-stone-400">
@@ -1038,39 +1130,6 @@ export const VendorStorefrontBuilder: React.FC = () => {
                     </span>
                     <span>Products: {selectedProducts.length}</span>
                     <span>Images: {selectedImages.length}</span>
-                  </div>
-                </div>
-                <div className="pt-4 border-t border-stone-100">
-                  <p className="text-[9px] uppercase font-bold tracking-widest text-stone-400 mb-3">
-                    Deployment Protocol
-                  </p>
-                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                    <SecondaryButton
-                      disabled={
-                        !generatedStorefront ||
-                        generatedStorefront.status === "deployed" ||
-                        !permissionService.canApprove("createStorefront")
-                      }
-                      onClick={() =>
-                        generatedStorefront && handleDeploy(generatedStorefront)
-                      }
-                    >
-                      <CheckCircle2 className="w-4 h-4 mr-2" /> Mark Deployed
-                    </SecondaryButton>
-                    <SecondaryButton
-                      disabled={
-                        !generatedStorefront ||
-                        generatedStorefront.status === "archived" ||
-                        !permissionService.canDelete("createStorefront")
-                      }
-                      onClick={() =>
-                        generatedStorefront &&
-                        handleArchive(generatedStorefront)
-                      }
-                      className="text-red-500 hover:bg-red-50 hover:text-red-600 hover:border-red-200"
-                    >
-                      <Archive className="w-4 h-4 mr-2" /> Archive
-                    </SecondaryButton>
                   </div>
                 </div>
               </div>
