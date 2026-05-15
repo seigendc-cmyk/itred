@@ -119,6 +119,7 @@ const VENDOR_STATUSES: VendorStatus[] = [
   "suspended",
   "dormant",
   "cancelled",
+  "pending_review",
 ];
 const SUB_STATUSES: SubscriptionStatus[] = [
   "trial",
@@ -346,6 +347,15 @@ export const VendorManagement: React.FC = () => {
       return;
     }
 
+    const sessionStr = localStorage.getItem("activeStaffSession");
+    const session = sessionStr
+      ? JSON.parse(sessionStr)
+      : { staffId: "STAFF-ADM", staffName: "System Admin" };
+    const canPublish =
+      permissionService.canPublish("vendorManagement") ||
+      permissionService.canApprove("vendorManagement");
+    const isNew = !selectedVendor;
+
     setIsSaving(true);
     const oldVendor = vendors.find(
       (v) => v.id === (selectedVendor?.id || formData.id),
@@ -356,73 +366,101 @@ export const VendorManagement: React.FC = () => {
         ...selectedVendor, // Preserve existing fields if not in formData
         ...formData,
         updatedAt: now,
-        updatedBy: "STAFF-ADM",
+        updatedBy: session.staffId,
       } as Vendor;
+
+      if (!canPublish) {
+        vendorToSave.status = "pending_review";
+      }
 
       await vendorService.updateVendor(vendorToSave);
 
-      analyticsService.logEvent({
-        eventType: selectedVendor ? "VENDOR_UPDATED" : "VENDOR_CREATED",
-        actorType: "admin",
-        actorName: "System Admin",
-        vendorId: vendorToSave.id,
-        vendorName: vendorToSave.name,
-        details: { action: selectedVendor ? "update" : "creation" },
-      });
+      if (!canPublish) {
+        await approvalService.submitApprovalRequest({
+          requestType: isNew ? "vendor_create" : "vendor_update",
+          recordType: "vendor",
+          recordId: vendorToSave.id,
+          recordName: vendorToSave.name,
+          submittedByStaffId: session.staffId,
+          submittedByName: session.staffName,
+          riskLevel: "medium",
+          beforeSnapshot: oldVendor || null,
+          afterSnapshot: vendorToSave,
+        });
 
-      // Non-blocking staff audit logging
-      try {
-        if (oldVendor) {
-          await staffAuditService.logUpdate(
-            "vendor",
-            "vendor",
-            vendorToSave.id,
-            vendorToSave.name,
-            oldVendor,
-            vendorToSave,
-          );
-          if (oldVendor.status !== vendorToSave.status) {
+        void staffAuditService.logAction({
+          eventType: "APPROVAL_SUBMITTED",
+          module: "vendor",
+          action: `Submitted vendor ${isNew ? "creation" : "update"} for approval`,
+          severity: "info",
+          recordType: "vendor",
+          recordId: vendorToSave.id,
+          recordName: vendorToSave.name,
+        });
+
+        setFormSuccess("Vendor saved as pending. Approval requested.");
+      } else {
+        analyticsService.logEvent({
+          eventType: isNew ? "VENDOR_CREATED" : "VENDOR_UPDATED",
+          actorType: "admin",
+          actorName: session.staffName,
+          vendorId: vendorToSave.id,
+          vendorName: vendorToSave.name,
+          details: { action: isNew ? "creation" : "update" },
+        });
+
+        try {
+          if (oldVendor) {
+            await staffAuditService.logUpdate(
+              "vendor",
+              "vendor",
+              vendorToSave.id,
+              vendorToSave.name,
+              oldVendor,
+              vendorToSave,
+            );
+            if (oldVendor.status !== vendorToSave.status) {
+              await staffAuditService.logAction({
+                eventType: "RECORD_UPDATED",
+                module: "vendor",
+                action: `Vendor status changed from ${oldVendor.status} to ${vendorToSave.status}`,
+                severity: "warning",
+                recordType: "vendor",
+                recordId: vendorToSave.id,
+                recordName: vendorToSave.name,
+              });
+            }
+          } else {
+            await staffAuditService.logCreate(
+              "vendor",
+              "vendor",
+              vendorToSave.id,
+              vendorToSave.name,
+              vendorToSave,
+            );
+          }
+          if (
+            oldVendor &&
+            (oldVendor.rpnId !== vendorToSave.rpnId ||
+              oldVendor.assignedRPNId !== vendorToSave.assignedRPNId)
+          ) {
             await staffAuditService.logAction({
               eventType: "RECORD_UPDATED",
               module: "vendor",
-              action: `Vendor status changed from ${oldVendor.status} to ${vendorToSave.status}`,
-              severity: "warning",
+              action: "Assigned/Reassigned vendor to RPN",
+              severity: "high",
               recordType: "vendor",
               recordId: vendorToSave.id,
               recordName: vendorToSave.name,
             });
           }
-        } else {
-          await staffAuditService.logCreate(
-            "vendor",
-            "vendor",
-            vendorToSave.id,
-            vendorToSave.name,
-            vendorToSave,
-          );
+        } catch (auditErr) {
+          console.error("Audit log failed", auditErr);
         }
-
-        if (
-          oldVendor &&
-          (oldVendor.rpnId !== vendorToSave.rpnId ||
-            oldVendor.assignedRPNId !== vendorToSave.assignedRPNId)
-        ) {
-          await staffAuditService.logAction({
-            eventType: "RECORD_UPDATED",
-            module: "vendor",
-            action: "Assigned/Reassigned vendor to RPN",
-            severity: "high",
-            recordType: "vendor",
-            recordId: vendorToSave.id,
-            recordName: vendorToSave.name,
-          });
-        }
-      } catch (auditErr) {
-        console.error("Audit log failed", auditErr);
       }
 
       await loadData();
-      setFormSuccess("Vendor saved successfully.");
+      if (canPublish) setFormSuccess("Vendor saved successfully.");
       setTimeout(() => setView("list"), 1500);
     } catch (error) {
       console.error("Save vendor error:", error);

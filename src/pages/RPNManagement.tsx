@@ -61,6 +61,7 @@ import {
 } from "../types.ts";
 import { asArray } from "../utils/safeData.ts";
 import { staffAuditService } from "../services/staffAuditService.ts";
+import { approvalService } from "../services/approvalService.ts";
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -248,20 +249,53 @@ export const RPNManagement: React.FC = () => {
     }));
   };
 
-  const saveRPN = () => {
+  const saveRPN = async () => {
     if (!rpnFormData.name || !rpnFormData.phone) {
       alert("Identity and contact required for node deployment.");
       return;
     }
+
+    const sessionStr = localStorage.getItem("activeStaffSession");
+    const session = sessionStr
+      ? JSON.parse(sessionStr)
+      : { staffId: "STAFF-ADM", staffName: "System Admin" };
+    const canApprove = permissionService.canApprove("rpnManagement");
+
     const rpnToSave = stripUndefinedDeep({
       ...rpnFormData,
       updatedAt: new Date().toISOString(),
     }) as RPN;
 
-    rpnService.update(rpnToSave);
-
     const isNew = !rpns.find((r) => r.id === rpnToSave.id);
+    const oldRpn = rpns.find((r) => r.id === rpnToSave.id);
 
+    if (!canApprove && !isNew) {
+      await approvalService.submitApprovalRequest({
+        requestType: "rpn_agent_update",
+        recordType: "rpn",
+        recordId: rpnToSave.id,
+        recordName: rpnToSave.name,
+        submittedByStaffId: session.staffId,
+        submittedByName: session.staffName,
+        riskLevel: "medium",
+        beforeSnapshot: oldRpn || null,
+        afterSnapshot: rpnToSave,
+      });
+      void staffAuditService.logAction({
+        eventType: "APPROVAL_SUBMITTED",
+        module: "staff",
+        action: "Submitted RPN agent update for approval",
+        severity: "info",
+        recordType: "rpn",
+        recordId: rpnToSave.id,
+        recordName: rpnToSave.name,
+      });
+      alert("RPN update submitted for manager approval.");
+      setView("list");
+      return;
+    }
+
+    rpnService.update(rpnToSave);
     analyticsService.logEvent({
       eventType: isNew ? "RPN_CREATED" : "RPN_UPDATED",
       actorType: "admin",

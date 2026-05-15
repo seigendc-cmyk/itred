@@ -98,10 +98,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     return path || AppRoute.DASHBOARD;
   };
 
-  const handleNavigate = (route: AppRoute) => {
-    navigate(`/${route}`);
-  };
-
   const activeRoute = getActiveRoute();
 
   // Title mapping for the AppShell header
@@ -168,6 +164,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     };
     const key = menuKeyMap[route] || (route as MenuKey);
     return permissionService.hasMenuAccess(key);
+  };
+
+  const handleNavigate = (route: AppRoute) => {
+    navigate(`/${route}`);
   };
 
   const sessionStr = localStorage.getItem("activeStaffSession");

@@ -56,6 +56,7 @@ import { settingsService } from "../services/settingsService.ts";
 import { focusMainContent } from "../utils/uiHelpers.ts";
 import { WhatsAppActivityQuickLog } from "../components/WhatsAppActivityQuickLog.tsx";
 import { staffAuditService } from "../services/staffAuditService.ts";
+import { approvalService } from "../services/approvalService.ts";
 
 async function assetUrlToDataUri(url: string): Promise<string> {
   const response = await fetch(url);
@@ -656,6 +657,11 @@ catalogueId: finalId,
   };
 
   const handleMarkDeployed = async (id: string) => {
+    const sessionStr = localStorage.getItem("activeStaffSession");
+    const session = sessionStr ? JSON.parse(sessionStr) : { staffId: "STAFF-ADM", staffName: "System Admin" };
+    const canApprove = permissionService.canApprove("createCatalogue");
+
+    if (canApprove) {
     try {
       await catalogueService.markAsDeployed(id);
       refreshHistory();
@@ -677,6 +683,24 @@ catalogueId: finalId,
     } catch (err) {
       console.error(err);
       alert("Failed to deploy catalogue.");
+    }
+    } else {
+      try {
+        await approvalService.submitApprovalRequest({
+          requestType: "catalogue_deploy",
+          recordType: "catalogue",
+          recordId: id,
+          recordName: `Catalogue ${id}`,
+          submittedByStaffId: session.staffId,
+          submittedByName: session.staffName,
+          riskLevel: "high",
+          beforeSnapshot: null,
+          afterSnapshot: null,
+        });
+        alert("Deployment approval requested. You will be notified when approved.");
+      } catch (err) {
+        console.error("Failed to submit approval request.");
+      }
     }
   };
 
@@ -1188,15 +1212,12 @@ catalogueId: finalId,
                 <div className="flex gap-2 flex-wrap justify-end">
                   <SecondaryButton
                     onClick={() => {
-                      if (permissionService.canApprove("createCatalogue")) {
-                        handleMarkDeployed(lastGenerated.id);
-                        if (lastGenerated.hostedUrl) {
-                          window.open(lastGenerated.hostedUrl, "_blank");
-                        }
-                      } else alert("Permission denied to deploy catalogues.");
+                      handleMarkDeployed(lastGenerated.id);
+                      if (permissionService.canApprove("createCatalogue") && lastGenerated.hostedUrl) {
+                        window.open(lastGenerated.hostedUrl, "_blank");
+                      }
                     }}
                     size="sm"
-                    disabled={!permissionService.canApprove("createCatalogue")}
                   >
                     <Globe size={14} className="mr-2" /> Deploy / Open Hosted
                     Catalogue
@@ -1469,18 +1490,9 @@ catalogueId: finalId,
                             {cat.status === "generated" && (
                               <button
                                 onClick={() => {
-                                  if (
-                                    permissionService.canApprove(
-                                      "createCatalogue",
-                                    )
-                                  )
-                                    handleMarkDeployed(cat.id);
-                                  else
-                                    alert(
-                                      "Permission denied to deploy catalogues.",
-                                    );
+                                  handleMarkDeployed(cat.id);
                                 }}
-                                className={`p-1.5 bg-stone-900 text-white hover:bg-brand-orange transition-colors ${!permissionService.canApprove("createCatalogue") ? "opacity-50 cursor-not-allowed" : ""}`}
+                                className={`p-1.5 bg-stone-900 text-white hover:bg-brand-orange transition-colors`}
                                 title="Deploy"
                               >
                                 <Globe size={12} />

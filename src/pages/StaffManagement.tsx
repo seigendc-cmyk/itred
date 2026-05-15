@@ -371,33 +371,6 @@ export const StaffManagement: React.FC = () => {
     setFormSuccess("");
   }, []);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        closeAllModals();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [closeAllModals]);
-
-  useEffect(() => {
-    if (location.pathname === "/role-menu-permissions") {
-      setActiveTab("roles");
-    } else if (location.pathname === "/staff-access-logs") {
-      setActiveTab("logs");
-    } else if (location.pathname === "/system-settings") {
-      setActiveTab("settings");
-    } else {
-      setActiveTab("directory");
-    }
-  }, [location.pathname]);
-
-  useEffect(() => {
-    loadStaff();
-    loadLogs();
-  }, []);
-
   const loadStaff = async () => {
     try {
       const serviceWithFirebase = staffService as typeof staffService & {
@@ -424,6 +397,33 @@ export const StaffManagement: React.FC = () => {
       asArray<ActivityLog>(await Promise.resolve(analyticsService.getEvents())),
     );
   };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        closeAllModals();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [closeAllModals]);
+
+  useEffect(() => {
+    if (location.pathname === "/role-menu-permissions") {
+      setActiveTab("roles");
+    } else if (location.pathname === "/staff-access-logs") {
+      setActiveTab("logs");
+    } else if (location.pathname === "/system-settings") {
+      setActiveTab("settings");
+    } else {
+      setActiveTab("directory");
+    }
+  }, [location.pathname]);
+
+  useEffect(() => {
+    loadStaff();
+    loadLogs();
+  }, []);
 
   const filteredStaff = useMemo(
     () =>
@@ -490,6 +490,26 @@ export const StaffManagement: React.FC = () => {
     dateFrom,
     dateTo,
   ]);
+
+  const duplicates = useMemo(() => {
+    if (!formData.staffCode && !formData.email) return [];
+
+    return staffList.filter((s) => {
+      if (s.id === formData.id) return false;
+      const sameCode =
+        !!formData.staffCode && s.staffCode === formData.staffCode;
+      const sameEmail =
+        !!formData.email &&
+        !!s.email &&
+        s.email.toLowerCase() === formData.email.toLowerCase() &&
+        s.status === "active";
+      return sameCode || sameEmail;
+    });
+  }, [formData.staffCode, formData.email, formData.id, staffList]);
+
+  const hasDuplicateCode = duplicates.some(
+    (s) => s.staffCode === formData.staffCode,
+  );
 
   const handleAddStaff = () => {
     const staffCode = staffService.generateStaffCode();
@@ -925,26 +945,6 @@ export const StaffManagement: React.FC = () => {
       },
     }));
   };
-
-  const duplicates = useMemo(() => {
-    if (!formData.staffCode && !formData.email) return [];
-
-    return staffList.filter((s) => {
-      if (s.id === formData.id) return false;
-      const sameCode =
-        !!formData.staffCode && s.staffCode === formData.staffCode;
-      const sameEmail =
-        !!formData.email &&
-        !!s.email &&
-        s.email.toLowerCase() === formData.email.toLowerCase() &&
-        s.status === "active";
-      return sameCode || sameEmail;
-    });
-  }, [formData.staffCode, formData.email, formData.id, staffList]);
-
-  const hasDuplicateCode = duplicates.some(
-    (s) => s.staffCode === formData.staffCode,
-  );
 
   return (
     <div className="space-y-8 pb-20">

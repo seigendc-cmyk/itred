@@ -427,7 +427,8 @@ export type SubscriptionStatus =
   | "overdue"
   | "paid"
   | "suspended"
-  | "cancelled";
+  | "cancelled"
+  | "pending_review";
 export type FollowUpStatus =
   | "not started"
   | "contacted"
@@ -531,7 +532,8 @@ export type ProductStatus =
   | "active"
   | "hidden"
   | "out_of_stock"
-  | "discontinued";
+  | "discontinued"
+  | "pending_review";
 export type ImageStatus =
   | "missing"
   | "uploaded"

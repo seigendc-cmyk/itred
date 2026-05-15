@@ -36,10 +36,6 @@ export const ApprovalQueue: React.FC = () => {
   } | null>(null);
   const [managerComment, setManagerComment] = useState("");
 
-  useEffect(() => {
-    loadRequests();
-  }, []);
-
   const loadRequests = async () => {
     const allReqs = await approvalService.getAll();
     setRequests(
@@ -50,11 +46,18 @@ export const ApprovalQueue: React.FC = () => {
     );
   };
 
+  useEffect(() => {
+    loadRequests();
+  }, []);
+
   const sessionStr = localStorage.getItem("activeStaffSession");
   const staffId = sessionStr ? JSON.parse(sessionStr).staffId : "STAFF-ADM";
   const staffName = sessionStr
     ? JSON.parse(sessionStr).staffName
     : "Backend Manager";
+
+  const pendingRequests = requests.filter((r) => r.status === "pending");
+  const todayStr = new Date().toISOString().split("T")[0];
 
   const filteredRequests = useMemo(() => {
     let filtered = requests;
@@ -65,9 +68,6 @@ export const ApprovalQueue: React.FC = () => {
     }
     return filtered;
   }, [requests, selectedTab]);
-
-  const pendingRequests = requests.filter((r) => r.status === "pending");
-  const todayStr = new Date().toISOString().split("T")[0];
 
   const stats = {
     pending: pendingRequests.length,

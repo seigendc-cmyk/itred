@@ -71,6 +71,7 @@ const PRODUCT_STATUSES: ProductStatus[] = [
   "hidden",
   "out_of_stock",
   "discontinued",
+  "pending_review",
 ];
 const IMAGE_STATUSES: ImageStatus[] = [
   "missing",
@@ -293,7 +294,7 @@ export const ProductManagement: React.FC = () => {
     setIsFormOpen(true);
   };
 
-  const handleSaveProduct = () => {
+  const handleSaveProduct = async () => {
     if (
       !editingProduct?.name ||
       !editingProduct?.vendorId ||
@@ -303,7 +304,23 @@ export const ProductManagement: React.FC = () => {
       return;
     }
 
+    const sessionStr = localStorage.getItem("activeStaffSession");
+    const session = sessionStr
+      ? JSON.parse(sessionStr)
+      : { staffId: "STAFF-ADM", staffName: "System Admin" };
+
+    const isNew = !editingProduct.createdAt;
     const oldProduct = safeProducts.find((p) => p.id === editingProduct.id);
+    const priceChanged =
+      oldProduct && oldProduct.sellingPrice !== editingProduct.sellingPrice;
+    const imageChanged =
+      oldProduct && oldProduct.imageUrl !== editingProduct.imageUrl;
+    const publishChanged =
+      oldProduct &&
+      oldProduct.publishToCatalogue !== editingProduct.publishToCatalogue;
+    const canApprove = permissionService.canApprove("productManagement");
+    const needsApproval =
+      (isNew || priceChanged || imageChanged || publishChanged) && !canApprove;
 
     const targetVendor = safeVendors.find(
       (v) => v.id === editingProduct.vendorId,
@@ -319,105 +336,128 @@ export const ProductManagement: React.FC = () => {
       updatedAt: new Date().toISOString(),
     } as Product;
 
-    productService.saveProduct(productToSave);
+    if (needsApproval) {
+      productToSave.status = "pending_review";
+    }
 
-    analyticsService.logEvent({
-      eventType: editingProduct.createdAt
-        ? "PRODUCT_UPDATED"
-        : "PRODUCT_CREATED",
-      actorType: "admin",
-      actorName: "System Admin",
-      productId: productToSave.id,
-      productName: productToSave.name,
-      vendorId: productToSave.vendorId,
-      vendorName: productToSave.vendorName,
-      details: { action: editingProduct.createdAt ? "update" : "creation" },
-    });
+    await productService.saveProduct(productToSave);
 
-    // Log farm produce events
-    if (productToSave.isFarmProduce) {
+    if (needsApproval) {
+      await approvalService.submitApprovalRequest({
+        requestType: isNew ? "product_create" : "product_update",
+        recordType: "product",
+        recordId: productToSave.id,
+        recordName: productToSave.name,
+        submittedByStaffId: session.staffId,
+        submittedByName: session.staffName,
+        riskLevel: priceChanged ? "high" : "medium",
+        beforeSnapshot: oldProduct || null,
+        afterSnapshot: productToSave,
+      });
+
+      void staffAuditService.logAction({
+        eventType: "APPROVAL_SUBMITTED",
+        module: "product",
+        action: `Submitted product ${isNew ? "creation" : "update"} for approval`,
+        severity: priceChanged ? "high" : "info",
+        recordType: "product",
+        recordId: productToSave.id,
+        recordName: productToSave.name,
+      });
+
+      alert("Product saved as pending review. Approval requested.");
+    } else {
       analyticsService.logEvent({
-        eventType: editingProduct.createdAt
-          ? "FARM_PRODUCE_UPDATED"
-          : "FARM_PRODUCE_CREATED",
+        eventType: isNew ? "PRODUCT_CREATED" : "PRODUCT_UPDATED",
         actorType: "admin",
-        actorName: "System Admin",
+        actorName: session.staffName,
         productId: productToSave.id,
         productName: productToSave.name,
         vendorId: productToSave.vendorId,
         vendorName: productToSave.vendorName,
-        details: {
-          cropType: productToSave.cropType,
-          harvestStatus: productToSave.harvestStatus,
-          quantityAvailable: productToSave.quantityAvailable,
-        },
+        details: { action: isNew ? "creation" : "update" },
       });
 
-      // Log availability changes
-      if (
-        editingProduct.createdAt &&
-        editingProduct.dateOfAvailability !== productToSave.dateOfAvailability
-      ) {
+      if (productToSave.isFarmProduce) {
         analyticsService.logEvent({
-          eventType: "FARM_PRODUCE_AVAILABILITY_CHANGED",
+          eventType: isNew ? "FARM_PRODUCE_CREATED" : "FARM_PRODUCE_UPDATED",
           actorType: "admin",
-          actorName: "System Admin",
+          actorName: session.staffName,
           productId: productToSave.id,
           productName: productToSave.name,
           vendorId: productToSave.vendorId,
           vendorName: productToSave.vendorName,
           details: {
-            oldDate: editingProduct.dateOfAvailability,
-            newDate: productToSave.dateOfAvailability,
+            cropType: productToSave.cropType,
+            harvestStatus: productToSave.harvestStatus,
+            quantityAvailable: productToSave.quantityAvailable,
           },
         });
-      }
-    }
 
-    // Non-blocking staff audit logging
-    try {
-      if (oldProduct) {
-        void staffAuditService.logUpdate(
-          "product",
-          "product",
-          productToSave.id,
-          productToSave.name,
-          oldProduct,
-          productToSave,
-        );
-        if (oldProduct.sellingPrice !== productToSave.sellingPrice) {
-          void staffAuditService.logAction({
-            eventType: "PRICE_CHANGED",
-            module: "product",
-            action: `Price changed for ${productToSave.name} from ${oldProduct.sellingPrice} to ${productToSave.sellingPrice}`,
-            severity: "high",
-            recordType: "product",
-            recordId: productToSave.id,
-            recordName: productToSave.name,
+        if (
+          !isNew &&
+          editingProduct.dateOfAvailability !== productToSave.dateOfAvailability
+        ) {
+          analyticsService.logEvent({
+            eventType: "FARM_PRODUCE_AVAILABILITY_CHANGED",
+            actorType: "admin",
+            actorName: session.staffName,
+            productId: productToSave.id,
+            productName: productToSave.name,
+            vendorId: productToSave.vendorId,
+            vendorName: productToSave.vendorName,
+            details: {
+              oldDate: editingProduct.dateOfAvailability,
+              newDate: productToSave.dateOfAvailability,
+            },
           });
         }
-        if (oldProduct.stockQuantity !== productToSave.stockQuantity) {
-          void staffAuditService.logAction({
-            eventType: "STOCK_CHANGED",
-            module: "product",
-            action: `Stock changed for ${productToSave.name} from ${oldProduct.stockQuantity} to ${productToSave.stockQuantity}`,
-            severity: "warning",
-            recordType: "product",
-            recordId: productToSave.id,
-            recordName: productToSave.name,
-          });
-        }
-      } else {
-        void staffAuditService.logCreate(
-          "product",
-          "product",
-          productToSave.id,
-          productToSave.name,
-          productToSave,
-        );
       }
-    } catch (auditErr) {
-      console.error("Audit log failed", auditErr);
+
+      try {
+        if (oldProduct) {
+          void staffAuditService.logUpdate(
+            "product",
+            "product",
+            productToSave.id,
+            productToSave.name,
+            oldProduct,
+            productToSave,
+          );
+          if (oldProduct.sellingPrice !== productToSave.sellingPrice) {
+            void staffAuditService.logAction({
+              eventType: "PRICE_CHANGED",
+              module: "product",
+              action: `Price changed for ${productToSave.name} from ${oldProduct.sellingPrice} to ${productToSave.sellingPrice}`,
+              severity: "high",
+              recordType: "product",
+              recordId: productToSave.id,
+              recordName: productToSave.name,
+            });
+          }
+          if (oldProduct.stockQuantity !== productToSave.stockQuantity) {
+            void staffAuditService.logAction({
+              eventType: "STOCK_CHANGED",
+              module: "product",
+              action: `Stock changed for ${productToSave.name} from ${oldProduct.stockQuantity} to ${productToSave.stockQuantity}`,
+              severity: "warning",
+              recordType: "product",
+              recordId: productToSave.id,
+              recordName: productToSave.name,
+            });
+          }
+        } else {
+          void staffAuditService.logCreate(
+            "product",
+            "product",
+            productToSave.id,
+            productToSave.name,
+            productToSave,
+          );
+        }
+      } catch (auditErr) {
+        console.error("Audit log failed", auditErr);
+      }
     }
 
     loadData();

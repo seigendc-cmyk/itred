@@ -33,14 +33,23 @@ export const StaffAccessLogs: React.FC = () => {
   const [filterEvent, setFilterEvent] = useState("all");
   const [filterSeverity, setFilterSeverity] = useState("all");
 
-  useEffect(() => {
-    loadLogs();
-  }, []);
-
   const loadLogs = async () => {
     const rawLogs = await staffAuditService.getLogs();
     setLogs(rawLogs);
   };
+
+  useEffect(() => {
+    loadLogs();
+  }, []);
+
+  const uniqueStaff = Array.from(new Set(logs.map((l) => l.staffId))).map(
+    (id) => {
+      const log = logs.find((l) => l.staffId === id);
+      return { id, name: log?.staffName || "Unknown" };
+    },
+  );
+  const uniqueModules = Array.from(new Set(logs.map((l) => l.module)));
+  const uniqueEvents = Array.from(new Set(logs.map((l) => l.eventType)));
 
   const filteredLogs = useMemo(() => {
     return logs.filter((log) => {
@@ -81,15 +90,6 @@ export const StaffAccessLogs: React.FC = () => {
       critical: logs.filter((l) => l.severity === "critical").length,
     };
   }, [logs]);
-
-  const uniqueStaff = Array.from(new Set(logs.map((l) => l.staffId))).map(
-    (id) => {
-      const log = logs.find((l) => l.staffId === id);
-      return { id, name: log?.staffName || "Unknown" };
-    },
-  );
-  const uniqueModules = Array.from(new Set(logs.map((l) => l.module)));
-  const uniqueEvents = Array.from(new Set(logs.map((l) => l.eventType)));
 
   return (
     <div className="space-y-8 pb-20">

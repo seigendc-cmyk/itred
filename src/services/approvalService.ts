@@ -8,6 +8,10 @@ import { getStorageAdapter } from "./storageService.ts";
 import { notificationService } from "./notificationService.ts";
 import { staffAuditService } from "./staffAuditService.ts";
 import { taskService } from "./taskService.ts";
+import { vendorService } from "./vendorService.ts";
+import { productService } from "./productService.ts";
+import { catalogueService } from "./catalogueService.ts";
+import { rpnService } from "./rpnService.ts";
 
 const STORAGE_KEY = "itred_approval_requests";
 
@@ -107,6 +111,49 @@ export const approvalService = {
       req.reviewedByName = managerName;
       req.managerComment = comment;
       await getStorageAdapter().setItem(STORAGE_KEY, all);
+
+      try {
+        if (
+          req.requestType === "vendor_create" ||
+          req.requestType === "vendor_update"
+        ) {
+          if (req.afterSnapshot) {
+            const v = { ...req.afterSnapshot };
+            if (v.status === "pending_review") v.status = "active";
+            await vendorService.updateVendor(v);
+          }
+        } else if (
+          req.requestType === "product_create" ||
+          req.requestType === "product_update"
+        ) {
+          if (req.afterSnapshot) {
+            const p = { ...req.afterSnapshot };
+            if (p.status === "pending_review") p.status = "active";
+            await productService.saveProduct(p);
+          }
+        } else if (req.requestType === "catalogue_deploy") {
+          await catalogueService.markAsDeployed(req.recordId);
+        } else if (req.requestType === "rpn_agent_update") {
+          if (req.afterSnapshot) {
+            await rpnService.update(req.afterSnapshot);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to apply approved snapshot", err);
+      }
+
+      try {
+        const notifs = await notificationService.getAll();
+        const relatedNotif = notifs.find(
+          (n) =>
+            n.recordType === "approval_request" &&
+            n.recordId === req.id &&
+            n.status === "unread",
+        );
+        if (relatedNotif) {
+          await notificationService.markAsResolved(relatedNotif.id);
+        }
+      } catch (err) {}
 
       await notificationService.createNotification({
         title: "Approval Granted",

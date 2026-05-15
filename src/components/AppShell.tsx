@@ -201,6 +201,21 @@ export const AppShell: React.FC<AppShellProps> = ({
   >([]);
   const [sessionIgnored, setSessionIgnored] = useState<Set<string>>(new Set());
 
+  const openAlertsCount = notifications.filter(
+    (n) =>
+      n.status === "unread" &&
+      (n.priority === "critical" ||
+        n.priority === "high" ||
+        n.priority === "medium"),
+  ).length;
+
+  const criticalAlert = notifications.find(
+    (n) =>
+      n.status === "unread" &&
+      (n.priority === "critical" || n.priority === "high") &&
+      !sessionIgnored.has(n.id),
+  );
+
   useEffect(() => {
     const loadNotifs = async () =>
       setNotifications(await notificationService.getAll());
@@ -275,21 +290,6 @@ export const AppShell: React.FC<AppShellProps> = ({
     onNavigate(route);
     setIsMobileMenuOpen(false);
   };
-
-  const openAlertsCount = notifications.filter(
-    (n) =>
-      n.status === "unread" &&
-      (n.priority === "critical" ||
-        n.priority === "high" ||
-        n.priority === "medium"),
-  ).length;
-
-  const criticalAlert = notifications.find(
-    (n) =>
-      n.status === "unread" &&
-      (n.priority === "critical" || n.priority === "high") &&
-      !sessionIgnored.has(n.id),
-  );
 
   return (
     <div className="min-h-screen bg-white flex flex-col md:flex-row">
