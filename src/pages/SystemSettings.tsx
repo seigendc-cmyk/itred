@@ -13,7 +13,7 @@ import {
 } from "../components/CommonUI.tsx";
 import { settingsService } from "../services/settingsService.ts";
 import { SystemSettings as SystemSettingsType } from "../types.ts";
-import { optimizeImageToWebP } from "../utils/imageOptimizer.ts";
+import { optimizeImageToWebP } from "../utils/imageUtils.ts";
 import { Upload, Trash2, Plus } from "lucide-react";
 import { staffAuditService } from "../services/staffAuditService.ts";
 import { permissionService } from "../services/permissionService.ts";

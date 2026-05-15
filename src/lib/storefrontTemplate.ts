@@ -490,8 +490,8 @@ export const generateVendorStorefrontHtml = (
     const ITRED_EVENTS_KEY = 'itred_offline_commerce_events';
     const ITRED_LEADS_KEY = 'itred_pending_leads';
     const ITRED_SESSION_KEY = 'itred_device_session_id';
-    const FEEDBACK_WA = ${JSON.stringify(feedbackWhatsAppNumber || "")};
-    const SYNC_ENDPOINT = ${JSON.stringify(syncEndpointUrl || "")};
+    const FEEDBACK_WA = ${JSON.stringify(feedbackWhatsAppNumber || "").replace(/</g, "\\u003c")};
+    const SYNC_ENDPOINT = ${JSON.stringify(syncEndpointUrl || "").replace(/</g, "\\u003c")};
 
     function getFeedbackUrl(encodedText) {
         if (FEEDBACK_WA) {
@@ -802,15 +802,15 @@ export const generateVendorStorefrontHtml = (
         .map(
           (p) => `
         "${p.id}": {
-          name: ${JSON.stringify(p.name || "")},
-          brand: ${JSON.stringify(p.brand || p.category || "")},
+          name: ${JSON.stringify(p.name || "").replace(/</g, "\\u003c")},
+          brand: ${JSON.stringify(p.brand || p.category || "").replace(/</g, "\\u003c")},
           price: ${p.sellingPrice || 0},
           stock: ${p.stockQuantity || 0},
-          img: ${JSON.stringify(normalizeImageUrl(p.imageUrl))},
-          desc: ${JSON.stringify(p.description || "")},
-          sku: ${JSON.stringify(p.sku || p.productCode || "")},
-          branch: ${JSON.stringify(p.branchName || "")},
-          delivery: ${JSON.stringify(p.deliveryAvailable ? "Available" : "Check with vendor")}
+          img: ${JSON.stringify(normalizeImageUrl(p.imageUrl)).replace(/</g, "\\u003c")},
+          desc: ${JSON.stringify(p.description || "").replace(/</g, "\\u003c")},
+          sku: ${JSON.stringify(p.sku || p.productCode || "").replace(/</g, "\\u003c")},
+          branch: ${JSON.stringify(p.branchName || "").replace(/</g, "\\u003c")},
+          delivery: ${JSON.stringify(p.deliveryAvailable ? "Available" : "Check with vendor").replace(/</g, "\\u003c")}
         }
       `,
         )

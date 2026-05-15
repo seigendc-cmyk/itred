@@ -314,15 +314,8 @@ export const ProductManagement: React.FC = () => {
       const oldProduct = safeProducts.find((p) => p.id === editingProduct.id);
       const priceChanged =
         oldProduct && oldProduct.sellingPrice !== editingProduct.sellingPrice;
-      const imageChanged =
-        oldProduct && oldProduct.imageUrl !== editingProduct.imageUrl;
-      const publishChanged =
-        oldProduct &&
-        oldProduct.publishToCatalogue !== editingProduct.publishToCatalogue;
-      const canApprove = permissionService.canApprove("productManagement");
-      const needsApproval =
-        (isNew || priceChanged || imageChanged || publishChanged) &&
-        !canApprove;
+      const canApprove = permissionService.canApprove("product");
+      const needsApproval = !canApprove;
 
       const targetVendor = safeVendors.find(
         (v) => v.id === editingProduct.vendorId,
@@ -367,7 +360,7 @@ export const ProductManagement: React.FC = () => {
           recordName: productToSave.name,
         });
 
-        alert("Product saved as pending review. Approval requested.");
+        alert("Product submitted for approval.");
       } else {
         analyticsService.logEvent({
           eventType: isNew ? "PRODUCT_CREATED" : "PRODUCT_UPDATED",
@@ -636,7 +629,7 @@ export const ProductManagement: React.FC = () => {
   const hasCriticalDuplicate = duplicates.some(
     (d) => d.similarity.level === "exact" || d.similarity.level === "high",
   );
-  const canManagerOverride = permissionService.canApprove("productManagement");
+  const canManagerOverride = permissionService.canApprove("product");
   const isSaveBlocked = hasCriticalDuplicate && !isManagerOverride;
 
   const handleOverrideRequest = async () => {

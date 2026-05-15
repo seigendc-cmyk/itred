@@ -787,9 +787,14 @@ export const generateCatalogueHtml = (
               <h3 class="svy-h3" style="font-size:15px; margin-bottom:8px;">Siyalamukela futhi ku iTred.</h3>
               <p class="svy-p" style="font-size:12px; margin-bottom:24px;">Dingani impahla, xhumanani labathengisi, lisitshele ukuthi ikhathalogu iyalinceda yini.</p>
               <button class="svy-btn" onclick="closeSurvey()">Continue</button>
-              <button class="svy-btn" onclick="triggerHelpfulnessSurvey(true)">Give Feedback</button>
+              <button class="svy-btn welcome-feedback-btn">Give Feedback</button>
             \`;
             showSurveyHtml(html);
+            document.querySelectorAll(".welcome-feedback-btn").forEach(function(btn) {
+              btn.addEventListener("click", function() {
+                triggerHelpfulnessSurvey(true);
+              });
+            });
           }
         }
 
@@ -798,10 +803,10 @@ export const generateCatalogueHtml = (
             safeLocalStorageSet(ITRED_LAST_HELP, Date.now());
             const html = \`
               <h3 class="svy-h3" style="margin-bottom:20px;">Is this catalogue helping you find what you need?</h3>
-              <button class="svy-btn" onclick="submitHelpfulness('Yes, it helped')">Yes, it helped</button>
-              <button class="svy-btn" onclick="submitHelpfulness('Partly helped')">Partly helped</button>
-              <button class="svy-btn" onclick="submitHelpfulness('No, I did not find what I wanted')">No, I did not find what I wanted</button>
-              <button class="svy-btn" onclick="submitHelpfulness('I need assistance')">I need assistance</button>
+              <button class="svy-btn helpfulness-btn" data-answer="Yes, it helped">Yes, it helped</button>
+              <button class="svy-btn helpfulness-btn" data-answer="Partly helped">Partly helped</button>
+              <button class="svy-btn helpfulness-btn" data-answer="No, I did not find what I wanted">No, I did not find what I wanted</button>
+              <button class="svy-btn helpfulness-btn" data-answer="I need assistance">I need assistance</button>
               <div style="margin-top:20px;">
                 <label style="font-size:12px; font-weight:bold; display:block; margin-bottom:6px;">Optional comment:</label>
                 <input type="text" id="helpComment" placeholder="What product/vendor are you looking for?" class="svy-input" />
@@ -809,6 +814,11 @@ export const generateCatalogueHtml = (
               <button class="svy-link" onclick="closeSurvey()">Not Now</button>
             \`;
             showSurveyHtml(html);
+            document.querySelectorAll('.helpfulness-btn').forEach(function(btn) {
+              btn.addEventListener('click', function() {
+                submitHelpfulness(btn.getAttribute('data-answer') || '');
+              });
+            });
           }
         }
 
@@ -819,8 +829,13 @@ export const generateCatalogueHtml = (
           const text = encodeURIComponent("Feedback: " + answer + "\\nComment: " + comment);
           document.getElementById('svyContent').innerHTML = \`
             <h3 class="svy-h3">Thank you for your feedback!</h3>
-            <button class="svy-wa" onclick="window.open(getFeedbackUrl('\${text}'))">Send Feedback to seiGEN Commerce on WhatsApp</button>
+            <button class="svy-wa survey-wa-btn" data-text="\${text}">Send Feedback to seiGEN Commerce on WhatsApp</button>
             <button class="svy-link" onclick="closeSurvey()">Close</button>\`;
+          document.querySelectorAll('.survey-wa-btn').forEach(function(btn) {
+              btn.addEventListener('click', function() {
+                  window.open(getFeedbackUrl(btn.getAttribute('data-text') || ''));
+              });
+          });
         }
 
         function triggerExpirySurvey() {
@@ -828,24 +843,37 @@ export const generateCatalogueHtml = (
             safeLocalStorageSet(ITRED_EXPIRY_SHOWN, "true");
             showSurveyHtml(\`
               <h3 class="svy-h3" style="margin-bottom:20px;">This catalogue is about to expire. Did it help you connect with vendors or products?</h3>
-              <button class="svy-btn" onclick="submitExpiry('Yes')">Yes</button>
-              <button class="svy-btn" onclick="submitExpiry('Partly')">Partly</button>
-              <button class="svy-btn" onclick="submitExpiry('No')">No</button>
-              <button class="svy-btn" onclick="submitExpiry('I need updated catalogue')">I need updated catalogue</button>
+              <button class="svy-btn expiry-btn" data-answer="Yes">Yes</button>
+              <button class="svy-btn expiry-btn" data-answer="Partly">Partly</button>
+              <button class="svy-btn expiry-btn" data-answer="No">No</button>
+              <button class="svy-btn expiry-btn" data-answer="I need updated catalogue">I need updated catalogue</button>
               <button class="svy-link" onclick="closeSurvey()">Not Now</button>\`);
             logOfflineEvent({ eventType: 'EXPIRY_SURVEY_OPENED', sourceType: 'catalogue', payload: { status: 'opened' } });
+            document.querySelectorAll('.expiry-btn').forEach(function(btn) {
+              btn.addEventListener('click', function() {
+                submitExpiry(btn.getAttribute('data-answer') || '');
+              });
+            });
           }
         }
 
         function submitExpiry(answer) {
           logOfflineEvent({ eventType: 'SURVEY_ANSWERED', sourceType: 'catalogue', payload: { survey: 'expiry', answer: answer } });
           const text = encodeURIComponent("Expiry Feedback: " + answer);
-          document.getElementById('svyContent').innerHTML = \`<h3 class="svy-h3">Thank you for your feedback!</h3><button class="svy-wa" onclick="window.open(getFeedbackUrl('\${text}'))">Send Feedback to seiGEN Commerce on WhatsApp</button><button class="svy-link" onclick="closeSurvey()">Close</button>\`;
+          document.getElementById('svyContent').innerHTML = \`<h3 class="svy-h3">Thank you for your feedback!</h3><button class="svy-wa survey-wa-btn" data-text="\${text}">Send Feedback to seiGEN Commerce on WhatsApp</button><button class="svy-link" onclick="closeSurvey()">Close</button>\`;
+          document.querySelectorAll('.survey-wa-btn').forEach(function(btn) {
+              btn.addEventListener('click', function() {
+                  window.open(getFeedbackUrl(btn.getAttribute('data-text') || ''));
+              });
+          });
         }
 
         function triggerNoResultsSurvey() {
           if (canShowPopup('', 0)) {
-            showSurveyHtml(\`<h3 class="svy-h3">We could not find that product.</h3><p class="svy-p" style="margin-bottom:20px;">Do you want seiGEN Commerce to help source it?</p><input type="text" id="nrProduct" placeholder="Product needed" class="svy-input" /><input type="text" id="nrLocation" placeholder="Location" class="svy-input" /><input type="text" id="nrBudget" placeholder="Budget (optional)" class="svy-input" /><input type="text" id="nrContact" placeholder="Contact (optional)" class="svy-input" /><button class="svy-btn" style="background:#111; color:#fff; text-align:center; margin-top:8px;" onclick="submitNoResults()">Submit Sourcing Request</button><button class="svy-link" onclick="closeSurvey()">Not Now</button>\`);
+            showSurveyHtml(\`<h3 class="svy-h3">We could not find that product.</h3><p class="svy-p" style="margin-bottom:20px;">Do you want seiGEN Commerce to help source it?</p><input type="text" id="nrProduct" placeholder="Product needed" class="svy-input" /><input type="text" id="nrLocation" placeholder="Location" class="svy-input" /><input type="text" id="nrBudget" placeholder="Budget (optional)" class="svy-input" /><input type="text" id="nrContact" placeholder="Contact (optional)" class="svy-input" /><button class="svy-btn nr-submit-btn" style="background:#111; color:#fff; text-align:center; margin-top:8px;">Submit Sourcing Request</button><button class="svy-link" onclick="closeSurvey()">Not Now</button>\`);
+            document.querySelectorAll('.nr-submit-btn').forEach(function(btn) {
+              btn.addEventListener('click', submitNoResults);
+            });
           }
         }
 
@@ -855,7 +883,12 @@ export const generateCatalogueHtml = (
           if (!product || !location) { alert('Please provide product and location'); return; }
           logOfflineEvent({ eventType: 'LEAD_FOLLOWUP_ANSWERED', sourceType: 'catalogue', payload: { survey: 'sourcing_request', product: product, location: location, budget: document.getElementById('nrBudget') ? document.getElementById('nrBudget').value : '', contact: document.getElementById('nrContact') ? document.getElementById('nrContact').value : '' } });
           const text = encodeURIComponent("Sourcing Request\\nProduct: " + product + "\\nLocation: " + location + "\\nBudget: " + (document.getElementById('nrBudget') ? document.getElementById('nrBudget').value : '') + "\\nContact: " + (document.getElementById('nrContact') ? document.getElementById('nrContact').value : ''));
-          document.getElementById('svyContent').innerHTML = \`<h3 class="svy-h3">Request Prepared!</h3><button class="svy-wa" onclick="window.open(getFeedbackUrl('\${text}'))">Send Request to seiGEN Commerce on WhatsApp</button><button class="svy-link" onclick="closeSurvey()">Close</button>\`;
+          document.getElementById('svyContent').innerHTML = \`<h3 class="svy-h3">Request Prepared!</h3><button class="svy-wa survey-wa-btn" data-text="\${text}">Send Request to seiGEN Commerce on WhatsApp</button><button class="svy-link" onclick="closeSurvey()">Close</button>\`;
+          document.querySelectorAll('.survey-wa-btn').forEach(function(btn) {
+              btn.addEventListener('click', function() {
+                  window.open(getFeedbackUrl(btn.getAttribute('data-text') || ''));
+              });
+          });
         }
 
         function checkExpiry() {
@@ -885,17 +918,25 @@ export const generateCatalogueHtml = (
           const html = 
             '<h3 class="svy-h3" style="margin-bottom:20px;">Were you helped by the vendor?</h3>' +
             '<p class="svy-p" style="margin-bottom:12px;">Regarding: <strong>' + escapeHtml(lead.productName) + '</strong> from <strong>' + escapeHtml(lead.vendorName) + '</strong></p>' +
-            '<button class="svy-btn" onclick="submitLeadFollowUp(\\'' + lead.leadRef + '\\', \\'Yes, I was helped\\')">Yes, I was helped</button>' +
-            '<button class="svy-btn" onclick="submitLeadFollowUp(\\'' + lead.leadRef + '\\', \\'Vendor did not respond\\')">Vendor did not respond</button>' +
-            '<button class="svy-btn" onclick="submitLeadFollowUp(\\'' + lead.leadRef + '\\', \\'Product was unavailable\\')">Product was unavailable</button>' +
-            '<button class="svy-btn" onclick="submitLeadFollowUp(\\'' + lead.leadRef + '\\', \\'Price was different\\')">Price was different</button>' +
-            '<button class="svy-btn" onclick="submitLeadFollowUp(\\'' + lead.leadRef + '\\', \\'I still need help\\')">I still need help</button>' +
+            '<button class="svy-btn lead-followup-btn" data-lead-ref="' + escapeHtml(lead.leadRef) + '" data-answer="Yes, I was helped">Yes, I was helped</button>' +
+            '<button class="svy-btn lead-followup-btn" data-lead-ref="' + escapeHtml(lead.leadRef) + '" data-answer="Vendor did not respond">Vendor did not respond</button>' +
+            '<button class="svy-btn lead-followup-btn" data-lead-ref="' + escapeHtml(lead.leadRef) + '" data-answer="Product was unavailable">Product was unavailable</button>' +
+            '<button class="svy-btn lead-followup-btn" data-lead-ref="' + escapeHtml(lead.leadRef) + '" data-answer="Price was different">Price was different</button>' +
+            '<button class="svy-btn lead-followup-btn" data-lead-ref="' + escapeHtml(lead.leadRef) + '" data-answer="I still need help">I still need help</button>' +
             '<div style="margin-top:20px;">' +
               '<label style="font-size:12px; font-weight:bold; display:block; margin-bottom:6px;">Optional comment:</label>' +
               '<input type="text" id="leadComment" placeholder="Any additional details?" class="svy-input" />' +
             '</div>' +
             '<button class="svy-link" onclick="closeSurvey()">Not Now</button>';
           showSurveyHtml(html);
+          document.querySelectorAll(".lead-followup-btn").forEach(function(btn) {
+            btn.addEventListener("click", function() {
+              submitLeadFollowUp(
+                btn.getAttribute("data-lead-ref") || "",
+                btn.getAttribute("data-answer") || ""
+              );
+            });
+          });
         }
 
         function submitLeadFollowUp(leadRef, answer) {
@@ -925,8 +966,13 @@ export const generateCatalogueHtml = (
 
           document.getElementById('svyContent').innerHTML = 
             '<h3 class="svy-h3">Thank you for your feedback!</h3>' +
-            '<button class="svy-wa" onclick="window.open(getFeedbackUrl(\\'' + encodedText + '\\'))">Send Feedback to seiGEN Commerce</button>' +
+            '<button class="svy-wa survey-wa-btn" data-text="' + encodedText + '">Send Feedback to seiGEN Commerce</button>' +
             '<button class="svy-link" onclick="closeSurvey()">Close</button>';
+          document.querySelectorAll('.survey-wa-btn').forEach(function(btn) {
+              btn.addEventListener('click', function() {
+                  window.open(getFeedbackUrl(btn.getAttribute('data-text') || ''));
+              });
+          });
         }
         // --- End Commerce Intelligence Core ---
 
@@ -1018,6 +1064,14 @@ export const generateCatalogueHtml = (
             return true;
         }
 
+        function bindHubEvents() {
+            document.querySelectorAll(".hub-link").forEach(function(link) {
+                link.addEventListener("click", function() {
+                    logHubClick(link.getAttribute("data-link-id"));
+                });
+            });
+        }
+
         function renderHub() {
             const grid = document.getElementById('hubGrid');
             if(cahLinks.length === 0) {
@@ -1047,7 +1101,7 @@ export const generateCatalogueHtml = (
                 const hasAdditional = Array.isArray(l.additionalWhatsappGroups) && l.additionalWhatsappGroups.length > 0;
                 
                 let cardHtml = '<div>';
-                cardHtml += '<a href="' + href + '" class="hub-link" target="_blank" onclick="logHubClick(\''+l.id+'\')" style="' + (hasAdditional ? 'margin-bottom:0; border-bottom:none;' : 'margin-bottom:12px;') + '">' +
+                cardHtml += '<a href="' + href + '" class="hub-link" target="_blank" data-link-id="' + escapeHtml(l.id) + '" style="' + (hasAdditional ? 'margin-bottom:0; border-bottom:none;' : 'margin-bottom:12px;') + '">' +
                        '<div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px;">' +
                            '<div class="hub-type">' + typeLabel + '</div>' +
                            '<div style="font-size:8px; font-weight:900; color:#888; text-transform:uppercase;">' + metaText + '</div>' +
@@ -1079,6 +1133,7 @@ export const generateCatalogueHtml = (
             }
 
             grid.innerHTML = htmlString;
+            bindHubEvents();
         }
 
         function renderVendors() {
@@ -1207,6 +1262,14 @@ export const generateCatalogueHtml = (
 
         window.addEventListener("online", syncOfflineEvents);
 
+        function bindProductEvents() {
+            document.querySelectorAll(".product-card").forEach(function(card) {
+                card.addEventListener("click", function() {
+                    openProduct(card.getAttribute("data-product-id"));
+                });
+            });
+        }
+
         function renderProducts() {
             const grid = document.getElementById('productGrid');
             const stats = document.getElementById('searchStats');
@@ -1260,7 +1323,7 @@ export const generateCatalogueHtml = (
                 const location = (branch ? branch.cityTown : null) || (vendor ? vendor.cityTown : null) || p.branchName || 'Various';
                 const vendorName = (vendor ? vendor.name : null) || p.vendorName || 'Vendor';
                 
-                return "<div class=\\"card\\" onclick=\\"openProduct('" + p.id + "')\\">" +
+                return "<div class=\\"card product-card\\" data-product-id=\\"" + escapeHtml(p.id) + "\\">" +
                         "<div class=\\"card-img-wrap\\">" +
                             (p.imageUrl ? "<img src=\\"" + p.imageUrl + "\\" class=\\"card-img\\" loading=\\"lazy\\" onerror=\\"this.style.display='none'\\">" : "<span style=\\"font-size:8px; font-weight:900; color:#ccc;\\">NO IMG</span>") +
                         "</div>" +
@@ -1275,6 +1338,7 @@ export const generateCatalogueHtml = (
                         "</div>" +
                     "</div>";
             }).join('');
+            bindProductEvents();
         }
 
         function logWaClick(productId) {
@@ -1409,12 +1473,24 @@ export const generateCatalogueHtml = (
             const msg = encodeURIComponent("Hi " + vendorName + ", I saw this product on iTred.\\n\\nProduct: " + p.name + "\\nPrice: USD " + (p.sellingPrice||0).toFixed(2) + "\\nRef: " + leadRef + "\\n\\nPlease confirm availability.");
             
             if(wa) {
-                actions += "<a href=\\"https://wa.me/" + wa.replace(/[^0-9]/g, '') + "?text=" + msg + "\\" class=\\"c-btn wa\\" target=\\"_blank\\" onclick=\\"logWaClick('" + p.id + "')\\">Order on WhatsApp</a>";
+                actions += "<a href=\\"https://wa.me/" + wa.replace(/[^0-9]/g, '') + "?text=" + msg + "\\" class=\\"c-btn wa product-wa-link\\" target=\\"_blank\\" data-product-id=\\"" + escapeHtml(p.id) + "\\">Order on WhatsApp</a>";
             }
             if(phone) {
-                actions += "<a href=\\"tel:" + phone + "\\" class=\\"c-btn\\" target=\\"_blank\\" onclick=\\"logCallClick('" + p.id + "')\\">Call Procurement</a>";
+                actions += "<a href=\\"tel:" + phone + "\\" class=\\"c-btn product-call-link\\" target=\\"_blank\\" data-product-id=\\"" + escapeHtml(p.id) + "\\">Call Procurement</a>";
             }
             document.getElementById('m-actions').innerHTML = actions;
+
+            document.querySelectorAll(".product-wa-link").forEach(function(btn) {
+                btn.addEventListener("click", function() {
+                    logWaClick(btn.getAttribute("data-product-id"));
+                });
+            });
+
+            document.querySelectorAll(".product-call-link").forEach(function(btn) {
+                btn.addEventListener("click", function() {
+                    logCallClick(btn.getAttribute("data-product-id"));
+                });
+            });
 
             productModal.style.display = 'flex';
             document.body.style.overflow = 'hidden';

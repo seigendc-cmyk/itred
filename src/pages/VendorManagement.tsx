@@ -359,10 +359,9 @@ export const VendorManagement: React.FC = () => {
     const session = sessionStr
       ? JSON.parse(sessionStr)
       : { staffId: "STAFF-ADM", staffName: "System Admin" };
-    const canPublish =
-      permissionService.canPublish("vendorManagement") ||
-      permissionService.canApprove("vendorManagement");
+    const canApprove = permissionService.canApprove("vendor");
     const isNew = !selectedVendor;
+    const needsApproval = !canApprove;
 
     setIsSaving(true);
     const oldVendor = vendors.find(
@@ -377,13 +376,13 @@ export const VendorManagement: React.FC = () => {
         updatedBy: session.staffId,
       } as Vendor;
 
-      if (!canPublish) {
+      if (needsApproval) {
         vendorToSave.status = "pending_review";
       }
 
       await vendorService.updateVendor(vendorToSave);
 
-      if (!canPublish) {
+      if (needsApproval) {
         await approvalService.submitApprovalRequest({
           requestType: isNew ? "vendor_create" : "vendor_update",
           recordType: "vendor",
@@ -406,7 +405,7 @@ export const VendorManagement: React.FC = () => {
           recordName: vendorToSave.name,
         });
 
-        setFormSuccess("Vendor saved as pending. Approval requested.");
+        alert("Vendor submitted for approval.");
       } else {
         analyticsService.logEvent({
           eventType: isNew ? "VENDOR_CREATED" : "VENDOR_UPDATED",
@@ -468,8 +467,10 @@ export const VendorManagement: React.FC = () => {
       }
 
       await loadData();
-      if (canPublish) alert("Saved successfully");
-      setTimeout(() => setView("list"), 1500);
+      if (!needsApproval) {
+        alert("Saved successfully");
+      }
+      setView("list");
     } catch (error) {
       console.error("Save vendor error:", error);
       alert(error instanceof Error ? error.message : "Save failed");
@@ -642,7 +643,7 @@ export const VendorManagement: React.FC = () => {
   const hasCriticalDuplicate = duplicates.some(
     (d) => d.similarity.level === "exact" || d.similarity.level === "high",
   );
-  const canManagerOverride = permissionService.canApprove("vendorManagement");
+  const canManagerOverride = permissionService.canApprove("vendor");
   const isSaveBlocked = hasCriticalDuplicate && !isManagerOverride;
 
   const handleOverrideRequest = async () => {
