@@ -347,11 +347,13 @@ export const generateCatalogueHtml = (
             position: fixed; bottom: 0; left: 0; right: 0; height: 60px;
             background: #fff; display: flex; border-top: 1px solid #eee; z-index: 1000;
             max-width: 480px; margin: 0 auto;
+            overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; scrollbar-width: none;
         }
+        .bottom-nav::-webkit-scrollbar { display: none; }
         .nav-item {
-            flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+            flex: 1 0 auto; display: flex; flex-direction: column; align-items: center; justify-content: center;
             font-size: 9px; font-weight: 900; color: #888; text-transform: uppercase; background: none; border: none;
-            cursor: pointer; transition: 0.2s;
+            cursor: pointer; transition: 0.2s; padding: 0 16px;
         }
         .nav-item.active { color: var(--brand-orange); border-top: 2px solid var(--brand-orange); background: #fffaf5; }
 
@@ -499,6 +501,18 @@ export const generateCatalogueHtml = (
                 <div id="hubGrid"></div>
             </div>
 
+            <!-- BRANCHES TAB -->
+            <div id="tab-branches" class="tab-content">
+                <h2 style="font-size: 16px; font-weight: 900; text-transform: uppercase; margin-bottom: 16px;">Branch Directory</h2>
+                <div id="branchGrid"></div>
+            </div>
+
+            <!-- STAFF TAB -->
+            <div id="tab-staff" class="tab-content">
+                <h2 style="font-size: 16px; font-weight: 900; text-transform: uppercase; margin-bottom: 16px;">Staff Directory</h2>
+                <div id="staffGrid"></div>
+            </div>
+
             <!-- TRADE TERMS TAB -->
             <div id="tab-terms" class="tab-content" style="font-size: 12px; line-height: 1.6;">
                 <h2 style="font-size: 16px; font-weight: 900; text-transform: uppercase; margin-bottom: 16px;">Trade Terms</h2>
@@ -528,6 +542,8 @@ export const generateCatalogueHtml = (
             <button class="nav-item active" data-target="tab-products">Products</button>
             <button class="nav-item" data-target="tab-vendors">Vendors</button>
             <button class="nav-item" data-target="tab-hub">Hub</button>
+            <button class="nav-item" data-target="tab-branches">Branches</button>
+            <button class="nav-item" data-target="tab-staff">Staff</button>
             <button class="nav-item" data-target="tab-terms">Terms</button>
         </nav>
     </div>
@@ -622,8 +638,8 @@ export const generateCatalogueHtml = (
         const ITRED_EVENTS_KEY = 'itred_offline_commerce_events';
         const ITRED_LEADS_KEY = 'itred_pending_leads';
         const ITRED_SESSION_KEY = 'itred_device_session_id';
-        const FEEDBACK_WA = ${JSON.stringify(metadata.feedbackWhatsAppNumber || "")};
-        const SYNC_ENDPOINT = ${JSON.stringify(metadata.syncEndpointUrl || "")};
+        const FEEDBACK_WA = ${JSON.stringify(metadata.feedbackWhatsAppNumber || "").replace(/</g, "\\u003c")};
+        const SYNC_ENDPOINT = ${JSON.stringify(metadata.syncEndpointUrl || "").replace(/</g, "\\u003c")};
 
         function getFeedbackUrl(encodedText) {
             if (FEEDBACK_WA) {
@@ -661,13 +677,12 @@ export const generateCatalogueHtml = (
         function logOfflineEvent(event) {
           try {
             const events = JSON.parse(safeLocalStorageGet(ITRED_EVENTS_KEY) || '[]');
-            const newEvent = {
-              ...event,
-              eventId: 'EVT-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9),
-              timestamp: new Date().toISOString(),
-              synced: false,
-              deviceSessionId: getDeviceSessionId(),
-            };
+            const newEvent = Object.assign({}, event, {
+                eventId: 'EVT-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9),
+                timestamp: new Date().toISOString(),
+                synced: false,
+                deviceSessionId: getDeviceSessionId()
+            });
             events.push(newEvent);
             safeLocalStorageSet(ITRED_EVENTS_KEY, JSON.stringify(events));
           } catch(e) { console.warn('Failed to log event', e); }
@@ -915,7 +930,7 @@ export const generateCatalogueHtml = (
         }
         // --- End Commerce Intelligence Core ---
 
-        const db = ${JSON.stringify(jsonData)};
+        const db = ${JSON.stringify(jsonData).replace(/</g, "\\u003c")};
         const CATALOGUE_ID = db.metadata.serialNumber;
         const SECTOR = db.metadata.sector;
         const CATEGORY = db.metadata.category;
@@ -925,10 +940,10 @@ export const generateCatalogueHtml = (
         const cahLinks = Array.isArray(db.cahLinks) ? db.cahLinks : [];
 
         // Tab Navigation
-        document.querySelectorAll('.nav-item').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
-                document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.nav-item').forEach(function(btn) {
+            btn.addEventListener('click', function(e) {
+                document.querySelectorAll('.nav-item').forEach(function(b) { b.classList.remove('active'); });
+                document.querySelectorAll('.tab-content').forEach(function(t) { t.classList.remove('active'); });
                 e.currentTarget.classList.add('active');
                 document.getElementById(e.currentTarget.dataset.target).classList.add('active');
                 
@@ -947,14 +962,14 @@ export const generateCatalogueHtml = (
             productModal.style.display = 'none';
             document.body.style.overflow = '';
         }
-        productModal.addEventListener('click', e => {
+        productModal.addEventListener('click', function(e) {
             if(e.target === productModal) closeModal();
         });
 
-        function getVendor(id) { return vendors.find(v => v.id === id); }
+        function getVendor(id) { return vendors.find(function(v) { return v.id === id; }); }
         function getBranch(vendor, id) { 
             const branches = vendor && Array.isArray(vendor.branches) ? vendor.branches : [];
-            return branches.find(b => b.id === id); 
+            return branches.find(function(b) { return b.id === id; }); 
         }
 
         function getHubUrl(l) {
@@ -989,7 +1004,7 @@ export const generateCatalogueHtml = (
         }
 
         function logHubClick(linkId) {
-            const link = cahLinks.find(l => l.id === linkId);
+            const link = cahLinks.find(function(l) { return l.id === linkId; });
             if (!link) return;
             logOfflineEvent({
                 eventType: 'HUB_LINK_CLICKED',
@@ -1006,13 +1021,13 @@ export const generateCatalogueHtml = (
         function renderHub() {
             const grid = document.getElementById('hubGrid');
             if(cahLinks.length === 0) {
-                grid.innerHTML = '<div style="padding:40px 20px; text-align:center; font-weight:900; color:#ccc; font-size:12px;">NO SECTOR WHATSAPP GROUPS WERE INCLUDED IN THIS CATALOGUE</div>';
+                grid.innerHTML = '<div style="padding:40px 20px; text-align:center; font-weight:900; color:#ccc; font-size:12px; text-transform:uppercase;">NO SECTOR WHATSAPP GROUPS WERE INCLUDED IN THIS CATALOGUE</div>';
                 return;
             }
 
-            const sortedLinks = [...cahLinks].sort((a,b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+            const sortedLinks = [...cahLinks].sort(function(a,b) { return (a.sortOrder || 0) - (b.sortOrder || 0); });
 
-            let htmlString = sortedLinks.map(l => {
+            let htmlString = sortedLinks.map(function(l) {
                 const rawUrl = getHubUrl(l);
                 const href = normalizeWhatsappHref(rawUrl);
                 
@@ -1068,15 +1083,74 @@ export const generateCatalogueHtml = (
 
         function renderVendors() {
             const grid = document.getElementById('vendorGrid');
-            grid.innerHTML = vendors.map(v => 
-                "<div class=\\"vendor-card\\">" +
+            grid.innerHTML = vendors.map(function(v) { 
+                return "<div class=\\"vendor-card\\">" +
                     "<div class=\\"vendor-score\\">" + escapeHtml(v.trustTier) + " (" + v.trustScore + "/100)</div>" +
                     "<div style=\\"font-size: 16px; font-weight: 900; margin-bottom: 4px;\\">" + escapeHtml(v.name) + "</div>" +
                     "<div style=\\"font-size: 12px; color: #666; margin-bottom: 8px;\\">" + escapeHtml(v.cityTown) + " • " + escapeHtml(v.sector) + "</div>" +
                     (v.businessDescription ? "<p style=\\"font-size:12px; margin-bottom:12px;\\">" + escapeHtml(v.businessDescription) + "</p>" : "") +
                     (v.whatsappNumber ? "<a href=\\"https://wa.me/" + v.whatsappNumber + "\\" class=\\"c-btn wa\\" target=\\"_blank\\">WhatsApp Vendor</a>" : "") +
-                "</div>"
-            ).join('');
+                "</div>";
+            }).join('');
+        }
+
+        function renderBranchesDirectory() {
+            const grid = document.getElementById('branchGrid');
+            let hasBranches = false;
+            let html = '';
+            
+            vendors.forEach(function(v) {
+                if (v.branches && v.branches.length > 0) {
+                    hasBranches = true;
+                    v.branches.forEach(function(b) {
+                        html += "<div class=\\"vendor-card\\">" +
+                            "<div style=\\"font-size: 10px; font-weight: 900; color: var(--brand-orange); text-transform: uppercase; margin-bottom: 4px;\\">" + escapeHtml(v.name) + "</div>" +
+                            "<div style=\\"font-size: 14px; font-weight: 800; margin-bottom: 6px;\\">" + escapeHtml(b.name) + "</div>" +
+                            "<div style=\\"font-size: 12px; color: #666; margin-bottom: 4px;\\">" + escapeHtml(b.address) + (b.cityTown ? ", " + escapeHtml(b.cityTown) : "") + "</div>" +
+                            "<div style=\\"font-size: 12px; font-weight: 700; margin-bottom: 12px;\\">" + (b.phone ? "Phone: " + escapeHtml(b.phone) : "") + "</div>" +
+                            "<div style=\\"display: flex; gap: 8px;\\">" +
+                            (b.phone ? "<a href=\\"tel:" + b.phone.replace(/[^0-9+]/g, '') + "\\" class=\\"c-btn\\" style=\\"margin-top:0;\\">Call</a>" : "") +
+                            (b.whatsapp ? "<a href=\\"https://wa.me/" + b.whatsapp.replace(/[^0-9]/g, '') + "\\" class=\\"c-btn wa\\" target=\\"_blank\\" style=\\"margin-top:0;\\">WhatsApp</a>" : "") +
+                            "</div>" +
+                        "</div>";
+                    });
+                }
+            });
+
+            if (!hasBranches) {
+                grid.innerHTML = '<div style="padding:40px 20px; text-align:center; font-weight:900; color:#ccc; font-size:12px; text-transform:uppercase;">NO BRANCH DIRECTORY WAS INCLUDED IN THIS CATALOGUE</div>';
+            } else {
+                grid.innerHTML = html;
+            }
+        }
+
+        function renderStaffDirectory() {
+            const grid = document.getElementById('staffGrid');
+            let hasStaff = false;
+            let html = '';
+            
+            vendors.forEach(function(v) {
+                if (v.staff && v.staff.length > 0) {
+                    hasStaff = true;
+                    html += '<h3 style="font-size: 12px; font-weight: 900; color: var(--brand-charcoal); text-transform: uppercase; margin: 16px 0 8px; border-bottom: 1px solid #eee; padding-bottom: 4px;">' + escapeHtml(v.name) + '</h3>';
+                    v.staff.forEach(function(s) {
+                        html += "<div class=\\"vendor-card\\" style=\\"margin-bottom: 8px; padding: 12px;\\">" +
+                            "<div style=\\"font-size: 14px; font-weight: 800; margin-bottom: 4px;\\">" + escapeHtml(s.fullName) + "</div>" +
+                            "<div style=\\"font-size: 10px; font-weight: 900; color: #888; text-transform: uppercase; margin-bottom: 12px;\\">" + escapeHtml(s.role) + "</div>" +
+                            "<div style=\\"display: flex; gap: 8px;\\">" +
+                            (s.phone ? "<a href=\\"tel:" + s.phone.replace(/[^0-9+]/g, '') + "\\" class=\\"c-btn\\" style=\\"margin-top:0;\\">Call</a>" : "") +
+                            (s.whatsapp ? "<a href=\\"https://wa.me/" + s.whatsapp.replace(/[^0-9]/g, '') + "\\" class=\\"c-btn wa\\" target=\\"_blank\\" style=\\"margin-top:0;\\">WhatsApp</a>" : "") +
+                            "</div>" +
+                        "</div>";
+                    });
+                }
+            });
+
+            if (!hasStaff) {
+                grid.innerHTML = '<div style="padding:40px 20px; text-align:center; font-weight:900; color:#ccc; font-size:12px; text-transform:uppercase;">NO STAFF DIRECTORY WAS INCLUDED IN THIS CATALOGUE</div>';
+            } else {
+                grid.innerHTML = html;
+            }
         }
 
         function rankProduct(p, tokens) {
@@ -1086,15 +1160,15 @@ export const generateCatalogueHtml = (
 
             const searchBlob = [
                 p.name, p.sku, p.category, p.description,
-                vendor?.name, vendor?.tradingName, vendor?.sector, vendor?.cityTown, vendor?.province,
-                branch?.name, branch?.cityTown, branch?.address,
-                p.tags?.join(' ')
+                vendor ? vendor.name : '', vendor ? vendor.tradingName : '', vendor ? vendor.sector : '', vendor ? vendor.cityTown : '', vendor ? vendor.province : '',
+                branch ? branch.name : '', branch ? branch.cityTown : '', branch ? branch.address : '',
+                p.tags ? p.tags.join(' ') : ''
             ].join(' ').toLowerCase();
 
             if (tokens.some(function(t) { return searchBlob === t; })) score += 100; // Exact match somewhere
             if (tokens.some(function(t) { return (p.name || '').toLowerCase().includes(t); })) score += 50;
             if (tokens.some(function(t) { return (p.category || '').toLowerCase().includes(t); })) score += 30;
-            if (tokens.some(function(t) { return (branch?.cityTown || vendor?.cityTown || '').toLowerCase().includes(t); })) score += 20;
+            if (tokens.some(function(t) { return ((branch ? branch.cityTown : '') || (vendor ? vendor.cityTown : '') || '').toLowerCase().includes(t); })) score += 20;
             
             if (vendor) score += (vendor.trustScore / 10);
             if (p.stockQuantity > 0) score += 10;
@@ -1105,8 +1179,10 @@ export const generateCatalogueHtml = (
 
         let searchTimeout;
         let lastQuery = '';
-        const debouncedSearchLog = () => {
-            const rawQuery = document.getElementById('searchInput').value.toLowerCase().trim();
+        function debouncedSearchLog() {
+            const searchInput = document.getElementById('searchInput');
+            if(!searchInput) return;
+            const rawQuery = searchInput.value.toLowerCase().trim();
             if (rawQuery.length < 2 || rawQuery === lastQuery) return;
             lastQuery = rawQuery;
 
@@ -1127,19 +1203,20 @@ export const generateCatalogueHtml = (
                 catalogueId: CATALOGUE_ID,
                 payload: { query: rawQuery, results: matchCount }
             });
-        };
+        }
 
         window.addEventListener("online", syncOfflineEvents);
 
         function renderProducts() {
             const grid = document.getElementById('productGrid');
             const stats = document.getElementById('searchStats');
-            const rawQuery = document.getElementById('searchInput').value.toLowerCase().trim();
+            const searchInput = document.getElementById('searchInput');
+            const rawQuery = searchInput ? searchInput.value.toLowerCase().trim() : '';
             const tokens = rawQuery ? rawQuery.split(/\\s+/) : [];
 
             if (products.length === 0) {
-                grid.innerHTML = '<div style="padding:40px 20px; text-align:center; font-weight:900; color:#ccc;">NO PRODUCTS WERE INCLUDED IN THIS CATALOGUE</div>';
-                stats.style.display = 'none';
+                grid.innerHTML = '<div style="padding:40px 20px; text-align:center; font-weight:900; color:#ccc; font-size:12px; text-transform:uppercase;">NO PRODUCTS WERE INCLUDED IN THIS CATALOGUE</div>';
+                if (stats) stats.style.display = 'none';
                 return;
             }
 
@@ -1152,9 +1229,9 @@ export const generateCatalogueHtml = (
                     const branch = getBranch(vendor, p.branchId);
                     const searchBlob = [
                         p.name, p.sku, p.category, p.description,
-                        vendor?.name, vendor?.tradingName, vendor?.sector, vendor?.cityTown,
-                        branch?.name, branch?.cityTown, branch?.address,
-                        p.tags?.join(' ')
+                        vendor ? vendor.name : '', vendor ? vendor.tradingName : '', vendor ? vendor.sector : '', vendor ? vendor.cityTown : '',
+                        branch ? branch.name : '', branch ? branch.cityTown : '', branch ? branch.address : '',
+                        p.tags ? p.tags.join(' ') : ''
                     ].join(' ').toLowerCase();
 
                     const matches = tokens.every(function(token) { return searchBlob.includes(token); });
@@ -1164,10 +1241,12 @@ export const generateCatalogueHtml = (
                     return null;
                 }).filter(function(x) { return x; }).sort(function(a,b) { return b.score - a.score; }).map(function(x) { return x.p; });
                 
-                stats.style.display = 'block';
-                stats.textContent = filtered.length + " Results Ranked";
+                if (stats) {
+                    stats.style.display = 'block';
+                    stats.textContent = filtered.length + " Results Ranked";
+                }
             } else {
-                stats.style.display = 'none';
+                if (stats) stats.style.display = 'none';
             }
 
             if(filtered.length === 0) {
@@ -1178,8 +1257,8 @@ export const generateCatalogueHtml = (
             grid.innerHTML = filtered.map(function(p) {
                 const vendor = getVendor(p.vendorId);
                 const branch = getBranch(vendor, p.branchId);
-                const location = branch?.cityTown || vendor?.cityTown || p.branchName || 'Various';
-                const vendorName = vendor?.name || p.vendorName || 'Vendor';
+                const location = (branch ? branch.cityTown : null) || (vendor ? vendor.cityTown : null) || p.branchName || 'Various';
+                const vendorName = (vendor ? vendor.name : null) || p.vendorName || 'Vendor';
                 
                 return "<div class=\\"card\\" onclick=\\"openProduct('" + p.id + "')\\">" +
                         "<div class=\\"card-img-wrap\\">" +
@@ -1199,15 +1278,17 @@ export const generateCatalogueHtml = (
         }
 
         function logWaClick(productId) {
-            const p = products.find(x => x.id === productId);
+            const p = products.find(function(x) { return x.id === productId; });
             if (!p) return;
+
             const vendor = getVendor(p.vendorId);
-            const leadRef = 'ITRED-' + 
+            const leadRef = 'ITRED-' + CATALOGUE_ID + '-' + p.vendorId + '-' + p.id;
+
             storePendingLead({
               leadRef: leadRef,
               timestamp: new Date().toISOString(),
               vendorId: p.vendorId,
-              vendorName: vendor ? vendor.name : p.vendorName,
+              vendorName: (vendor ? vendor.name : null) || p.vendorName,
               productId: p.id,
               productName: p.name,
               catalogueId: CATALOGUE_ID,
@@ -1223,7 +1304,7 @@ export const generateCatalogueHtml = (
                 sourceType: 'catalogue',
                 catalogueId: CATALOGUE_ID,
                 vendorId: p.vendorId,
-                vendorName: vendor ? vendor.name : p.vendorName,
+                vendorName: (vendor ? vendor.name : null) || p.vendorName,
                 productId: p.id,
                 productName: p.name,
                 leadRef: leadRef,
@@ -1232,8 +1313,9 @@ export const generateCatalogueHtml = (
         }
 
         function logCallClick(productId) {
-            const p = products.find(x => x.id === productId);
+            const p = products.find(function(x) { return x.id === productId; });
             if (!p) return;
+
             const vendor = getVendor(p.vendorId);
             const leadRef = 'ITRED-' + CATALOGUE_ID + '-' + p.vendorId + '-' + p.id;
 
@@ -1241,7 +1323,7 @@ export const generateCatalogueHtml = (
               leadRef: leadRef,
               timestamp: new Date().toISOString(),
               vendorId: p.vendorId,
-              vendorName: vendor ? vendor.name : p.vendorName,
+              vendorName: (vendor ? vendor.name : null) || p.vendorName,
               productId: p.id,
               productName: p.name,
               catalogueId: CATALOGUE_ID,
@@ -1257,7 +1339,7 @@ export const generateCatalogueHtml = (
                 sourceType: 'catalogue',
                 catalogueId: CATALOGUE_ID,
                 vendorId: p.vendorId,
-                vendorName: vendor ? vendor.name : p.vendorName,
+                vendorName: (vendor ? vendor.name : null) || p.vendorName,
                 productId: p.id,
                 productName: p.name,
                 leadRef: leadRef,
@@ -1280,7 +1362,7 @@ export const generateCatalogueHtml = (
                 sourceType: 'catalogue',
                 catalogueId: CATALOGUE_ID,
                 vendorId: p.vendorId,
-                vendorName: vendor ? vendor.name : p.vendorName,
+                vendorName: (vendor ? vendor.name : null) || p.vendorName,
                 productId: p.id,
                 productName: p.name,
                 sector: p.sector,
@@ -1293,7 +1375,7 @@ export const generateCatalogueHtml = (
               setTimeout(triggerHelpfulnessSurvey, 2000);
             }
 
-            const vendorName = vendor?.name || p.vendorName || 'Vendor';
+            const vendorName = (vendor ? vendor.name : null) || p.vendorName || 'Vendor';
 
             document.getElementById('m-vendor').textContent = vendorName;
             document.getElementById('m-title').textContent = p.name;
@@ -1306,9 +1388,9 @@ export const generateCatalogueHtml = (
             document.getElementById('m-stock').textContent = p.stockQuantity > 0 ? p.stockQuantity + ' In Stock' : 'Out of Stock';
 
             document.getElementById('mv-name').textContent = vendorName;
-            document.getElementById('mv-score').textContent = vendor?.trustTier ? vendor.trustTier + ' (' + vendor.trustScore + ')' : 'New Vendor';
+            document.getElementById('mv-score').textContent = (vendor && vendor.trustTier) ? vendor.trustTier + ' (' + vendor.trustScore + ')' : 'New Vendor';
             document.getElementById('mv-loc').textContent = vendor ? (vendor.streetAddress || '') + ' ' + (vendor.cityTown || '') + ' ' + (vendor.province || '') : 'N/A';
-            document.getElementById('mv-hours').textContent = vendor?.openingHours || 'Not provided';
+            document.getElementById('mv-hours').textContent = (vendor && vendor.openingHours) ? vendor.openingHours : 'Not provided';
 
             if(branch) {
                 document.getElementById('m-branch').innerHTML = 
@@ -1321,8 +1403,8 @@ export const generateCatalogueHtml = (
 
             // Actions
             let actions = '';
-            const phone = branch?.phone || vendor?.mainPhone;
-            const wa = branch?.whatsapp || vendor?.whatsappNumber;
+            const phone = (branch ? branch.phone : null) || (vendor ? vendor.mainPhone : null);
+            const wa = (branch ? branch.whatsapp : null) || (vendor ? vendor.whatsappNumber : null);
             const leadRef = 'ITRED-' + CATALOGUE_ID + '-' + p.vendorId + '-' + p.id;
             const msg = encodeURIComponent("Hi " + vendorName + ", I saw this product on iTred.\\n\\nProduct: " + p.name + "\\nPrice: USD " + (p.sellingPrice||0).toFixed(2) + "\\nRef: " + leadRef + "\\n\\nPlease confirm availability.");
             
@@ -1341,15 +1423,15 @@ export const generateCatalogueHtml = (
         // Esc html helper
         function escapeHtml(str) {
             if(!str) return '';
-            return String(str).replace(/[&<>'"]/g, 
-                tag => ({
+            return String(str).replace(/[&<>'"]/g, function(tag) {
+                return {
                     '&': '&amp;',
                     '<': '&lt;',
                     '>': '&gt;',
                     "'": '&#39;',
                     '"': '&quot;'
-                }[tag])
-            );
+                }[tag];
+            });
         }
 
         function isChromeLikeBrowser() {
@@ -1387,11 +1469,14 @@ export const generateCatalogueHtml = (
             });
         }
 
-        document.getElementById('searchInput').addEventListener('input', function() {
-            renderProducts();
-            clearTimeout(searchTimeout);
-            searchTimeout = setTimeout(debouncedSearchLog, 900);
-        });
+        const searchInputEl = document.getElementById('searchInput');
+        if(searchInputEl) {
+            searchInputEl.addEventListener('input', function() {
+                renderProducts();
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(debouncedSearchLog, 900);
+            });
+        }
         
         document.addEventListener("DOMContentLoaded", function () {
             try {
@@ -1407,6 +1492,9 @@ export const generateCatalogueHtml = (
                 renderProducts();
                 renderVendors();
                 renderHub();
+                renderStaffDirectory();
+                renderBranchesDirectory();
+                
                 if (typeof initIosGate === "function") initIosGate();
                 if (typeof initBrowserGate === "function") initBrowserGate();
 
@@ -1423,7 +1511,7 @@ export const generateCatalogueHtml = (
                 console.error("Catalogue render failed", error);
                 var grid = document.getElementById("productGrid");
                 if (grid) {
-                    grid.innerHTML = '<div style="padding:40px 20px;text-align:center;font-weight:900;color:#ff6b00;">CATALOGUE RENDER ERROR. CHECK PRODUCT DATA.</div>';
+                    grid.innerHTML = '<div style="padding:40px 20px;text-align:center;font-weight:900;color:#ff6b00;">CATALOGUE RENDER ERROR. CHECK BROWSER CONSOLE.</div>';
                 }
             }
         });
