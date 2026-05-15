@@ -26,6 +26,7 @@ import {
   Layers,
   ArchiveX,
 } from "lucide-react";
+import { staffService } from "../services/staffService.ts";
 
 export const ApprovalQueue: React.FC = () => {
   const [requests, setRequests] = useState<ApprovalRequest[]>([]);
@@ -94,6 +95,19 @@ export const ApprovalQueue: React.FC = () => {
 
     try {
       if (activeModal.type === "approve") {
+        if (activeModal.request.requestType === "staff_delete") {
+          if (
+            !permissionService.hasActionPermission("staff.approveDelete" as any)
+          ) {
+            alert("You do not have permission to approve staff deletions.");
+            return;
+          }
+          if (staffService.isLastActiveSysAdmin(activeModal.request.recordId)) {
+            alert("Cannot approve deletion of the last active SysAdmin.");
+            return;
+          }
+        }
+
         await approvalService.approveRequest(
           activeModal.request.id,
           staffId,

@@ -145,6 +145,12 @@ export type ActionPermissionKey =
   | "staff.editKycDetails"
   | "staff.generateStaffCode"
   | "staff.repairDuplicateCodes"
+  | "staff.suspend"
+  | "staff.reactivate"
+  | "staff.archive"
+  | "staff.requestDelete"
+  | "staff.approveDelete"
+  | "staff.deletePermanent"
   | "roles.viewPermissions"
   | "roles.editPermissions"
   | "roles.createRoleTemplate"
@@ -200,7 +206,10 @@ export interface Staff {
     | "suspended"
     | "passcode_reset_required"
     | "locked"
-    | "archived";
+    | "archived"
+    | "pending_delete"
+    | "archived_deleted"
+    | "deleted";
   passcode: string;
   mustChangePasscode: boolean;
   failedAttemptCount: number;
@@ -243,6 +252,11 @@ export interface Staff {
   actionPermissions?: ActionPermissions;
   createdBy: string;
   updatedBy: string;
+  deleteRequestedAt?: string;
+  deleteRequestedBy?: string;
+  deleteReason?: string;
+  deletedAt?: string;
+  deletedBy?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -620,7 +634,11 @@ export type EventType =
   | "STAFF_LOCKED_AFTER_FAILED_ATTEMPTS"
   | "STAFF_LOGIN_BLOCKED_SUSPENDED"
   | "STAFF_LOGOUT"
-  | "ACCESS_DENIED";
+  | "ACCESS_DENIED"
+  | "STAFF_ARCHIVED"
+  | "STAFF_DELETE_REQUESTED"
+  | "STAFF_DELETE_APPROVED"
+  | "STAFF_DELETE_REJECTED";
 
 export type VendorStorefrontStatus =
   | "draft"
@@ -1226,7 +1244,8 @@ export interface ApprovalRequest {
     | "lead_conversion"
     | "rpn_agent_update"
     | "staff_kyc_update"
-    | "permission_change";
+    | "permission_change"
+    | "staff_delete";
   recordType: string;
   recordId: string;
   recordName?: string;

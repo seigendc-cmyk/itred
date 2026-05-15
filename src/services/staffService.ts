@@ -472,6 +472,16 @@ export const staffService = {
     return getLocalStaff().find((staff) => staff.id === id);
   },
 
+  isLastActiveSysAdmin: (staffId: string): boolean => {
+    const activeAdmins = getLocalStaff().filter(
+      (s) =>
+        (s.role === "SysAdmin" || s.role === "Admin") &&
+        s.status === "active" &&
+        s.id !== staffId,
+    );
+    return activeAdmins.length === 0;
+  },
+
   saveStaff: async (staff: Staff): Promise<void> => {
     const now = new Date().toISOString();
     let staffCode = staff.staffCode;

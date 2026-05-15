@@ -19,6 +19,8 @@ import {
   FileText,
   Download,
   AlertTriangle,
+  Archive,
+  Trash2,
 } from "lucide-react";
 import {
   StatusBadge,
@@ -212,8 +214,17 @@ const ACTION_GROUPS = [
     ],
   },
   {
-    name: "Role & Menu Permissions",
+    name: "Staff & Permissions",
     keys: [
+      "staff.suspend",
+      "staff.reactivate",
+      "staff.archive",
+      "staff.requestDelete",
+      "staff.approveDelete",
+      "staff.deletePermanent",
+      "staff.editKycDetails",
+      "staff.generateStaffCode",
+      "staff.repairDuplicateCodes",
       "roles.viewPermissions",
       "roles.editPermissions",
       "roles.createRoleTemplate",
@@ -364,6 +375,10 @@ export const StaffManagement: React.FC = () => {
   const [isScanningDuplicates, setIsScanningDuplicates] = useState(false);
   const [isRepairingDuplicates, setIsRepairingDuplicates] = useState(false);
 
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [staffToDelete, setStaffToDelete] = useState<Staff | null>(null);
+  const [deleteReason, setDeleteReason] = useState("");
+
   const canRepairDuplicates =
     permissionService.isSysAdmin() ||
     JSON.parse(localStorage.getItem("activeStaffSession") || "{}")
@@ -376,6 +391,7 @@ export const StaffManagement: React.FC = () => {
     setIsPasscodeModalOpen(false);
     setIsApplyRoleModalOpen(false);
     setConfirmConfig(null);
+    setIsDeleteModalOpen(false);
     setPasscodeModalConfig(null);
     setApplyRoleConfig(null);
     setTempPasscode("");
@@ -864,6 +880,22 @@ export const StaffManagement: React.FC = () => {
   };
 
   const triggerAction = (staff: Staff, type: string) => {
+    const activeSessionStr = localStorage.getItem("activeStaffSession");
+    const activeSession = activeSessionStr
+      ? JSON.parse(activeSessionStr)
+      : null;
+
+    if (type === "suspend" || type === "archive") {
+      if (activeSession && activeSession.staffId === staff.id) {
+        alert("You cannot suspend or archive your own active session.");
+        return;
+      }
+      if (staffService.isLastActiveSysAdmin(staff.id)) {
+        alert("At least one active SysAdmin must remain in the system.");
+        return;
+      }
+    }
+
     const configs: Record<string, any> = {
       suspend: {
         title: "Suspend Staff?",
@@ -876,6 +908,12 @@ export const StaffManagement: React.FC = () => {
         variant: "success",
         status: "active",
         eventType: "STAFF_REACTIVATED",
+      },
+      archive: {
+        title: "Archive Staff?",
+        variant: "danger",
+        status: "archived",
+        eventType: "STAFF_ARCHIVED",
       },
       lock: {
         title: "Lock Profile?",
@@ -1718,24 +1756,64 @@ export const StaffManagement: React.FC = () => {
                                 </button>
                               )}
 
-                              {permissionService.canEdit("staffManagement") && (
+                              {permissionService.hasActionPermission(
+                                "staff.suspend" as any,
+                              ) &&
+                                staff.status === "active" && (
+                                  <button
+                                    onClick={() =>
+                                      triggerAction(staff, "suspend")
+                                    }
+                                    className="p-1.5 border border-stone-200 rounded-none hover:bg-stone-100 text-stone-400 hover:text-orange-500"
+                                    title="Suspend Staff"
+                                  >
+                                    <UserX size={12} />
+                                  </button>
+                                )}
+
+                              {permissionService.hasActionPermission(
+                                "staff.reactivate" as any,
+                              ) &&
+                                staff.status === "suspended" && (
+                                  <button
+                                    onClick={() =>
+                                      triggerAction(staff, "reactivate")
+                                    }
+                                    className="p-1.5 border border-stone-200 rounded-none hover:bg-stone-100 text-stone-400 hover:text-green-500"
+                                    title="Reactivate Staff"
+                                  >
+                                    <UserX size={12} />
+                                  </button>
+                                )}
+
+                              {permissionService.hasActionPermission(
+                                "staff.archive" as any,
+                              ) && (
                                 <button
                                   onClick={() =>
-                                    triggerAction(
-                                      staff,
-                                      staff.status === "active"
-                                        ? "suspend"
-                                        : "reactivate",
-                                    )
+                                    triggerAction(staff, "archive")
                                   }
-                                  className="p-1.5 border border-stone-200 rounded-none hover:bg-stone-100"
-                                  title={
-                                    staff.status === "active"
-                                      ? "Suspend Staff"
-                                      : "Reactivate Staff"
-                                  }
+                                  className="p-1.5 border border-stone-200 rounded-none hover:bg-stone-100 text-stone-400 hover:text-brand-orange"
+                                  title="Archive Staff"
                                 >
-                                  <UserX size={12} />
+                                  <Archive size={12} />
+                                </button>
+                              )}
+
+                              {(permissionService.hasActionPermission(
+                                "staff.requestDelete" as any,
+                              ) ||
+                                permissionService.isSysAdmin()) && (
+                                <button
+                                  onClick={() => {
+                                    setStaffToDelete(staff);
+                                    setDeleteReason("");
+                                    setIsDeleteModalOpen(true);
+                                  }}
+                                  className="p-1.5 border border-stone-200 rounded-none hover:bg-stone-100 text-stone-400 hover:text-red-500"
+                                  title="Request Permanent Delete"
+                                >
+                                  <Trash2 size={12} />
                                 </button>
                               )}
 
