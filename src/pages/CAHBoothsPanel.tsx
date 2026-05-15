@@ -98,7 +98,7 @@ export const CAHBoothsPanel: React.FC = () => {
     setIsFormOpen(true);
   };
 
-  const handleSaveBooth = () => {
+  const handleSaveBooth = async () => {
     if (!editingBooth?.name || !editingBooth?.province || !editingBooth?.cityTown) {
       alert('Name, Province and City are required.');
       return;
@@ -110,30 +110,36 @@ export const CAHBoothsPanel: React.FC = () => {
       updatedBy: 'STAFF-ADM',
     } as CAHBooth;
 
-    cahService.saveBooth(boothToSave);
-
-    const isNew = !editingBooth.createdAt;
-    
-    analyticsService.logEvent({
-      eventType: isNew ? 'CAH_BOOTH_CREATED' : 'CAH_BOOTH_UPDATED',
-      actorType: 'admin',
-      actorName: 'System Admin',
-      cahBoothId: boothToSave.id,
-      details: { name: boothToSave.name, code: boothToSave.code }
-    });
-
-    logService.add({
-      userId: 'STAFF-ADM',
-      action: isNew ? 'CAH_BOOTH_CREATED' : 'CAH_BOOTH_UPDATED',
-      entityType: 'cah_booth',
-      entityId: boothToSave.id,
-      details: `CAH Booth "${boothToSave.name}" was ${isNew ? 'created' : 'updated'}.`,
-      severity: 'info'
-    });
-
-    loadData();
-    setIsFormOpen(false);
-    setEditingBooth(null);
+    try {
+      await cahService.saveBooth(boothToSave);
+  
+      const isNew = !editingBooth.createdAt;
+      
+      analyticsService.logEvent({
+        eventType: isNew ? 'CAH_BOOTH_CREATED' : 'CAH_BOOTH_UPDATED',
+        actorType: 'admin',
+        actorName: 'System Admin',
+        cahBoothId: boothToSave.id,
+        details: { name: boothToSave.name, code: boothToSave.code }
+      });
+  
+      logService.add({
+        userId: 'STAFF-ADM',
+        action: isNew ? 'CAH_BOOTH_CREATED' : 'CAH_BOOTH_UPDATED',
+        entityType: 'cah_booth',
+        entityId: boothToSave.id,
+        details: `CAH Booth "${boothToSave.name}" was ${isNew ? 'created' : 'updated'}.`,
+        severity: 'info'
+      });
+  
+      loadData();
+      setIsFormOpen(false);
+      setEditingBooth(null);
+      alert("Saved successfully");
+    } catch (error: any) {
+      console.error(error);
+      alert(error.message || "Save failed");
+    }
   };
 
   const handleCreateAsset = (boothId: string) => {
@@ -148,7 +154,7 @@ export const CAHBoothsPanel: React.FC = () => {
     setIsAssetFormOpen(true);
   };
 
-  const handleSaveAsset = () => {
+  const handleSaveAsset = async () => {
     if (!editingAsset?.name || !editingAsset?.serialNumber) {
       alert('Name and Serial Number are required.');
       return;
@@ -161,24 +167,30 @@ export const CAHBoothsPanel: React.FC = () => {
       updatedBy: 'STAFF-ADM',
     } as CAHBoothAsset;
 
-    cahService.saveBoothAsset(assetToSave);
-
-    const isNew = !editingAsset.createdAt;
-    let eventType = isNew ? 'CAH_ASSET_ADDED' : 'CAH_ASSET_UPDATED';
-    if (!isNew && assetToSave.condition === 'damaged') eventType = 'CAH_ASSET_MARKED_DAMAGED';
-    if (!isNew && assetToSave.condition === 'missing') eventType = 'CAH_ASSET_MARKED_MISSING';
-
-    analyticsService.logEvent({
-      eventType: eventType as any,
-      actorType: 'admin',
-      actorName: 'System Admin',
-      cahBoothId: assetToSave.boothId,
-      details: { name: assetToSave.name, condition: assetToSave.condition }
-    });
-
-    loadData();
-    setIsAssetFormOpen(false);
-    setEditingAsset(null);
+    try {
+      await cahService.saveBoothAsset(assetToSave);
+  
+      const isNew = !editingAsset.createdAt;
+      let eventType = isNew ? 'CAH_ASSET_ADDED' : 'CAH_ASSET_UPDATED';
+      if (!isNew && assetToSave.condition === 'damaged') eventType = 'CAH_ASSET_MARKED_DAMAGED';
+      if (!isNew && assetToSave.condition === 'missing') eventType = 'CAH_ASSET_MARKED_MISSING';
+  
+      analyticsService.logEvent({
+        eventType: eventType as any,
+        actorType: 'admin',
+        actorName: 'System Admin',
+        cahBoothId: assetToSave.boothId,
+        details: { name: assetToSave.name, condition: assetToSave.condition }
+      });
+  
+      loadData();
+      setIsAssetFormOpen(false);
+      setEditingAsset(null);
+      alert("Saved successfully");
+    } catch (error: any) {
+      console.error(error);
+      alert(error.message || "Save failed");
+    }
   };
 
   const selectedBoothAssets = selectedBoothId ? assets.filter(a => a.boothId === selectedBoothId) : [];

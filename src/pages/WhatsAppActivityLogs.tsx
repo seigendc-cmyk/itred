@@ -40,7 +40,7 @@ import {
 import { whatsappActivityService } from "../services/whatsappActivityService.ts";
 import { rpnService } from "../services/rpnService.ts";
 import { staffService } from "../services/staffService.ts";
-import { RPN } from "../types.ts";
+import { RPN, Staff } from "../types.ts";
 import { focusMainContent } from "../utils/uiHelpers.ts";
 import { whatsappSourceService } from "../services/whatsappSourceService.ts";
 import { staffAuditService } from "../services/staffAuditService.ts";
@@ -184,52 +184,82 @@ export const WhatsAppActivityLogs: React.FC = () => {
     focusMainContent();
   };
 
-  const handleDeleteLog = (id: string) => {
-    if (confirm("Permanently delete this activity log?")) {
-      whatsappActivityService.deleteLog(id);
-      loadData();
-    }
-  };
+  const handleDeleteLog = async (id: string) => {
+    if (!confirm("Permanently delete this activity log?")) return;
 
-  const handleMarkFollowUpDone = (log: WhatsAppActivityLog) => {
-    whatsappActivityService.updateLog(log.id, {
-      followUpRequired: false,
-      responseStatus: "RESPONDED",
-      notes: log.notes
-        ? `${log.notes}\n[Follow-up marked done on ${new Date().toLocaleDateString()}]`
-        : `[Follow-up marked done on ${new Date().toLocaleDateString()}]`,
-    });
-
-    const newLog: WhatsAppActivityLog = {
-      ...log,
-      id: `WA-${Date.now()}`,
-      activityDate: new Date().toISOString().split("T")[0],
-      activityType: "FOLLOW_UP_DONE",
-      notes: `Follow-up completed for original log: ${log.id}`,
-      followUpRequired: false,
-      followUpDate: undefined,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    whatsappActivityService.saveLog(newLog);
-    loadData();
-
-    // Non-blocking staff audit logging
     try {
-      void staffAuditService.logAction({
-        eventType: "WHATSAPP_ACTIVITY_LOGGED",
-        module: "whatsapp",
-        action: `Follow-up marked done for log ${log.id}`,
-        severity: "info",
-        recordType: "whatsapp_log",
-        recordId: log.id,
-      });
-    } catch (auditErr) {
-      console.error("Audit log failed", auditErr);
+      await whatsappActivityService.deleteLog(id);
+
+      try {
+        void staffAuditService.logAction({
+          eventType: "RECORD_DELETED",
+          module: "whatsapp",
+          severity: "warning",
+          action: `Deleted WhatsApp activity log ${id}`,
+          recordType: "whatsapp_activity",
+          recordId: id,
+        });
+      } catch (auditError) {
+        console.error("Audit log failed", auditError);
+      }
+
+      loadData();
+      alert("WhatsApp activity log deleted.");
+    } catch (error) {
+      console.error("Failed to delete WhatsApp activity log", error);
+      alert(
+        error instanceof Error
+          ? error.message
+          : "Failed to delete WhatsApp activity log.",
+      );
     }
   };
 
-  const handleSave = () => {
+  const handleMarkFollowUpDone = async (log: WhatsAppActivityLog) => {
+    try {
+      await whatsappActivityService.updateLog(log.id, {
+        followUpRequired: false,
+        responseStatus: "RESPONDED",
+        notes: log.notes
+          ? `${log.notes}\n[Follow-up marked done on ${new Date().toLocaleDateString()}]`
+          : `[Follow-up marked done on ${new Date().toLocaleDateString()}]`,
+      });
+
+      const newLog: WhatsAppActivityLog = {
+        ...log,
+        id: `WA-${Date.now()}`,
+        activityDate: new Date().toISOString().split("T")[0],
+        activityType: "FOLLOW_UP_DONE",
+        notes: `Follow-up completed for original log: ${log.id}`,
+        followUpRequired: false,
+        followUpDate: undefined,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      await whatsappActivityService.saveLog(newLog);
+      loadData();
+
+      // Non-blocking staff audit logging
+      try {
+        void staffAuditService.logAction({
+          eventType: "WHATSAPP_ACTIVITY_LOGGED",
+          module: "whatsapp",
+          action: `Follow-up marked done for log ${log.id}`,
+          severity: "info",
+          recordType: "whatsapp_log",
+          recordId: log.id,
+        });
+      } catch (auditErr) {
+        console.error("Audit log failed", auditErr);
+      }
+      alert("Saved successfully");
+    } catch (error: any) {
+      console.error(error);
+      alert(error.message || "Save failed");
+    }
+  };
+
+  const handleSave = async () => {
     if (
       !formData.activityType ||
       !formData.sourceType ||
@@ -267,45 +297,51 @@ export const WhatsAppActivityLogs: React.FC = () => {
       assignedStaffName: formData.assignedStaffName || "",
     };
 
-    whatsappActivityService.saveLog(cleanObj(logToSave));
-
-    // Non-blocking staff audit logging
     try {
-      let severity: "info" | "high" = "info";
-      if (
-        logToSave.activityType === "COMPLAINT_RECEIVED" ||
-        logToSave.priority === "HIGH" ||
-        logToSave.priority === "CRITICAL"
-      )
-        severity = "high";
+      await whatsappActivityService.saveLog(cleanObj(logToSave));
 
-      void staffAuditService.logAction({
-        eventType: "WHATSAPP_ACTIVITY_LOGGED",
-        module: "whatsapp",
-        action: `Logged WhatsApp activity: ${logToSave.activityType}`,
-        severity,
-        recordType: "whatsapp_log",
-        recordId: logToSave.id,
-        afterSnapshot: logToSave,
-      });
+      // Non-blocking staff audit logging
+      try {
+        let severity: "info" | "high" = "info";
+        if (
+          logToSave.activityType === "COMPLAINT_RECEIVED" ||
+          logToSave.priority === "HIGH" ||
+          logToSave.priority === "CRITICAL"
+        )
+          severity = "high";
 
-      if (logToSave.leadStatus === "CONVERTED") {
         void staffAuditService.logAction({
-          eventType: "LEAD_FOLLOWED_UP",
+          eventType: "WHATSAPP_ACTIVITY_LOGGED",
           module: "whatsapp",
-          action: `Lead converted in log ${logToSave.id}`,
-          severity: "info",
+          action: `Logged WhatsApp activity: ${logToSave.activityType}`,
+          severity,
           recordType: "whatsapp_log",
           recordId: logToSave.id,
+          afterSnapshot: logToSave,
         });
-      }
-    } catch (auditErr) {
-      console.error("Audit log failed", auditErr);
-    }
 
-    loadData();
-    setIsFormOpen(false);
-    setFormData({});
+        if (logToSave.leadStatus === "CONVERTED") {
+          void staffAuditService.logAction({
+            eventType: "LEAD_FOLLOWED_UP",
+            module: "whatsapp",
+            action: `Lead converted in log ${logToSave.id}`,
+            severity: "info",
+            recordType: "whatsapp_log",
+            recordId: logToSave.id,
+          });
+        }
+      } catch (auditErr) {
+        console.error("Audit log failed", auditErr);
+      }
+
+      loadData();
+      setIsFormOpen(false);
+      setFormData({});
+      alert("Saved successfully");
+    } catch (error: any) {
+      console.error(error);
+      alert(error.message || "Save failed");
+    }
   };
 
   const inputClass =

@@ -143,6 +143,8 @@ export type ActionPermissionKey =
   | "rpn.viewCommissions"
   | "rpn.exportReports"
   | "staff.editKycDetails"
+  | "staff.generateStaffCode"
+  | "staff.repairDuplicateCodes"
   | "roles.viewPermissions"
   | "roles.editPermissions"
   | "roles.createRoleTemplate"
@@ -181,6 +183,8 @@ export interface Branch {
 
 export interface Staff {
   id: string;
+  docId?: string;
+  firestoreDocId?: string;
   staffCode: string;
   fullName: string;
   displayName: string;
@@ -1193,6 +1197,7 @@ export interface ITredNotification {
   recordType: string;
   recordId: string;
   status: NotificationStatus;
+  dedupeKey?: string;
   createdAt: string;
   readAt?: string;
   resolvedAt?: string;

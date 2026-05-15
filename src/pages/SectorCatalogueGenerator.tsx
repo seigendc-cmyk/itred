@@ -523,12 +523,16 @@ export const SectorCatalogueGenerator: React.FC = () => {
       const hostedUrl = "";
 
       const resolveFeedbackNumber = () => {
-        const routes = (systemSettings?.feedbackWhatsAppRoutes || []).filter(r => r.isActive).sort((a,b) => b.priority - a.priority);
-        let match = routes.find(r => r.sector === config.sector && r.category === config.category);
+        const routes = (systemSettings?.feedbackWhatsAppRoutes || [])
+          .filter((r) => r.isActive)
+          .sort((a, b) => b.priority - a.priority);
+        let match = routes.find(
+          (r) => r.sector === config.sector && r.category === config.category,
+        );
         if (match) return match.whatsappNumber;
-        match = routes.find(r => r.sector === config.sector);
+        match = routes.find((r) => r.sector === config.sector);
         if (match) return match.whatsappNumber;
-        match = routes.find(r => r.purpose === "DEFAULT");
+        match = routes.find((r) => r.purpose === "DEFAULT");
         if (match) return match.whatsappNumber;
         return systemSettings?.defaultFeedbackWhatsAppNumber || "";
       };
@@ -540,7 +544,7 @@ export const SectorCatalogueGenerator: React.FC = () => {
         plans,
         {
           serialNumber: config.serialNumber,
-catalogueId: finalId,
+          catalogueId: finalId,
           sector: config.sector,
           category: config.category,
           expiryDate: expiry.toISOString(),
@@ -627,7 +631,7 @@ catalogueId: finalId,
           severity: "info",
           recordType: "catalogue",
           recordId: finalId,
-          recordName: config.serialNumber
+          recordName: config.serialNumber,
         });
       } catch (auditErr) {
         console.error("Audit log failed", auditErr);
@@ -643,14 +647,10 @@ catalogueId: finalId,
         setEditingCatalogueId(null);
       }
       await refreshHistory();
-      alert(
-        `Catalogue ${mode === "new" ? "created" : mode === "update" ? "updated" : "replaced"} successfully.`,
-      );
+      alert("Saved successfully");
     } catch (err) {
       console.error(err);
-      alert(
-        "Catalogue generation or save failed. Check permissions and network.",
-      );
+      alert(err instanceof Error ? err.message : "Save failed");
     } finally {
       setIsGenerating(false);
     }
@@ -658,32 +658,34 @@ catalogueId: finalId,
 
   const handleMarkDeployed = async (id: string) => {
     const sessionStr = localStorage.getItem("activeStaffSession");
-    const session = sessionStr ? JSON.parse(sessionStr) : { staffId: "STAFF-ADM", staffName: "System Admin" };
+    const session = sessionStr
+      ? JSON.parse(sessionStr)
+      : { staffId: "STAFF-ADM", staffName: "System Admin" };
     const canApprove = permissionService.canApprove("createCatalogue");
 
     if (canApprove) {
-    try {
-      await catalogueService.markAsDeployed(id);
-      refreshHistory();
-      alert("Catalogue deployed. Lifecycle tracking active.");
-      
-      // Non-blocking staff audit logging
       try {
-        void staffAuditService.logAction({
-          eventType: "CATALOGUE_DEPLOYED",
-          module: "catalogue",
-          action: `Deployed catalogue ${id}`,
-          severity: "high",
-          recordType: "catalogue",
-          recordId: id
-        });
-      } catch (auditErr) {
-        console.error("Audit log failed", auditErr);
+        await catalogueService.markAsDeployed(id);
+        refreshHistory();
+        alert("Saved successfully");
+
+        // Non-blocking staff audit logging
+        try {
+          void staffAuditService.logAction({
+            eventType: "CATALOGUE_DEPLOYED",
+            module: "catalogue",
+            action: `Deployed catalogue ${id}`,
+            severity: "high",
+            recordType: "catalogue",
+            recordId: id,
+          });
+        } catch (auditErr) {
+          console.error("Audit log failed", auditErr);
+        }
+      } catch (err) {
+        console.error(err);
+        alert(err instanceof Error ? err.message : "Save failed");
       }
-    } catch (err) {
-      console.error(err);
-      alert("Failed to deploy catalogue.");
-    }
     } else {
       try {
         await approvalService.submitApprovalRequest({
@@ -697,9 +699,10 @@ catalogueId: finalId,
           beforeSnapshot: null,
           afterSnapshot: null,
         });
-        alert("Deployment approval requested. You will be notified when approved.");
+        alert("Saved successfully");
       } catch (err) {
         console.error("Failed to submit approval request.");
+        alert(err instanceof Error ? err.message : "Save failed");
       }
     }
   };
@@ -708,10 +711,10 @@ catalogueId: finalId,
     try {
       await catalogueService.redeployCatalogue(id);
       refreshHistory();
-      alert("Catalogue redeployed. Expiry timeline reset.");
+      alert("Saved successfully");
     } catch (err) {
       console.error(err);
-      alert("Failed to redeploy catalogue.");
+      alert(err instanceof Error ? err.message : "Save failed");
     }
   };
 
@@ -719,9 +722,10 @@ catalogueId: finalId,
     try {
       await catalogueService.archiveCatalogue(id);
       refreshHistory();
+      alert("Saved successfully");
     } catch (err) {
       console.error(err);
-      alert("Failed to archive catalogue.");
+      alert(err instanceof Error ? err.message : "Save failed");
     }
   };
 
@@ -734,9 +738,10 @@ catalogueId: finalId,
       try {
         await catalogueService.deleteCatalogue(id);
         refreshHistory();
+        alert("Saved successfully");
       } catch (err) {
         console.error(err);
-        alert("Failed to delete catalogue record.");
+        alert(err instanceof Error ? err.message : "Save failed");
       }
     }
   };
@@ -822,7 +827,7 @@ catalogueId: finalId,
         action: `Downloaded catalogue HTML: ${filename}`,
         severity: "info",
         recordType: "file",
-        recordName: filename
+        recordName: filename,
       });
     } catch (auditErr) {
       console.error("Audit log failed", auditErr);
@@ -1213,7 +1218,10 @@ catalogueId: finalId,
                   <SecondaryButton
                     onClick={() => {
                       handleMarkDeployed(lastGenerated.id);
-                      if (permissionService.canApprove("createCatalogue") && lastGenerated.hostedUrl) {
+                      if (
+                        permissionService.canApprove("createCatalogue") &&
+                        lastGenerated.hostedUrl
+                      ) {
                         window.open(lastGenerated.hostedUrl, "_blank");
                       }
                     }}

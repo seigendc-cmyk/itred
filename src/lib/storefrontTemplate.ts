@@ -79,7 +79,7 @@ export const generateVendorStorefrontHtml = (
       ? '<div style="grid-column: 1 / -1; padding: 24px; text-align: center; color: var(--muted); background: #f9f9f9; border: 1px dashed var(--border); border-radius: 8px;">No products available for this vendor.</div>'
       : vendorProducts
           .map((p) => {
-            const imageSrc = normalizeImageUrl(product.imageUrl);
+            const imageSrc = normalizeImageUrl(p.imageUrl);
             const searchString = escapeHtml(
               [
                 p.name,
@@ -93,7 +93,7 @@ export const generateVendorStorefrontHtml = (
                 vendor.cityTown || "",
                 vendor.suburb || "",
                 vendor.district || "",
-                p.sellingPrice.toString(),
+                (p.sellingPrice || 0).toString(),
               ]
                 .join(" ")
                 .toLowerCase(),
@@ -104,7 +104,7 @@ export const generateVendorStorefrontHtml = (
             return `
       <article class="product-card" data-id="${p.id}" data-search="${searchString}">
         <div class="product-img-wrapper" onclick="openProductModal('${p.id}')">
-          <img src="${imageSrc}" loading="lazy" alt="${escapeHtml(p.name)}" />
+          <img src="${imageSrc}" loading="lazy" alt="${escapeHtml(p.name)}" onerror="this.style.display='none'" />
         </div>
         <div class="product-info">
           <div class="product-brand">${escapeHtml(p.brand || p.category || vendor.sector || "General")}</div>
@@ -218,8 +218,12 @@ export const generateVendorStorefrontHtml = (
     ? `https://wa.me/${supportLink.supportNumber?.replace(/[^0-9]/g, "")}?text=${supportMsg}`
     : "";
 
-  const logoSrc = normalizeImageUrl(vendor.logoUrl);
-  const bannerSrc = normalizeImageUrl(vendor.bannerUrl);
+  const logoSrc = normalizeImageUrl(
+    vendor.logoAssetUrl || vendor.logoUrl || vendor.businessLogoUrl,
+  );
+  const bannerSrc = normalizeImageUrl(
+    vendor.bannerAssetUrl || vendor.bannerUrl || vendor.businessBannerUrl,
+  );
   const mainSector = escapeHtml(vendor.sector || "General");
   const cahJoinUrl =
     communityLink?.whatsappCommunityLink ||
@@ -353,9 +357,9 @@ export const generateVendorStorefrontHtml = (
 
   <header class="header">
     <div class="banner-container">
-      <img src="${bannerSrc}" class="banner-img" />
+      <img src="${bannerSrc}" class="banner-img" onerror="this.style.display='none'" />
       <div class="logo-badge">
-        <img src="${logoSrc}" class="logo-img" />
+        <img src="${logoSrc}" class="logo-img" onerror="this.style.display='none'" />
       </div>
     </div>
     <div class="header-content">
@@ -434,7 +438,7 @@ export const generateVendorStorefrontHtml = (
   <div id="modal-overlay" class="modal-overlay">
     <div class="modal-content">
       <button class="modal-close" onclick="closeModal()">×</button>
-      <img id="m-img" class="modal-img" />
+      <img id="m-img" class="modal-img" onerror="this.style.display='none'" />
       <div class="modal-body">
         <h2 id="m-name" class="modal-title"></h2>
         <div id="m-price" class="modal-price"></div>

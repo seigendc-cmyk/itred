@@ -358,6 +358,19 @@ export const StaffManagement: React.FC = () => {
     variant: "danger" | "warning" | "success";
   } | null>(null);
 
+  const [duplicateScanResult, setDuplicateScanResult] = useState<
+    { staffCode: string; records: Staff[] }[]
+  >([]);
+  const [isScanningDuplicates, setIsScanningDuplicates] = useState(false);
+  const [isRepairingDuplicates, setIsRepairingDuplicates] = useState(false);
+
+  const canRepairDuplicates =
+    permissionService.isSysAdmin() ||
+    JSON.parse(localStorage.getItem("activeStaffSession") || "{}")
+      .actionPermissions?.["staff.repairDuplicateCodes"] ||
+    JSON.parse(localStorage.getItem("activeStaffSession") || "{}").role ===
+      "Super Admin";
+
   const closeAllModals = useCallback(() => {
     setIsConfirmOpen(false);
     setIsPasscodeModalOpen(false);
@@ -494,8 +507,54 @@ export const StaffManagement: React.FC = () => {
   const duplicates = useMemo(() => {
     if (!formData.staffCode && !formData.email) return [];
 
+    const isSameStaff = (
+      s: Staff,
+      targetId?: string,
+      targetDocId?: string,
+      targetCode?: string,
+      targetEmail?: string,
+    ) => {
+      if (!targetId) return false;
+      if (s.id === targetId) return true;
+      const sDocId = (s as any).docId;
+      if (sDocId && sDocId === targetId) return true;
+      if (s.firestoreDocId && s.firestoreDocId === targetId) return true;
+      if (targetDocId && s.id === targetDocId) return true;
+      if (
+        s.email &&
+        targetEmail &&
+        s.email.toLowerCase() === targetEmail.toLowerCase() &&
+        s.staffCode === targetCode
+      )
+        return true;
+      return false;
+    };
+
     return staffList.filter((s) => {
-      if (s.id === formData.id) return false;
+      // Do not flag the currently edited staff member as a duplicate of themselves
+      if (
+        selectedStaff &&
+        isSameStaff(
+          s,
+          selectedStaff.id,
+          selectedStaff.firestoreDocId,
+          selectedStaff.staffCode,
+          selectedStaff.email,
+        )
+      )
+        return false;
+      if (
+        !selectedStaff &&
+        isSameStaff(
+          s,
+          formData.id,
+          formData.firestoreDocId,
+          formData.staffCode,
+          formData.email,
+        )
+      )
+        return false;
+
       const sameCode =
         !!formData.staffCode && s.staffCode === formData.staffCode;
       const sameEmail =
@@ -505,14 +564,73 @@ export const StaffManagement: React.FC = () => {
         s.status === "active";
       return sameCode || sameEmail;
     });
-  }, [formData.staffCode, formData.email, formData.id, staffList]);
+  }, [
+    formData.staffCode,
+    formData.email,
+    formData.id,
+    formData.firestoreDocId,
+    selectedStaff,
+    staffList,
+  ]);
 
   const hasDuplicateCode = duplicates.some(
     (s) => s.staffCode === formData.staffCode,
   );
 
-  const handleAddStaff = () => {
-    const staffCode = staffService.generateStaffCode();
+  const handleScanDuplicates = () => {
+    setIsScanningDuplicates(true);
+    try {
+      const dups = staffService.findDuplicateStaffCodes();
+      setDuplicateScanResult(dups);
+      if (dups.length === 0) {
+        alert("No duplicate staff codes found.");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Failed to scan duplicates.");
+    } finally {
+      setIsScanningDuplicates(false);
+    }
+  };
+
+  const handleRepairDuplicates = async () => {
+    if (
+      !confirm(
+        "Are you sure you want to repair duplicate staff codes? Original records will be kept and duplicates will be renumbered.",
+      )
+    ) {
+      return;
+    }
+
+    setIsRepairingDuplicates(true);
+    try {
+      const { totalRepaired } = await staffService.repairDuplicateStaffCodes();
+
+      void staffAuditService.logAction({
+        eventType: "RECORD_UPDATED",
+        module: "staff",
+        severity: "critical",
+        action: "Repaired duplicate staff codes",
+      });
+
+      alert(`Repaired ${totalRepaired} duplicate staff records.`);
+      setDuplicateScanResult([]);
+      void loadStaff();
+    } catch (e: any) {
+      console.error(e);
+      alert(e.message || "Failed to repair duplicates.");
+    } finally {
+      setIsRepairingDuplicates(false);
+    }
+  };
+
+  const handleAddStaff = async () => {
+    let staffCode = "";
+    try {
+      staffCode = await staffService.generateUniqueStaffCodeFromFirebase();
+    } catch (e) {
+      staffCode = staffService.generateStaffCode();
+    }
 
     setFormData({
       id: staffCode,
@@ -703,13 +821,23 @@ export const StaffManagement: React.FC = () => {
       setConfirmTempPasscode("");
       setSelectedStaff(null);
       setFormData({});
-      setFormSuccess("Staff Personal, Address & KYC details saved.");
+      alert("Staff saved successfully.");
       setView("list");
       focusMainContent();
-      setTimeout(() => setFormSuccess(""), 3000);
     } catch (error: any) {
-      console.error("Failed to save staff profile.", error);
-      if (error.message && error.message.includes("Duplicate")) {
+      console.error(error);
+      if (
+        error.message &&
+        error.message.includes("already exists on another staff record")
+      ) {
+        void staffAuditService.logAction({
+          eventType: "ACCESS_DENIED",
+          module: "staff",
+          severity: "high",
+          action: "Blocked duplicate staff code save",
+        });
+        setFormError(error.message);
+      } else if (error.message && error.message.includes("Duplicate")) {
         void staffAuditService.logAction({
           eventType: "ACCESS_DENIED",
           module: "staff",
@@ -718,9 +846,7 @@ export const StaffManagement: React.FC = () => {
         });
         setFormError(error.message);
       } else {
-        setFormError(
-          "Staff details were not saved. Check permissions or network.",
-        );
+        alert(error.message || "Failed to save staff.");
       }
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
@@ -820,13 +946,10 @@ export const StaffManagement: React.FC = () => {
             void loadLogs();
           }, 800);
 
-          setFormSuccess("Staff saved to Firebase/local cache");
-          setTimeout(() => setFormSuccess(""), 3000);
-        } catch (error) {
-          console.error("Failed to update staff status.", error);
-          setFormError(
-            "Failed to save staff profile to Firebase. Check console for details.",
-          );
+          alert("Staff saved successfully.");
+        } catch (error: any) {
+          console.error(error);
+          alert(error.message || "Failed to save staff.");
           window.scrollTo({ top: 0, behavior: "smooth" });
         }
       },
@@ -882,13 +1005,10 @@ export const StaffManagement: React.FC = () => {
       setConfirmTempPasscode("");
       setIsPasscodeModalOpen(false);
 
-      setFormSuccess("Staff saved to Firebase/local cache");
-      setTimeout(() => setFormSuccess(""), 3000);
-    } catch (error) {
-      console.error("Failed to save new passcode.", error);
-      alert(
-        "Failed to save staff profile to Firebase. Check console for details.",
-      );
+      alert("Staff saved successfully.");
+    } catch (error: any) {
+      console.error(error);
+      alert(error.message || "Failed to save staff.");
     }
   };
 
@@ -1360,6 +1480,73 @@ export const StaffManagement: React.FC = () => {
               )}
             </div>
 
+            {canRepairDuplicates && (
+              <DataPanel title="Staff Code Integrity">
+                <div className="p-6">
+                  <div className="flex justify-between items-center mb-4">
+                    <div>
+                      <p className="text-sm font-bold text-brand-charcoal">
+                        Duplicate Staff Codes
+                      </p>
+                      <p className="text-xs text-stone-500">
+                        Detect and repair identical staff numbers across
+                        different records.
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <SecondaryButton
+                        onClick={handleScanDuplicates}
+                        disabled={isScanningDuplicates}
+                      >
+                        {isScanningDuplicates
+                          ? "Scanning..."
+                          : "Scan Duplicates"}
+                      </SecondaryButton>
+                      {duplicateScanResult.length > 0 && (
+                        <PrimaryButton
+                          onClick={handleRepairDuplicates}
+                          disabled={isRepairingDuplicates}
+                        >
+                          {isRepairingDuplicates
+                            ? "Repairing..."
+                            : "Repair Duplicate Staff Codes"}
+                        </PrimaryButton>
+                      )}
+                    </div>
+                  </div>
+                  {duplicateScanResult.length > 0 && (
+                    <div className="space-y-4 mt-6">
+                      <p className="text-xs font-bold text-red-600">
+                        Found {duplicateScanResult.length} duplicate code(s).
+                      </p>
+                      {duplicateScanResult.map((dup) => (
+                        <div
+                          key={dup.staffCode}
+                          className="border border-red-200 bg-red-50 p-4 text-xs"
+                        >
+                          <p className="font-bold text-red-700 mb-2">
+                            Code: {dup.staffCode} ({dup.records.length} records)
+                          </p>
+                          <ul className="list-disc pl-5 space-y-1">
+                            {dup.records.map((r) => (
+                              <li key={r.id}>
+                                {r.fullName} ({r.email || "No email"}) - Status:{" "}
+                                {r.status} (Updated:{" "}
+                                {new Date(
+                                  r.updatedAt || r.createdAt || 0,
+                                ).toLocaleDateString()}
+                                )
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </DataPanel>
+            )}
+
             <DataPanel title="Staff Registry">
               {permissionService.isSysAdmin() && (
                 <div className="p-2 mb-4 bg-stone-100 border border-stone-200 text-[10px] font-mono text-stone-500">
@@ -1746,26 +1933,33 @@ export const StaffManagement: React.FC = () => {
                     <p className="text-xs text-stone-600 mt-1">
                       Another record shares the same staff code or email.
                     </p>
-                    {hasDuplicateCode && permissionService.isSysAdmin() && (
-                      <PrimaryButton
-                        className="mt-3 text-xs px-3 py-1"
-                        onClick={async () => {
-                          let newCode = "";
-                          try {
-                            newCode =
-                              await staffService.generateUniqueStaffCodeFromFirebase();
-                          } catch (e) {
-                            newCode = staffService.generateStaffCode();
-                          }
-                          setFormData((prev) => ({
-                            ...prev,
-                            staffCode: newCode,
-                          }));
-                        }}
-                      >
-                        Regenerate Code
-                      </PrimaryButton>
-                    )}
+                    {hasDuplicateCode &&
+                      (permissionService.isSysAdmin() ||
+                        JSON.parse(
+                          localStorage.getItem("activeStaffSession") || "{}",
+                        ).actionPermissions?.["staff.generateStaffCode"] ||
+                        JSON.parse(
+                          localStorage.getItem("activeStaffSession") || "{}",
+                        ).role === "Super Admin") && (
+                        <PrimaryButton
+                          className="mt-3 text-xs px-3 py-1"
+                          onClick={async () => {
+                            let newCode = "";
+                            try {
+                              newCode =
+                                await staffService.generateUniqueStaffCodeFromFirebase();
+                            } catch (e) {
+                              newCode = staffService.generateStaffCode();
+                            }
+                            setFormData((prev) => ({
+                              ...prev,
+                              staffCode: newCode,
+                            }));
+                          }}
+                        >
+                          Generate New Staff Code
+                        </PrimaryButton>
+                      )}
                   </div>
                 </div>
               </div>
@@ -1773,12 +1967,41 @@ export const StaffManagement: React.FC = () => {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <FormField label="Staff Code">
-                <input
-                  type="text"
-                  value={formData.staffCode || ""}
-                  disabled
-                  className="form-input bg-stone-100 text-stone-500 cursor-not-allowed"
-                />
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={formData.staffCode || ""}
+                    disabled
+                    className="form-input bg-stone-100 text-stone-500 cursor-not-allowed flex-1"
+                  />
+                  {(permissionService.isSysAdmin() ||
+                    JSON.parse(
+                      localStorage.getItem("activeStaffSession") || "{}",
+                    ).actionPermissions?.["staff.generateStaffCode"] ||
+                    JSON.parse(
+                      localStorage.getItem("activeStaffSession") || "{}",
+                    ).role === "Super Admin") && (
+                    <SecondaryButton
+                      type="button"
+                      onClick={async () => {
+                        let newCode = "";
+                        try {
+                          newCode =
+                            await staffService.generateUniqueStaffCodeFromFirebase();
+                        } catch (e) {
+                          newCode = staffService.generateStaffCode();
+                        }
+                        setFormData((prev) => ({
+                          ...prev,
+                          staffCode: newCode,
+                        }));
+                      }}
+                      className="whitespace-nowrap px-3 py-2 text-xs"
+                    >
+                      Generate New Staff Code
+                    </SecondaryButton>
+                  )}
+                </div>
               </FormField>
 
               <FormField label="Full Name *" required>
@@ -2434,13 +2657,10 @@ export const StaffManagement: React.FC = () => {
 
                         setView("list");
                         focusMainContent();
-                        setFormSuccess("Staff saved to Firebase/local cache");
-                        setTimeout(() => setFormSuccess(""), 3000);
-                      } catch (error) {
-                        console.error("Failed to save permissions.", error);
-                        setFormError(
-                          "Failed to save staff profile to Firebase. Check console for details.",
-                        );
+                        alert("Staff saved successfully.");
+                      } catch (error: any) {
+                        console.error(error);
+                        alert(error.message || "Failed to save staff.");
                       }
                     }
                   }}
@@ -2764,11 +2984,9 @@ export const StaffManagement: React.FC = () => {
                   `Template applied to ${staffToUpdate.length} staff members.`,
                 );
                 setTimeout(() => setFormSuccess(""), 3000);
-              } catch (error) {
-                console.error("Failed to apply role.", error);
-                alert(
-                  "Failed to save staff profile to Firebase. Check console for details.",
-                );
+              } catch (error: any) {
+                console.error(error);
+                alert(error.message || "Failed to save staff.");
               }
             } else {
               alert("No staff found with this role.");

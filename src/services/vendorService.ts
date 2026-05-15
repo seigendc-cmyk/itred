@@ -7,6 +7,8 @@ import { Vendor } from "../types.ts";
 import { asArray } from "../utils/safeData.ts";
 import { getStorageAdapter } from "./storageService.ts";
 import { analyticsService } from "./analyticsService.ts";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { storage } from "../lib/firebase.ts";
 
 const VENDORS_KEY = "itred_vendors";
 
@@ -161,5 +163,17 @@ export const vendorService = {
     const vendors = await vendorService.getVendors();
     const filtered = vendors.filter((v) => v.id !== id);
     await vendorService.saveVendors(filtered);
+  },
+
+  uploadVendorLogo: async (vendorId: string, file: Blob): Promise<string> => {
+    const storageRef = ref(storage, `vendor-assets/${vendorId}/logo.webp`);
+    await uploadBytes(storageRef, file, { contentType: "image/webp" });
+    return getDownloadURL(storageRef);
+  },
+
+  uploadVendorBanner: async (vendorId: string, file: Blob): Promise<string> => {
+    const storageRef = ref(storage, `vendor-assets/${vendorId}/banner.webp`);
+    await uploadBytes(storageRef, file, { contentType: "image/webp" });
+    return getDownloadURL(storageRef);
   },
 };

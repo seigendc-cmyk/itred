@@ -93,6 +93,8 @@ const loadStaffFromFirestore = async (): Promise<Staff[]> => {
     return {
       ...data,
       id: data.id || staffDoc.id,
+      docId: staffDoc.id,
+      firestoreDocId: staffDoc.id,
     } as Staff;
   });
 };
@@ -105,12 +107,28 @@ const validateUniqueStaffIdentity = async (staff: Staff): Promise<void> => {
     remoteStaff = getLocalStaff();
   }
 
+  const isSameStaff = (s: Staff, target: Staff) => {
+    if (s.id === target.id) return true;
+    if (s.docId && s.docId === target.id) return true;
+    if (target.docId && s.id === target.docId) return true;
+    if (s.firestoreDocId && s.firestoreDocId === target.id) return true;
+    if (target.firestoreDocId && s.id === target.firestoreDocId) return true;
+    if (
+      s.email &&
+      target.email &&
+      s.email.toLowerCase() === target.email.toLowerCase() &&
+      s.staffCode === target.staffCode
+    )
+      return true;
+    return false;
+  };
+
   const codeDuplicate = remoteStaff.find(
-    (s) => s.staffCode === staff.staffCode && s.id !== staff.id,
+    (s) => s.staffCode === staff.staffCode && !isSameStaff(s, staff),
   );
   if (codeDuplicate) {
     throw new Error(
-      "Duplicate staff code found. Generate a new staff code before saving.",
+      "This staff number already exists on another staff record. Please click Generate New Staff Code or repair duplicate staff records.",
     );
   }
 
@@ -118,7 +136,7 @@ const validateUniqueStaffIdentity = async (staff: Staff): Promise<void> => {
     const emailDuplicate = remoteStaff.find(
       (s) =>
         s.email?.toLowerCase() === staff.email?.toLowerCase() &&
-        s.id !== staff.id &&
+        !isSameStaff(s, staff) &&
         s.status === "active",
     );
     if (emailDuplicate) {
@@ -578,6 +596,67 @@ export const staffService = {
     }
 
     return `${prefix}${nextNumber.toString().padStart(4, "0")}`;
+  },
+
+  findDuplicateStaffCodes: (): { staffCode: string; records: Staff[] }[] => {
+    const allStaff = getLocalStaff();
+    const map = new Map<string, Staff[]>();
+    for (const staff of allStaff) {
+      if (!staff.staffCode) continue;
+      const current = map.get(staff.staffCode) || [];
+      current.push(staff);
+      map.set(staff.staffCode, current);
+    }
+
+    const duplicates: { staffCode: string; records: Staff[] }[] = [];
+    map.forEach((records, staffCode) => {
+      if (records.length > 1) {
+        duplicates.push({ staffCode, records });
+      }
+    });
+
+    return duplicates;
+  },
+
+  repairDuplicateStaffCodes: async (): Promise<{ totalRepaired: number }> => {
+    const duplicates = staffService.findDuplicateStaffCodes();
+    let totalRepaired = 0;
+
+    for (const { records } of duplicates) {
+      const sorted = [...records].sort((a, b) => {
+        if (a.status === "active" && b.status !== "active") return -1;
+        if (a.status !== "active" && b.status === "active") return 1;
+
+        const dateA = new Date(a.updatedAt || a.createdAt || 0).getTime();
+        const dateB = new Date(b.updatedAt || b.createdAt || 0).getTime();
+        return dateB - dateA;
+      });
+
+      const [, ...others] = sorted;
+
+      for (const other of others) {
+        let newCode = "";
+        try {
+          newCode = await staffService.generateUniqueStaffCodeFromFirebase();
+        } catch (e) {
+          newCode = staffService.generateStaffCode();
+        }
+
+        other.staffCode = newCode;
+        other.updatedAt = new Date().toISOString();
+
+        upsertLocalStaff(other);
+
+        try {
+          await syncStaffToFirestore(other);
+        } catch (e) {
+          console.error("Failed to sync repaired record to firestore", e);
+        }
+        totalRepaired++;
+      }
+    }
+
+    return { totalRepaired };
   },
 
   saveRoleTemplates: (templates: Record<string, MenuPermissions>): void => {

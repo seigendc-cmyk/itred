@@ -205,20 +205,26 @@ export const RPNManagement: React.FC = () => {
     };
   }, [vendors, collections]);
 
-  const handleDeleteRPN = () => {
+  const handleDeleteRPN = async () => {
     if (rpnToDelete) {
-      const rpn = safeRpns.find((r) => r.id === rpnToDelete);
-      rpnService.delete(rpnToDelete);
-      analyticsService.logEvent({
-        eventType: "RPN_UPDATED", // Using RPN_UPDATED with action detail
-        actorType: "admin",
-        actorName: "System Admin",
-        rpnId: rpnToDelete,
-        details: { action: "purged", name: rpn?.name },
-      });
-      loadData();
-      setIsDeleteDialogOpen(false);
-      setRpnToDelete(null);
+      try {
+        const rpn = safeRpns.find((r) => r.id === rpnToDelete);
+        await rpnService.delete(rpnToDelete);
+        analyticsService.logEvent({
+          eventType: "RPN_UPDATED", // Using RPN_UPDATED with action detail
+          actorType: "admin",
+          actorName: "System Admin",
+          rpnId: rpnToDelete,
+          details: { action: "purged", name: rpn?.name },
+        });
+        loadData();
+        setIsDeleteDialogOpen(false);
+        setRpnToDelete(null);
+        alert("Deleted successfully");
+      } catch (error: any) {
+        console.error(error);
+        alert(error.message || "Delete failed");
+      }
     }
   };
 
@@ -270,55 +276,65 @@ export const RPNManagement: React.FC = () => {
     const oldRpn = rpns.find((r) => r.id === rpnToSave.id);
 
     if (!canApprove && !isNew) {
-      await approvalService.submitApprovalRequest({
-        requestType: "rpn_agent_update",
-        recordType: "rpn",
-        recordId: rpnToSave.id,
-        recordName: rpnToSave.name,
-        submittedByStaffId: session.staffId,
-        submittedByName: session.staffName,
-        riskLevel: "medium",
-        beforeSnapshot: oldRpn || null,
-        afterSnapshot: rpnToSave,
-      });
-      void staffAuditService.logAction({
-        eventType: "APPROVAL_SUBMITTED",
-        module: "staff",
-        action: "Submitted RPN agent update for approval",
-        severity: "info",
-        recordType: "rpn",
-        recordId: rpnToSave.id,
-        recordName: rpnToSave.name,
-      });
-      alert("RPN update submitted for manager approval.");
-      setView("list");
+      try {
+        await approvalService.submitApprovalRequest({
+          requestType: "rpn_agent_update",
+          recordType: "rpn",
+          recordId: rpnToSave.id,
+          recordName: rpnToSave.name,
+          submittedByStaffId: session.staffId,
+          submittedByName: session.staffName,
+          riskLevel: "medium",
+          beforeSnapshot: oldRpn || null,
+          afterSnapshot: rpnToSave,
+        });
+        void staffAuditService.logAction({
+          eventType: "APPROVAL_SUBMITTED",
+          module: "staff",
+          action: "Submitted RPN agent update for approval",
+          severity: "info",
+          recordType: "rpn",
+          recordId: rpnToSave.id,
+          recordName: rpnToSave.name,
+        });
+        alert("RPN update submitted for manager approval.");
+        setView("list");
+      } catch (error: any) {
+        console.error(error);
+        alert(error.message || "Save failed");
+      }
       return;
     }
 
-    rpnService.update(rpnToSave);
-    analyticsService.logEvent({
-      eventType: isNew ? "RPN_CREATED" : "RPN_UPDATED",
-      actorType: "admin",
-      actorName: "System Admin",
-      rpnId: rpnToSave.id,
-      details: { name: rpnToSave.name, level: rpnToSave.level },
-    });
-
-    if (!isNew) {
-      void staffAuditService.logAction({
-        eventType: "RECORD_UPDATED",
-        module: "staff",
-        severity: "high",
-        action: "Updated RPN agent profile",
-        recordType: "rpn_agent",
-        recordId: rpnToSave.id,
-        recordName: rpnToSave.name,
+    try {
+      await rpnService.update(rpnToSave);
+      analyticsService.logEvent({
+        eventType: isNew ? "RPN_CREATED" : "RPN_UPDATED",
+        actorType: "admin",
+        actorName: "System Admin",
+        rpnId: rpnToSave.id,
+        details: { name: rpnToSave.name, level: rpnToSave.level },
       });
-    }
 
-    loadData();
-    setView("list");
-    alert("Agent Personal, Address & KYC details saved.");
+      if (!isNew) {
+        void staffAuditService.logAction({
+          eventType: "RECORD_UPDATED",
+          module: "staff",
+          severity: "high",
+          action: "Updated RPN agent profile",
+          recordType: "rpn_agent",
+          recordId: rpnToSave.id,
+          recordName: rpnToSave.name,
+        });
+      }
+
+      loadData();
+      setView("list");
+      alert("Saved successfully");
+    } catch (error: any) {
+      console.error(error);
+      alert(error.message || "Save failed");
+    }
   };
 
   const startCollectionRecord = (rpnId?: string) => {
@@ -334,35 +350,41 @@ export const RPNManagement: React.FC = () => {
     setView("collection_form");
   };
 
-  const saveCollection = () => {
+  const saveCollection = async () => {
     if (!collectionFormData.rpnId || !collectionFormData.vendorId) {
       alert("Mapping required: RPN and Vendor must be specified.");
       return;
     }
-    const collectionToSave = {
-      ...collectionFormData,
-      updatedAt: new Date().toISOString(),
-    } as FieldCollectionRecord;
-    rpnService.updateCollection(collectionToSave);
+    try {
+      const collectionToSave = {
+        ...collectionFormData,
+        updatedAt: new Date().toISOString(),
+      } as FieldCollectionRecord;
+      await rpnService.updateCollection(collectionToSave);
 
-    analyticsService.logEvent({
-      eventType: "FIELD_COLLECTION_RECORDED",
-      actorType: "rpn",
-      actorName:
-        safeRpns.find((r) => r.id === collectionToSave.rpnId)?.name ||
-        "RPN Agent",
-      rpnId: collectionToSave.rpnId,
-      vendorId: collectionToSave.vendorId,
-      details: {
-        type: collectionToSave.type,
-        productCount: collectionToSave.productCount,
-        imageCount: collectionToSave.imageCount,
-      },
-    });
+      analyticsService.logEvent({
+        eventType: "FIELD_COLLECTION_RECORDED",
+        actorType: "rpn",
+        actorName:
+          safeRpns.find((r) => r.id === collectionToSave.rpnId)?.name ||
+          "RPN Agent",
+        rpnId: collectionToSave.rpnId,
+        vendorId: collectionToSave.vendorId,
+        details: {
+          type: collectionToSave.type,
+          productCount: collectionToSave.productCount,
+          imageCount: collectionToSave.imageCount,
+        },
+      });
 
-    loadData();
-    if (selectedRPN) setView("profile");
-    else setView("list");
+      loadData();
+      if (selectedRPN) setView("profile");
+      else setView("list");
+      alert("Saved successfully");
+    } catch (error: any) {
+      console.error(error);
+      alert(error.message || "Save failed");
+    }
   };
 
   const openRPNProfile = (rpn: RPN) => {

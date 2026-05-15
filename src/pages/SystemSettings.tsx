@@ -9,12 +9,26 @@ import {
   DataPanel,
   PrimaryButton,
   SecondaryButton,
+  FormField,
 } from "../components/CommonUI.tsx";
 import { settingsService } from "../services/settingsService.ts";
 import { SystemSettings as SystemSettingsType } from "../types.ts";
 import { optimizeImageToWebP } from "../utils/imageOptimizer.ts";
 import { Upload, Trash2, Plus } from "lucide-react";
 import { staffAuditService } from "../services/staffAuditService.ts";
+import { permissionService } from "../services/permissionService.ts";
+
+const defaultRpnSettings = {
+  dailyOnboardingThreshold: 4,
+  weeklyOnboardingThreshold: 20,
+  monthlyOnboardingThreshold: 80,
+  churnWarningPercent: 15,
+  minimumCollectionRatePercent: 70,
+  graceDaysBeforeWarning: 3,
+  enableThresholdAlerts: true,
+  requireApprovalForThresholdChange: false,
+  updatedAt: new Date().toISOString(),
+};
 
 export const SystemSettings: React.FC = () => {
   const [settings, setSettings] = useState<SystemSettingsType>({});
@@ -60,6 +74,12 @@ export const SystemSettings: React.FC = () => {
     setIsSaving(true);
     try {
       await settingsService.saveSettings(settings);
+      const settingsToSave = { ...settings };
+      if (!settingsToSave.rpnPerformanceSettings) {
+        settingsToSave.rpnPerformanceSettings = defaultRpnSettings;
+      }
+
+      await settingsService.saveSettings(settingsToSave);
       alert("Settings saved successfully.");
 
       // Non-blocking staff audit logging
@@ -69,7 +89,8 @@ export const SystemSettings: React.FC = () => {
           module: "settings",
           action: "Updated system settings",
           severity: "critical",
-          afterSnapshot: settings,
+          beforeSnapshot: null,
+          afterSnapshot: settingsToSave,
         });
       } catch (auditErr) {
         console.error("Audit log failed", auditErr);
@@ -148,6 +169,206 @@ export const SystemSettings: React.FC = () => {
               {isSaving ? "Saving..." : "Save Settings"}
             </PrimaryButton>
           </div>
+        </div>
+      </DataPanel>
+
+      <DataPanel title="RPN Performance Thresholds">
+        <div className="p-6">
+          {!permissionService.canSetRpnThresholds() && (
+            <div className="mb-6 p-4 border-l-4 border-red-500 bg-red-50 text-red-700 text-xs font-bold uppercase tracking-widest">
+              You do not have permission to change RPN thresholds.
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <FormField label="Daily Onboarding Target">
+              <input
+                type="number"
+                className="border-2 border-stone-200 p-2 text-sm outline-none focus:border-brand-orange w-full disabled:bg-stone-100 disabled:text-stone-400"
+                value={
+                  settings.rpnPerformanceSettings?.dailyOnboardingThreshold ??
+                  defaultRpnSettings.dailyOnboardingThreshold
+                }
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    rpnPerformanceSettings: {
+                      ...(prev.rpnPerformanceSettings || defaultRpnSettings),
+                      dailyOnboardingThreshold: Number(e.target.value),
+                    },
+                  }))
+                }
+                disabled={!permissionService.canSetRpnThresholds()}
+              />
+            </FormField>
+
+            <FormField label="Weekly Onboarding Target">
+              <input
+                type="number"
+                className="border-2 border-stone-200 p-2 text-sm outline-none focus:border-brand-orange w-full disabled:bg-stone-100 disabled:text-stone-400"
+                value={
+                  settings.rpnPerformanceSettings?.weeklyOnboardingThreshold ??
+                  defaultRpnSettings.weeklyOnboardingThreshold
+                }
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    rpnPerformanceSettings: {
+                      ...(prev.rpnPerformanceSettings || defaultRpnSettings),
+                      weeklyOnboardingThreshold: Number(e.target.value),
+                    },
+                  }))
+                }
+                disabled={!permissionService.canSetRpnThresholds()}
+              />
+            </FormField>
+
+            <FormField label="Monthly Onboarding Target">
+              <input
+                type="number"
+                className="border-2 border-stone-200 p-2 text-sm outline-none focus:border-brand-orange w-full disabled:bg-stone-100 disabled:text-stone-400"
+                value={
+                  settings.rpnPerformanceSettings?.monthlyOnboardingThreshold ??
+                  defaultRpnSettings.monthlyOnboardingThreshold
+                }
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    rpnPerformanceSettings: {
+                      ...(prev.rpnPerformanceSettings || defaultRpnSettings),
+                      monthlyOnboardingThreshold: Number(e.target.value),
+                    },
+                  }))
+                }
+                disabled={!permissionService.canSetRpnThresholds()}
+              />
+            </FormField>
+
+            <FormField label="Churn Warning %">
+              <input
+                type="number"
+                className="border-2 border-stone-200 p-2 text-sm outline-none focus:border-brand-orange w-full disabled:bg-stone-100 disabled:text-stone-400"
+                value={
+                  settings.rpnPerformanceSettings?.churnWarningPercent ??
+                  defaultRpnSettings.churnWarningPercent
+                }
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    rpnPerformanceSettings: {
+                      ...(prev.rpnPerformanceSettings || defaultRpnSettings),
+                      churnWarningPercent: Number(e.target.value),
+                    },
+                  }))
+                }
+                disabled={!permissionService.canSetRpnThresholds()}
+              />
+            </FormField>
+
+            <FormField label="Minimum Collection Rate %">
+              <input
+                type="number"
+                className="border-2 border-stone-200 p-2 text-sm outline-none focus:border-brand-orange w-full disabled:bg-stone-100 disabled:text-stone-400"
+                value={
+                  settings.rpnPerformanceSettings
+                    ?.minimumCollectionRatePercent ??
+                  defaultRpnSettings.minimumCollectionRatePercent
+                }
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    rpnPerformanceSettings: {
+                      ...(prev.rpnPerformanceSettings || defaultRpnSettings),
+                      minimumCollectionRatePercent: Number(e.target.value),
+                    },
+                  }))
+                }
+                disabled={!permissionService.canSetRpnThresholds()}
+              />
+            </FormField>
+
+            <FormField label="Grace Days Before Warning">
+              <input
+                type="number"
+                className="border-2 border-stone-200 p-2 text-sm outline-none focus:border-brand-orange w-full disabled:bg-stone-100 disabled:text-stone-400"
+                value={
+                  settings.rpnPerformanceSettings?.graceDaysBeforeWarning ??
+                  defaultRpnSettings.graceDaysBeforeWarning
+                }
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    rpnPerformanceSettings: {
+                      ...(prev.rpnPerformanceSettings || defaultRpnSettings),
+                      graceDaysBeforeWarning: Number(e.target.value),
+                    },
+                  }))
+                }
+                disabled={!permissionService.canSetRpnThresholds()}
+              />
+            </FormField>
+
+            <div className="flex items-center gap-4 pt-5">
+              <label
+                className={`flex items-center gap-2 text-xs font-bold uppercase ${permissionService.canSetRpnThresholds() ? "text-stone-600 cursor-pointer" : "text-stone-400 cursor-not-allowed"}`}
+              >
+                <input
+                  type="checkbox"
+                  checked={
+                    settings.rpnPerformanceSettings?.enableThresholdAlerts ??
+                    defaultRpnSettings.enableThresholdAlerts
+                  }
+                  onChange={(e) =>
+                    setSettings((prev) => ({
+                      ...prev,
+                      rpnPerformanceSettings: {
+                        ...(prev.rpnPerformanceSettings || defaultRpnSettings),
+                        enableThresholdAlerts: e.target.checked,
+                      },
+                    }))
+                  }
+                  className="accent-brand-orange w-4 h-4"
+                  disabled={!permissionService.canSetRpnThresholds()}
+                />
+                Enable Threshold Alerts
+              </label>
+            </div>
+
+            <div className="flex items-center gap-4 pt-5 md:col-span-2">
+              <label
+                className={`flex items-center gap-2 text-xs font-bold uppercase ${permissionService.canSetRpnThresholds() ? "text-stone-600 cursor-pointer" : "text-stone-400 cursor-not-allowed"}`}
+              >
+                <input
+                  type="checkbox"
+                  checked={
+                    settings.rpnPerformanceSettings
+                      ?.requireApprovalForThresholdChange ??
+                    defaultRpnSettings.requireApprovalForThresholdChange
+                  }
+                  onChange={(e) =>
+                    setSettings((prev) => ({
+                      ...prev,
+                      rpnPerformanceSettings: {
+                        ...(prev.rpnPerformanceSettings || defaultRpnSettings),
+                        requireApprovalForThresholdChange: e.target.checked,
+                      },
+                    }))
+                  }
+                  className="accent-brand-orange w-4 h-4"
+                  disabled={!permissionService.canSetRpnThresholds()}
+                />
+                Require Approval for Threshold Changes
+              </label>
+            </div>
+          </div>
+
+          {permissionService.canSetRpnThresholds() && (
+            <div className="mt-6 border-t border-stone-100 pt-6">
+              <PrimaryButton onClick={handleSave} disabled={isSaving}>
+                {isSaving ? "Saving..." : "Save Settings"}
+              </PrimaryButton>
+            </div>
+          )}
         </div>
       </DataPanel>
 

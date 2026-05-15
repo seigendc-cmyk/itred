@@ -99,9 +99,14 @@ export const ActivityLogs: React.FC = () => {
   };
 
   const handleClearLogs = async () => {
-    await analyticsService.clearEvents();
-    await loadLogs();
-    setShowClearConfirm(false);
+    try {
+      await analyticsService.clearEvents();
+      await loadLogs();
+      setShowClearConfirm(false);
+    } catch (error: any) {
+      console.error(error);
+      alert(error.message || "Failed to clear logs");
+    }
   };
 
   const eventTypes: EventType[] = Array.from(

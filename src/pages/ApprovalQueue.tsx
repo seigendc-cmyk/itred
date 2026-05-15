@@ -116,12 +116,13 @@ export const ApprovalQueue: React.FC = () => {
         );
       }
 
+      alert("Saved successfully");
       setActiveModal(null);
       setManagerComment("");
       loadRequests();
     } catch (err) {
       console.error(err);
-      alert("Failed to process approval action.");
+      alert(err instanceof Error ? err.message : "Save failed");
     }
   };
 

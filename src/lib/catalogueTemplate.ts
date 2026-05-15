@@ -63,7 +63,7 @@ export const generateCatalogueHtml = (
   // Calculate synthetic scores for UI
   const scoredVendors = vendors.map((v) => {
     let score = 50;
-    if (v.logoUrl) score += 10;
+    if (v.logoAssetUrl || v.logoUrl || v.businessLogoUrl) score += 10;
     if (v.branches && v.branches.length > 0) score += 5;
     if (v.whatsappNumber) score += 10;
     if (v.businessDescription && v.businessDescription.length > 50) score += 5;
@@ -1183,7 +1183,7 @@ export const generateCatalogueHtml = (
                 
                 return "<div class=\\"card\\" onclick=\\"openProduct('" + p.id + "')\\">" +
                         "<div class=\\"card-img-wrap\\">" +
-                            (p.imageUrl ? "<img src=\\"" + p.imageUrl + "\\" class=\\"card-img\\" loading=\\"lazy\\">" : "<span style=\\"font-size:8px; font-weight:900; color:#ccc;\\">NO IMG</span>") +
+                            (p.imageUrl ? "<img src=\\"" + p.imageUrl + "\\" class=\\"card-img\\" loading=\\"lazy\\" onerror=\\"this.style.display='none'\\">" : "<span style=\\"font-size:8px; font-weight:900; color:#ccc;\\">NO IMG</span>") +
                         "</div>" +
                         "<div class=\\"card-info\\">" +
                             "<div class=\\"c-vendor\\">" + escapeHtml(vendorName) + "</div>" +
@@ -1272,7 +1272,7 @@ export const generateCatalogueHtml = (
             const branch = getBranch(vendor, p.branchId);
 
             document.getElementById('modalImageContainer').innerHTML = p.imageUrl 
-                ? "<img src=\\"" + p.imageUrl + "\\" class=\\"m-image\\">"
+                ? "<img src=\\"" + p.imageUrl + "\\" class=\\"m-image\\" onerror=\\"this.style.display='none'\\">"
                 : "<div class=\\"m-image\\" style=\\"display:flex;align-items:center;justify-content:center;color:#ccc;font-weight:900;\\">NO IMAGE</div>";
 
             logOfflineEvent({
@@ -1323,7 +1323,8 @@ export const generateCatalogueHtml = (
             let actions = '';
             const phone = branch?.phone || vendor?.mainPhone;
             const wa = branch?.whatsapp || vendor?.whatsappNumber;
-            const leadRef = 'ITRED-' + CATALOGUE_ID + '-' + p.vm\ngPrice||0).toFixed(2) + "\\nRef: " + leadRef + "\\n\\nPlease confirm availability.");
+            const leadRef = 'ITRED-' + CATALOGUE_ID + '-' + p.vendorId + '-' + p.id;
+            const msg = encodeURIComponent("Hi " + vendorName + ", I saw this product on iTred.\\n\\nProduct: " + p.name + "\\nPrice: USD " + (p.sellingPrice||0).toFixed(2) + "\\nRef: " + leadRef + "\\n\\nPlease confirm availability.");
             
             if(wa) {
                 actions += "<a href=\\"https://wa.me/" + wa.replace(/[^0-9]/g, '') + "?text=" + msg + "\\" class=\\"c-btn wa\\" target=\\"_blank\\" onclick=\\"logWaClick('" + p.id + "')\\">Order on WhatsApp</a>";

@@ -62,10 +62,12 @@ import {
   FieldDataSource,
   Branch,
   PricingPlan,
+  Product,
+  CatalogueGeneration,
+  Staff,
 } from "../types.ts";
 import { asArray } from "../utils/safeData.ts";
 import { optimizeImageToWebP } from "../utils/imageUtils.ts";
-import { vendorAssetService } from "../services/vendorAssetService.ts";
 import { findSimilarVendors } from "../utils/duplicateDetection.ts";
 import { approvalService } from "../services/approvalService.ts";
 
@@ -256,30 +258,36 @@ export const VendorManagement: React.FC = () => {
 
   const handleDelete = () => {
     if (vendorToDelete) {
-      vendorService.deleteVendor(vendorToDelete);
-      analyticsService.logEvent({
-        eventType: "VENDOR_DELETED",
-        actorType: "admin",
-        actorName: "System Admin",
-        vendorId: vendorToDelete,
-        details: { action: "purged" },
-      });
-      loadData();
-      setIsDeleteDialogOpen(false);
-      setVendorToDelete(null);
-
-      // Non-blocking staff audit logging
       try {
-        const vendor = vendors.find((v) => v.id === vendorToDelete);
-        void staffAuditService.logDelete(
-          "vendor",
-          "vendor",
-          vendorToDelete,
-          vendor?.name || "Unknown",
-          vendor,
-        );
-      } catch (e) {
-        console.error("Audit log failed", e);
+        vendorService.deleteVendor(vendorToDelete);
+        analyticsService.logEvent({
+          eventType: "VENDOR_DELETED",
+          actorType: "admin",
+          actorName: "System Admin",
+          vendorId: vendorToDelete,
+          details: { action: "purged" },
+        });
+        loadData();
+        setIsDeleteDialogOpen(false);
+        setVendorToDelete(null);
+        alert("Deleted successfully");
+
+        // Non-blocking staff audit logging
+        try {
+          const vendor = vendors.find((v) => v.id === vendorToDelete);
+          void staffAuditService.logDelete(
+            "vendor",
+            "vendor",
+            vendorToDelete,
+            vendor?.name || "Unknown",
+            vendor,
+          );
+        } catch (e) {
+          console.error("Audit log failed", e);
+        }
+      } catch (error: any) {
+        console.error(error);
+        alert(error.message || "Delete failed");
       }
     }
   };
@@ -460,13 +468,11 @@ export const VendorManagement: React.FC = () => {
       }
 
       await loadData();
-      if (canPublish) setFormSuccess("Vendor saved successfully.");
+      if (canPublish) alert("Saved successfully");
       setTimeout(() => setView("list"), 1500);
     } catch (error) {
       console.error("Save vendor error:", error);
-      setFormError(
-        "Vendor was not saved. Check Firebase permissions or login status.",
-      );
+      alert(error instanceof Error ? error.message : "Save failed");
     } finally {
       setIsSaving(false);
     }
@@ -523,9 +529,9 @@ export const VendorManagement: React.FC = () => {
     setLogoStatus("Optimizing...");
     try {
       const optimizedBlob = await optimizeImageToWebP(file, {
-        maxWidth: 512,
-        maxHeight: 512,
-        quality: 0.82,
+        maxWidth: 800,
+        maxHeight: 800,
+        quality: 0.86,
       });
       if (optimizedBlob.size > 200 * 1024) {
         console.warn(
@@ -537,11 +543,8 @@ export const VendorManagement: React.FC = () => {
         formData.id ||
         `VEND-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
       if (!formData.id) setFormData((prev) => ({ ...prev, id: vendorId }));
-      const url = await vendorAssetService.uploadVendorLogo(
-        vendorId,
-        optimizedBlob,
-      );
-      setFormData((prev) => ({ ...prev, logoAssetUrl: url, logoUrl: url }));
+      const url = await vendorService.uploadVendorLogo(vendorId, optimizedBlob);
+      setFormData((prev) => ({ ...prev, logoAssetUrl: url }));
       setLogoStatus("Uploaded");
       setTimeout(() => setLogoStatus(""), 3000);
 
@@ -578,8 +581,8 @@ export const VendorManagement: React.FC = () => {
     try {
       const optimizedBlob = await optimizeImageToWebP(file, {
         maxWidth: 1600,
-        maxHeight: 600,
-        quality: 0.82,
+        maxHeight: 700,
+        quality: 0.86,
       });
       if (optimizedBlob.size > 500 * 1024) {
         console.warn(
@@ -591,11 +594,11 @@ export const VendorManagement: React.FC = () => {
         formData.id ||
         `VEND-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
       if (!formData.id) setFormData((prev) => ({ ...prev, id: vendorId }));
-      const url = await vendorAssetService.uploadVendorBanner(
+      const url = await vendorService.uploadVendorBanner(
         vendorId,
         optimizedBlob,
       );
-      setFormData((prev) => ({ ...prev, bannerAssetUrl: url, bannerUrl: url }));
+      setFormData((prev) => ({ ...prev, bannerAssetUrl: url }));
       setBannerStatus("Uploaded");
       setTimeout(() => setBannerStatus(""), 3000);
 

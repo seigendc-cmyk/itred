@@ -15,7 +15,7 @@ import {
   SearchInput,
 } from "../components/CommonUI.tsx";
 import {
-  Activity,
+  Activity as ActivityIcon,
   MessageSquare,
   CheckCircle2,
   PhoneCall,
@@ -572,7 +572,7 @@ export const WhatsAppCommunityBI: React.FC = () => {
         <StatCard
           label="Activities"
           value={bi.exec.activities}
-          icon={Activity}
+          icon={ActivityIcon}
         />
         <StatCard
           label="Enquiries"

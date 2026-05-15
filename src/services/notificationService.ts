@@ -55,13 +55,32 @@ export const notificationService = {
   createNotification: async (
     notif: Omit<ITredNotification, "id" | "createdAt" | "status">,
   ): Promise<void> => {
-    const newNotif: ITredNotification = {
-      ...notif,
-      id: `NOTIF-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      status: "unread",
-      createdAt: new Date().toISOString(),
-    };
-    await notificationService.create(newNotif);
+    try {
+      const today = new Date().toISOString().split("T")[0];
+      const dedupeKey =
+        notif.dedupeKey ||
+        `${notif.type}:${notif.recordType}:${notif.recordId}:${today}`;
+
+      const all = await notificationService.getAll();
+      const exists = all.some(
+        (n) =>
+          n.dedupeKey === dedupeKey &&
+          (n.status === "unread" || n.status === "read"),
+      );
+
+      if (exists) return; // Deduplicate identical alerts for today
+
+      const newNotif: ITredNotification = {
+        ...notif,
+        id: `NOTIF-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        status: "unread",
+        dedupeKey,
+        createdAt: new Date().toISOString(),
+      };
+      await notificationService.create(newNotif);
+    } catch (error) {
+      console.error("Failed to safely create notification:", error);
+    }
   },
 
   getUnreadNotifications: async (): Promise<ITredNotification[]> => {

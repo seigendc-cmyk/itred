@@ -212,10 +212,12 @@ export const PricingPlans: React.FC = () => {
       await loadData();
       setIsFormOpen(false);
       setEditingPlan(null);
-    } catch (error) {
+      alert("Saved successfully");
+    } catch (error: any) {
       console.error("Pricing plan save failed", error);
       alert(
-        "Pricing plan was not saved. Check Firebase permissions or network.",
+        error.message ||
+          "Pricing plan was not saved. Check Firebase permissions or network.",
       );
     } finally {
       setIsSavingPlan(false);
@@ -234,96 +236,114 @@ export const PricingPlans: React.FC = () => {
       return;
     }
 
-    const plan = safePlans.find((p) => p.id === id);
-
-    await pricingPlanService.deletePlan(id);
-
-    analyticsService.logEvent({
-      eventType: "PLAN_UPDATED",
-      actorType: "admin",
-      actorName: "System Admin",
-      details: {
-        action: "deleted",
-        planId: id,
-        name: plan?.name,
-      },
-    });
-
-    await loadData();
-
-    // Non-blocking staff audit logging
     try {
-      void staffAuditService.logDelete(
-        "pricing",
-        "pricing_plan",
-        id,
-        plan?.name || "Unknown",
-      );
-    } catch (e) {
-      console.error("Audit log failed", e);
+      const plan = safePlans.find((p) => p.id === id);
+
+      await pricingPlanService.deletePlan(id);
+
+      analyticsService.logEvent({
+        eventType: "PLAN_UPDATED",
+        actorType: "admin",
+        actorName: "System Admin",
+        details: {
+          action: "deleted",
+          planId: id,
+          name: plan?.name,
+        },
+      });
+
+      await loadData();
+      alert("Deleted successfully");
+
+      // Non-blocking staff audit logging
+      try {
+        void staffAuditService.logDelete(
+          "pricing",
+          "pricing_plan",
+          id,
+          plan?.name || "Unknown",
+        );
+      } catch (e) {
+        console.error("Audit log failed", e);
+      }
+    } catch (error: any) {
+      console.error(error);
+      alert(error.message || "Delete failed");
     }
   };
 
   const handleToggleStatus = async (id: string, currentStatus: string) => {
-    const newStatus = currentStatus === "active" ? "inactive" : "active";
-    const plan = safePlans.find((p) => p.id === id);
-
-    await pricingPlanService.updateStatus(id, newStatus as any);
-
-    analyticsService.logEvent({
-      eventType: "PLAN_UPDATED",
-      actorType: "admin",
-      actorName: "System Admin",
-      details: {
-        planId: id,
-        name: plan?.name,
-        status: newStatus,
-      },
-    });
-
-    await loadData();
-
-    // Non-blocking staff audit logging
     try {
-      void staffAuditService.logAction({
-        eventType: "RECORD_UPDATED",
-        module: "pricing",
-        action: `Plan status changed to ${newStatus} for ${plan?.name}`,
-        severity: "critical",
-        recordType: "pricing_plan",
-        recordId: id,
-        recordName: plan?.name,
+      const newStatus = currentStatus === "active" ? "inactive" : "active";
+      const plan = safePlans.find((p) => p.id === id);
+
+      await pricingPlanService.updateStatus(id, newStatus as any);
+
+      analyticsService.logEvent({
+        eventType: "PLAN_UPDATED",
+        actorType: "admin",
+        actorName: "System Admin",
+        details: {
+          planId: id,
+          name: plan?.name,
+          status: newStatus,
+        },
       });
-    } catch (e) {
-      console.error("Audit log failed", e);
+
+      await loadData();
+      alert("Saved successfully");
+
+      // Non-blocking staff audit logging
+      try {
+        void staffAuditService.logAction({
+          eventType: "RECORD_UPDATED",
+          module: "pricing",
+          action: `Plan status changed to ${newStatus} for ${plan?.name}`,
+          severity: "critical",
+          recordType: "pricing_plan",
+          recordId: id,
+          recordName: plan?.name,
+        });
+      } catch (e) {
+        console.error("Audit log failed", e);
+      }
+    } catch (error: any) {
+      console.error(error);
+      alert(error.message || "Save failed");
     }
   };
 
   const handleAssignPlan = async () => {
     if (!vendorToAssign || !targetPlanId) return;
 
-    const updatedVendor = {
-      ...vendorToAssign,
-      planId: targetPlanId,
-      updatedAt: new Date().toISOString(),
-      updatedBy: "Admin",
-    };
+    try {
+      const updatedVendor = {
+        ...vendorToAssign,
+        planId: targetPlanId,
+        updatedAt: new Date().toISOString(),
+        updatedBy: "Admin",
+      };
 
-    await vendorService.updateVendor(updatedVendor);
+      await vendorService.updateVendor(updatedVendor);
 
-    analyticsService.logEvent({
-      eventType: "PLAN_ASSIGNED_TO_VENDOR",
-      actorType: "admin",
-      actorName: "System Admin",
-      vendorId: vendorToAssign.id,
-      vendorName: vendorToAssign.name,
-      details: { planId: targetPlanId },
-    });
+      analyticsService.logEvent({
+        eventType: "PLAN_ASSIGNED_TO_VENDOR",
+        actorType: "admin",
+        actorName: "System Admin",
+        vendorId: vendorToAssign.id,
+        vendorName: vendorToAssign.name,
+        details: { planId: targetPlanId },
+      });
 
-    await loadData();
-    setIsAssignModalOpen(false);
-    setVendorToAssign(null);
-    setTargetPlanId("");
+      await loadData();
+      setIsAssignModalOpen(false);
+      setVendorToAssign(null);
+      setTargetPlanId("");
+      alert("Saved successfully");
+    } catch (error: any) {
+      console.error(error);
+      alert(error.message || "Save failed");
+    }
   };
 
   const getUsage = (vendorId: string) => {

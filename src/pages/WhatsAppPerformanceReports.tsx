@@ -51,7 +51,6 @@ import { notificationService } from "../services/notificationService.ts";
 type TabMode = "vendor" | "rpn" | "product" | "followup";
 
 export const WhatsAppPerformanceReports: React.FC = () => {
-  // WHATSAPP_REPORTS_RUNTIME_STABILITY_PATCH
   const [rawLogs, setRawLogs] = useState<WhatsAppActivityLog[]>([]);
   const [activeTab, setActiveTab] = useState<TabMode>("vendor");
   const [rpns, setRpns] = useState<RPN[]>([]);
@@ -205,10 +204,6 @@ export const WhatsAppPerformanceReports: React.FC = () => {
     return summary;
   }, [filteredLogs]);
 
-  
-
-
-
   // Vendor Reports
   const vendorReports = useMemo(() => {
     const vMap = new Map<string, any>();
@@ -329,10 +324,42 @@ export const WhatsAppPerformanceReports: React.FC = () => {
       .sort((a, b) => b.totalActivities - a.totalActivities);
   }, [filteredLogs]);
 
-  // WhatsApp report notification automation temporarily disabled for runtime stability.
-  // Rebuild this later through a debounced service after all report arrays are initialized.
+  useEffect(() => {
+    if (execSummary.overdueFollowUps > 0) {
+      void notificationService.createNotification({
+        type: "task_due",
+        priority: "critical",
+        title: "Overdue Follow-ups Detected",
+        message: `${execSummary.overdueFollowUps} follow-ups are currently overdue across the network.`,
+        recordType: "WhatsApp Reports",
+        recordId: "bi-overdue-followups",
+      });
+    }
+    if (execSummary.highPriority > 0) {
+      void notificationService.createNotification({
+        type: "lead_followup",
+        priority: "critical",
+        title: "High Priority Issues Pending",
+        message: `${execSummary.highPriority} critical priority items remain unresolved.`,
+        recordType: "WhatsApp Reports",
+        recordId: "bi-high-priority",
+      });
+    }
+    vendorReports.forEach((v) => {
+      if (v.missedResponses >= 2) {
+        void notificationService.createNotification({
+          type: "customer_feedback",
+          priority: "medium",
+          title: "Repeated Missed Responses",
+          message: `${v.vendorName} has missed ${v.missedResponses} responses.`,
+          recordType: "WhatsApp Reports",
+          recordId: `vendor-missed-${v.vendorId}`,
+        });
+      }
+    });
+  }, [execSummary, vendorReports]);
 
-// RPN Reports
+  // RPN Reports
   const rpnReports = useMemo(() => {
     const rpnMap = new Map<string, any>();
 
@@ -490,31 +517,37 @@ export const WhatsAppPerformanceReports: React.FC = () => {
       );
   }, [filteredLogs]);
 
-  const handleMarkFollowUpDone = (log: WhatsAppActivityLog) => {
-    const notes = log.notes
-      ? `${log.notes}\n[Follow-up marked done on ${new Date().toLocaleDateString()}]`
-      : `[Follow-up marked done on ${new Date().toLocaleDateString()}]`;
+  const handleMarkFollowUpDone = async (log: WhatsAppActivityLog) => {
+    try {
+      const notes = log.notes
+        ? `${log.notes}\n[Follow-up marked done on ${new Date().toLocaleDateString()}]`
+        : `[Follow-up marked done on ${new Date().toLocaleDateString()}]`;
 
-    whatsappActivityService.updateLog(log.id, {
-      followUpRequired: false,
-      responseStatus: "RESPONDED",
-      notes: notes,
-    });
+      await whatsappActivityService.updateLog(log.id, {
+        followUpRequired: false,
+        responseStatus: "RESPONDED",
+        notes: notes,
+      });
 
-    const newLog: WhatsAppActivityLog = {
-      ...log,
-      id: `WA-${Date.now()}`,
-      activityDate: new Date().toISOString().split("T")[0],
-      activityType: "FOLLOW_UP_DONE",
-      notes: `Follow-up completed for original log: ${log.id}`,
-      followUpRequired: false,
-      followUpDate: undefined,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+      const newLog: WhatsAppActivityLog = {
+        ...log,
+        id: `WA-${Date.now()}`,
+        activityDate: new Date().toISOString().split("T")[0],
+        activityType: "FOLLOW_UP_DONE",
+        notes: `Follow-up completed for original log: ${log.id}`,
+        followUpRequired: false,
+        followUpDate: undefined,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
 
-    whatsappActivityService.saveLog(newLog);
-    loadData();
+      await whatsappActivityService.saveLog(newLog);
+      loadData();
+      alert("Saved successfully");
+    } catch (error: any) {
+      console.error(error);
+      alert(error.message || "Save failed");
+    }
   };
 
   const handleOpenUpdateModal = (log: WhatsAppActivityLog) => {
@@ -529,30 +562,36 @@ export const WhatsAppPerformanceReports: React.FC = () => {
     setUpdateFormData({});
   };
 
-  const handleModalSave = () => {
+  const handleModalSave = async () => {
     if (!selectedLog) return;
-    whatsappActivityService.updateLog(selectedLog.id, {
-      ...updateFormData,
-      notes: updateFormData.notes,
-      assignedRpnId: updateFormData.assignedRpnId,
-      assignedRpnName: rpns.find((r) => r.id === updateFormData.assignedRpnId)
-        ?.name,
-      assignedToType: updateFormData.assignedToType,
-      assignedStaffId: updateFormData.assignedStaffId,
-      assignedStaffName:
-        staffList.find((s) => s.id === updateFormData.assignedStaffId)
-          ?.displayName ||
-        staffList.find((s) => s.id === updateFormData.assignedStaffId)
-          ?.fullName,
-      leadStatus: updateFormData.leadStatus,
-      followUpDate: updateFormData.followUpDate,
-      priority: updateFormData.priority,
-    });
-    handleModalClose();
-    loadData();
+    try {
+      await whatsappActivityService.updateLog(selectedLog.id, {
+        ...updateFormData,
+        notes: updateFormData.notes,
+        assignedRpnId: updateFormData.assignedRpnId,
+        assignedRpnName: rpns.find((r) => r.id === updateFormData.assignedRpnId)
+          ?.name,
+        assignedToType: updateFormData.assignedToType,
+        assignedStaffId: updateFormData.assignedStaffId,
+        assignedStaffName:
+          staffList.find((s) => s.id === updateFormData.assignedStaffId)
+            ?.displayName ||
+          staffList.find((s) => s.id === updateFormData.assignedStaffId)
+            ?.fullName,
+        leadStatus: updateFormData.leadStatus,
+        followUpDate: updateFormData.followUpDate,
+        priority: updateFormData.priority,
+      });
+      handleModalClose();
+      loadData();
+      alert("Saved successfully");
+    } catch (error: any) {
+      console.error(error);
+      alert(error.message || "Save failed");
+    }
   };
 
-  const handleModalAction = (
+  const handleModalAction = async (
     type:
       | "converted"
       | "lost"
@@ -563,71 +602,77 @@ export const WhatsAppPerformanceReports: React.FC = () => {
   ) => {
     if (!selectedLog) return;
 
-    const createNewActivity = (
-      activityType: WhatsAppActivityType,
-      notes: string,
-    ) => {
-      const newLog: WhatsAppActivityLog = {
-        ...selectedLog,
-        id: `WA-${Date.now()}`,
-        activityDate: new Date().toISOString().split("T")[0],
-        activityType,
-        notes,
-        followUpRequired: false,
-        followUpDate: undefined,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+    try {
+      const createNewActivity = async (
+        activityType: WhatsAppActivityType,
+        notes: string,
+      ) => {
+        const newLog: WhatsAppActivityLog = {
+          ...selectedLog,
+          id: `WA-${Date.now()}`,
+          activityDate: new Date().toISOString().split("T")[0],
+          activityType,
+          notes,
+          followUpRequired: false,
+          followUpDate: undefined,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        await whatsappActivityService.saveLog(newLog);
       };
-      whatsappActivityService.saveLog(newLog);
-    };
 
-    if (type === "converted" || type === "lost") {
-      whatsappActivityService.updateLog(selectedLog.id, {
-        leadStatus: type === "converted" ? "CONVERTED" : "LOST",
-        followUpRequired: false,
-      });
-      createNewActivity(
-        "FOLLOW_UP_DONE",
-        `Follow-up resulted in ${type} lead for original log: ${selectedLog.id}`,
-      );
-    } else if (type === "vendorResponded") {
-      whatsappActivityService.updateLog(selectedLog.id, {
-        responseStatus: "RESPONDED",
-      });
-      createNewActivity(
-        "VENDOR_RESPONDED",
-        `Vendor responded to enquiry from log: ${selectedLog.id}`,
-      );
-    } else if (type === "vendorDidNotRespond") {
-      whatsappActivityService.updateLog(selectedLog.id, {
-        responseStatus: "MISSED",
-        priority: "HIGH",
-      });
-      createNewActivity(
-        "VENDOR_DID_NOT_RESPOND",
-        `Vendor did not respond to enquiry from log: ${selectedLog.id}. Escalating.`,
-      );
-    } else if (type === "contacted") {
-      whatsappActivityService.updateLog(selectedLog.id, {
-        leadStatus: "CONTACTED",
-      });
-      createNewActivity(
-        "FOLLOW_UP_DONE",
-        `Follow-up contacted for log: ${selectedLog.id}`,
-      );
-    } else if (type === "escalate") {
-      whatsappActivityService.updateLog(selectedLog.id, {
-        responseStatus: "ESCALATED",
-        priority: "CRITICAL",
-      });
-      createNewActivity(
-        "OTHER",
-        `Issue escalated for original log: ${selectedLog.id}`,
-      );
+      if (type === "converted" || type === "lost") {
+        await whatsappActivityService.updateLog(selectedLog.id, {
+          leadStatus: type === "converted" ? "CONVERTED" : "LOST",
+          followUpRequired: false,
+        });
+        await createNewActivity(
+          "FOLLOW_UP_DONE",
+          `Follow-up resulted in ${type} lead for original log: ${selectedLog.id}`,
+        );
+      } else if (type === "vendorResponded") {
+        await whatsappActivityService.updateLog(selectedLog.id, {
+          responseStatus: "RESPONDED",
+        });
+        await createNewActivity(
+          "VENDOR_RESPONDED",
+          `Vendor responded to enquiry from log: ${selectedLog.id}`,
+        );
+      } else if (type === "vendorDidNotRespond") {
+        await whatsappActivityService.updateLog(selectedLog.id, {
+          responseStatus: "MISSED",
+          priority: "HIGH",
+        });
+        await createNewActivity(
+          "VENDOR_DID_NOT_RESPOND",
+          `Vendor did not respond to enquiry from log: ${selectedLog.id}. Escalating.`,
+        );
+      } else if (type === "contacted") {
+        await whatsappActivityService.updateLog(selectedLog.id, {
+          leadStatus: "CONTACTED",
+        });
+        await createNewActivity(
+          "FOLLOW_UP_DONE",
+          `Follow-up contacted for log: ${selectedLog.id}`,
+        );
+      } else if (type === "escalate") {
+        await whatsappActivityService.updateLog(selectedLog.id, {
+          responseStatus: "ESCALATED",
+          priority: "CRITICAL",
+        });
+        await createNewActivity(
+          "OTHER",
+          `Issue escalated for original log: ${selectedLog.id}`,
+        );
+      }
+
+      handleModalClose();
+      loadData();
+      alert("Saved successfully");
+    } catch (error: any) {
+      console.error(error);
+      alert(error.message || "Save failed");
     }
-
-    handleModalClose();
-    loadData();
   };
 
   const inputClass =

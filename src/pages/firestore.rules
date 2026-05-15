@@ -1,35 +1,111 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // TEMP DEV ONLY - Fallback for missing vendorId records
-    match /itred_activity_logs/{docId} {
-      allow get, list: if true;
-      allow create, update: if true;
-      allow delete: if isConsoleAdmin();
+
+    function isConsoleAdmin() {
+      return true;
     }
-    match /itred_catalogue_history/{docId} {
-      allow get, list: if true;
-      allow create, update: if true;
-      allow delete: if isConsoleAdmin();
-    }
-    match /itred_vendors/{docId} {
-      allow get, list: if true;
-      allow create, update: if true;
-      allow delete: if isConsoleAdmin();
-    }
-    match /itred_product_intake/{productId} {
-      allow read, list, create, update: if request.auth != null;
-      allow delete: if request.auth != null;
-    }
-    match /itred_staff_audit_logs/{docId} {
+
+    // Pilot open rules. Must be restricted before production.
+
+    match /itred_system_settings/{document=**} {
       allow get, list, create, update: if true;
       allow delete: if isConsoleAdmin();
     }
-    match /itred_approval_requests/{docId} {
+    match /itred_activity_logs/{document=**} {
       allow get, list, create, update: if true;
       allow delete: if isConsoleAdmin();
     }
-    match /itred_notifications/{docId} {
+    match /itred_console_staff/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+    match /itred_role_templates/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+    match /itred_staff_audit_logs/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+    match /itred_approval_requests/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+    match /itred_notifications/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+    match /itred_staff_tasks/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+    match /itred_vendors/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+    match /itred_products/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+    match /itred_catalogues/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+    match /itred_catalogue_history/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+    match /itred_storefronts/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+    match /itred_pricing_plans/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+    match /itred_cah_links/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+    match /itred_whatsapp_activity/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+    match /itred_whatsapp_sources/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+    match /itred_offline_sync_batches/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+    match /itred_offline_events/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+    match /itred_catalogue_survey_responses/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+    match /itred_lead_followup_responses/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+    match /itred_product_demand_signals/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+    match /itred_vendor_impact_events/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+    match /itred_cah_impact_events/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+
+    match /{document=**} {
       allow get, list, create, update: if true;
       allow delete: if isConsoleAdmin();
     }

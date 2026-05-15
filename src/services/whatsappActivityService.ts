@@ -121,50 +121,58 @@ export const whatsappActivityService = {
   },
 
   evaluateLogRules(log: WhatsAppActivityLog): void {
-    if (log.priority === "HIGH" || log.priority === "CRITICAL") {
-      notificationService.addNotification({
-        type: "WHATSAPP",
-        severity: "CRITICAL",
-        title: `Priority Activity: ${log.priority}`,
-        message: `Activity log ${log.id} requires immediate attention.`,
-        relatedModule: "WhatsApp Activity",
-        relatedRecordId: `priority-${log.id}`,
-      });
-    }
-
-    if (log.followUpRequired && log.followUpDate) {
+    try {
       const today = new Date().toISOString().split("T")[0];
-      if (log.followUpDate <= today) {
-        notificationService.addNotification({
-          type: "WHATSAPP",
-          severity: log.followUpDate < today ? "CRITICAL" : "WARNING",
-          title:
-            log.followUpDate < today
-              ? "Overdue Follow-up"
-              : "Follow-up Due Today",
-          message: `Follow-up is required for task ${log.id}.`,
-          relatedModule: "WhatsApp Activity",
-          relatedRecordId: `followup-${log.id}`,
+
+      if (log.priority === "HIGH" || log.priority === "CRITICAL") {
+        void notificationService.createNotification({
+          type: "lead_followup",
+          priority: log.priority === "CRITICAL" ? "critical" : "high",
+          title: `Priority Activity: ${log.priority}`,
+          message: `Activity log ${log.id} requires immediate attention.`,
+          recordType: "whatsapp_activity",
+          recordId: log.id,
+          dedupeKey: `lead_followup:whatsapp_activity:${log.id}:${today}`,
         });
       }
-    }
 
-    if (
-      log.responseStatus === "MISSED" ||
-      log.responseStatus === "ESCALATED" ||
-      log.activityType === "VENDOR_DID_NOT_RESPOND"
-    ) {
-      notificationService.addNotification({
-        type: "WHATSAPP",
-        severity: "CRITICAL",
-        title:
-          log.activityType === "VENDOR_DID_NOT_RESPOND"
-            ? "Vendor Did Not Respond"
-            : `Vendor Response: ${log.responseStatus}`,
-        message: `Vendor engagement failure requires escalation.`,
-        relatedModule: "WhatsApp Activity",
-        relatedRecordId: `response-${log.id}`,
-      });
+      if (log.followUpRequired && log.followUpDate) {
+        if (log.followUpDate <= today) {
+          void notificationService.createNotification({
+            type: "task_due",
+            priority: log.followUpDate < today ? "critical" : "high",
+            title:
+              log.followUpDate < today
+                ? "Overdue Follow-up"
+                : "Follow-up Due Today",
+            message: `Follow-up is required for task ${log.id}.`,
+            recordType: "whatsapp_activity",
+            recordId: log.id,
+            dedupeKey: `task_due:whatsapp_activity:${log.id}:${today}`,
+          });
+        }
+      }
+
+      if (
+        log.responseStatus === "MISSED" ||
+        log.responseStatus === "ESCALATED" ||
+        log.activityType === "VENDOR_DID_NOT_RESPOND"
+      ) {
+        void notificationService.createNotification({
+          type: "system_alert",
+          priority: "critical",
+          title:
+            log.activityType === "VENDOR_DID_NOT_RESPOND"
+              ? "Vendor Did Not Respond"
+              : `Vendor Response: ${log.responseStatus}`,
+          message: `Vendor engagement failure requires escalation.`,
+          recordType: "whatsapp_activity",
+          recordId: log.id,
+          dedupeKey: `system_alert:whatsapp_activity:${log.id}:${today}`,
+        });
+      }
+    } catch (error) {
+      console.error("Failed to evaluate log rules", error);
     }
   },
 };

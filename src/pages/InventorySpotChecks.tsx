@@ -295,7 +295,7 @@ export const InventorySpotChecks: React.FC = () => {
     };
   }, [safeChecks, biRecommendations]);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!formData.vendorId) return;
 
     const vendor = safeVendors.find((v) => v.id === formData.vendorId);
@@ -352,26 +352,32 @@ export const InventorySpotChecks: React.FC = () => {
       updatedAt: new Date().toISOString(),
     };
 
-    inventorySpotCheckService.saveSpotCheck(check);
+    try {
+      await inventorySpotCheckService.saveSpotCheck(check);
 
-    analyticsService.logEvent({
-      eventType:
-        check.status === "completed"
-          ? "SPOT_CHECK_COMPLETED"
-          : check.status === "escalated"
-            ? "SPOT_CHECK_ESCALATED"
-            : "SPOT_CHECK_SCHEDULED",
-      actorType: "admin",
-      actorName: "System Admin",
-      vendorId: vendor.id,
-      vendorName: vendor.name,
-      spotCheckId: check.id,
-      details: { type: check.type, result: check.result },
-    });
+      analyticsService.logEvent({
+        eventType:
+          check.status === "completed"
+            ? "SPOT_CHECK_COMPLETED"
+            : check.status === "escalated"
+              ? "SPOT_CHECK_ESCALATED"
+              : "SPOT_CHECK_SCHEDULED",
+        actorType: "admin",
+        actorName: "System Admin",
+        vendorId: vendor.id,
+        vendorName: vendor.name,
+        spotCheckId: check.id,
+        details: { type: check.type, result: check.result },
+      });
 
-    setShowScheduleModal(false);
-    setSelectedCheck(null);
-    loadData();
+      setShowScheduleModal(false);
+      setSelectedCheck(null);
+      loadData();
+      alert("Saved successfully");
+    } catch (error: any) {
+      console.error(error);
+      alert(error.message || "Save failed");
+    }
   };
 
   return (
