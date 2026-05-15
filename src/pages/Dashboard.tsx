@@ -93,6 +93,7 @@ const safeLoadArray = async <T,>(
 };
 
 export const Dashboard: React.FC = () => {
+  console.log("Dashboard mounted successfully");
   const [data, setData] = useState<DashboardData>(EMPTY_DASHBOARD_DATA);
 
   useEffect(() => {
@@ -122,7 +123,9 @@ export const Dashboard: React.FC = () => {
           fieldCollections,
           plans,
         ] = await Promise.all([
-          safeLoadArray<Vendor>("itred_vendors", () => vendorService.getVendors()),
+          safeLoadArray<Vendor>("itred_vendors", () =>
+            vendorService.getVendors(),
+          ),
           safeLoadArray<Product>("itred_products", () =>
             productService.getProducts(),
           ),

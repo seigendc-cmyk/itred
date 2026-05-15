@@ -242,6 +242,9 @@ export const RPNPerformanceDashboard: React.FC = () => {
     if (!settings.rpnPerformanceSettings?.enableThresholdAlerts) return;
     if (rpnPerformance.length === 0) return;
 
+    // Notification automation temporarily disabled until runtime stability confirmed.
+    return;
+
     const evaluateRpnThresholdAlerts = async () => {
       const allNotifs = await notificationService.getAll();
       const today = new Date().toISOString().split("T")[0];

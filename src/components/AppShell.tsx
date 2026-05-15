@@ -201,15 +201,19 @@ export const AppShell: React.FC<AppShellProps> = ({
   >([]);
   const [sessionIgnored, setSessionIgnored] = useState<Set<string>>(new Set());
 
+  console.log("AppShell mounted successfully");
+
   const loadNotifications = useCallback(async () => {
     try {
       const latestNotifications = await notificationService.getAll();
-      setNotifications(latestNotifications);
+      setNotifications(
+        Array.isArray(latestNotifications) ? latestNotifications : [],
+      );
     } catch (error) {
       console.error("Failed to load notifications", error);
       setNotifications([]);
     }
-  }, [loadNotifications]);
+  }, []);
 
   const openAlertsCount = notifications.filter(
     (n) =>
@@ -232,13 +236,18 @@ export const AppShell: React.FC<AppShellProps> = ({
     const handleUpdate = () => {
       void loadNotifications();
     };
-    const handleToast = (e: any) => {
+
+    const handleToast = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      const detail = customEvent.detail || {};
       const newToast = {
         id: Date.now(),
-        message: e.detail.message,
-        type: e.detail.type,
+        message: detail.message || "Notification",
+        type: detail.type || "info",
       };
+
       setToasts((prev) => [...prev, newToast]);
+
       setTimeout(
         () => setToasts((prev) => prev.filter((t) => t.id !== newToast.id)),
         3000,
@@ -252,7 +261,7 @@ export const AppShell: React.FC<AppShellProps> = ({
       window.removeEventListener("itred_notifications_updated", handleUpdate);
       window.removeEventListener("itred_toast", handleToast);
     };
-  }, []);
+  }, [loadNotifications]);
 
   useEffect(() => {
     const group = MENU_GROUPS.find((g) =>

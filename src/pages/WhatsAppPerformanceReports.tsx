@@ -325,6 +325,9 @@ export const WhatsAppPerformanceReports: React.FC = () => {
   }, [filteredLogs]);
 
   useEffect(() => {
+    // Notification automation temporarily disabled until runtime stability confirmed.
+    return;
+
     if (execSummary.overdueFollowUps > 0) {
       void notificationService.createNotification({
         type: "task_due",
