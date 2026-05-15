@@ -577,10 +577,10 @@ export const StaffManagement: React.FC = () => {
     (s) => s.staffCode === formData.staffCode,
   );
 
-  const handleScanDuplicates = () => {
+  const handleScanDuplicates = async () => {
     setIsScanningDuplicates(true);
     try {
-      const dups = staffService.findDuplicateStaffCodes();
+      const dups = await staffService.findDuplicateStaffCodes();
       setDuplicateScanResult(dups);
       if (dups.length === 0) {
         alert("No duplicate staff codes found.");
@@ -713,18 +713,28 @@ export const StaffManagement: React.FC = () => {
       localRoleTemplates[formData.role as string]?.actionPermissions || {};
 
     const now = new Date().toISOString();
-    const staffCode = selectedStaff
+
+    let finalStaffCode = selectedStaff
       ? formData.staffCode || selectedStaff.staffCode
-      : formData.staffCode || staffService.generateStaffCode();
+      : formData.staffCode;
+
+    if (!selectedStaff && !finalStaffCode) {
+      try {
+        finalStaffCode =
+          await staffService.generateUniqueStaffCodeFromFirebase();
+      } catch (e) {
+        finalStaffCode = staffService.generateStaffCode();
+      }
+    }
 
     const staffId = selectedStaff
       ? selectedStaff.id
-      : formData.id || staffCode || `STF-${Date.now()}`;
+      : formData.id || finalStaffCode || `STF-${Date.now()}`;
 
     const staffToSave: Staff = stripUndefinedDeep({
       ...(formData as Staff),
       id: staffId,
-      staffCode,
+      staffCode: finalStaffCode as string,
       menuPermissions: !selectedStaff
         ? defaultPermissions
         : formData.menuPermissions || defaultPermissions,
@@ -811,6 +821,7 @@ export const StaffManagement: React.FC = () => {
       }
 
       setStaffList(asArray<Staff>(staffService.getAllStaff()));
+      await loadStaff();
       await loadLogs();
 
       window.setTimeout(() => {
@@ -825,7 +836,7 @@ export const StaffManagement: React.FC = () => {
       setView("list");
       focusMainContent();
     } catch (error: any) {
-      console.error(error);
+      console.error("Failed to save staff", error);
       if (
         error.message &&
         error.message.includes("already exists on another staff record")
@@ -845,9 +856,9 @@ export const StaffManagement: React.FC = () => {
           action: "Blocked duplicate staff code/email save",
         });
         setFormError(error.message);
-      } else {
-        alert(error.message || "Failed to save staff.");
       }
+
+      alert(error instanceof Error ? error.message : "Failed to save staff.");
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
   };
@@ -1955,6 +1966,7 @@ export const StaffManagement: React.FC = () => {
                               ...prev,
                               staffCode: newCode,
                             }));
+                            alert("New staff code generated.");
                           }}
                         >
                           Generate New Staff Code
@@ -1995,6 +2007,7 @@ export const StaffManagement: React.FC = () => {
                           ...prev,
                           staffCode: newCode,
                         }));
+                        alert("New staff code generated.");
                       }}
                       className="whitespace-nowrap px-3 py-2 text-xs"
                     >

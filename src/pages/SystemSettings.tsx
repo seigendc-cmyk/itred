@@ -87,7 +87,7 @@ export const SystemSettings: React.FC = () => {
         void staffAuditService.logAction({
           eventType: "SYSTEM_SETTING_CHANGED",
           module: "settings",
-          action: "Updated system settings",
+          action: "Updated session timeout settings",
           severity: "critical",
           beforeSnapshot: null,
           afterSnapshot: settingsToSave,
@@ -369,6 +369,54 @@ export const SystemSettings: React.FC = () => {
               </PrimaryButton>
             </div>
           )}
+        </div>
+      </DataPanel>
+
+      <DataPanel title="Security & Session Controls">
+        <div className="p-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <FormField label="Session Timeout (minutes)">
+              <input
+                type="number"
+                value={settings.sessionTimeoutMinutes ?? 30}
+                onChange={(e) => {
+                  const timeoutMinutes = Math.max(
+                    1,
+                    Math.min(1440, Number(e.target.value) || 30),
+                  );
+                  setSettings((prev) => ({
+                    ...prev,
+                    sessionTimeoutMinutes: timeoutMinutes,
+                  }));
+                }}
+                className="border-2 border-stone-200 p-2 text-sm outline-none focus:border-brand-orange w-full"
+                min="1"
+                max="1440"
+              />
+            </FormField>
+
+            <div className="flex items-center gap-4 pt-5">
+              <label className="flex items-center gap-2 text-xs font-bold uppercase text-stone-600 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={settings.enableSessionTimeout ?? true}
+                  onChange={(e) =>
+                    setSettings((prev) => ({
+                      ...prev,
+                      enableSessionTimeout: e.target.checked,
+                    }))
+                  }
+                  className="accent-brand-orange w-4 h-4"
+                />
+                Enable Session Timeout
+              </label>
+            </div>
+          </div>
+          <div className="mt-6 border-t border-stone-100 pt-6">
+            <PrimaryButton onClick={handleSave} disabled={isSaving}>
+              {isSaving ? "Saving..." : "Save Settings"}
+            </PrimaryButton>
+          </div>
         </div>
       </DataPanel>
 

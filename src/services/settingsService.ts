@@ -14,10 +14,17 @@ export const settingsService = {
     try {
       const data =
         await getStorageAdapter().getItem<SystemSettings>(SETTINGS_KEY);
-      return data || {};
+      return {
+        enableSessionTimeout: true,
+        sessionTimeoutMinutes: 30,
+        ...(data || {}),
+      };
     } catch (e) {
       console.warn("Failed to get system settings", e);
-      return {};
+      return {
+        enableSessionTimeout: true,
+        sessionTimeoutMinutes: 30,
+      };
     }
   },
 

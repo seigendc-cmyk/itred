@@ -1316,6 +1316,8 @@ export interface SystemSettings {
   defaultFeedbackWhatsAppNumber?: string;
   syncEndpointUrl?: string;
   rpnPerformanceSettings?: RPNPerformanceSettings;
+  enableSessionTimeout?: boolean;
+  sessionTimeoutMinutes?: number;
   updatedAt?: string;
 }
 

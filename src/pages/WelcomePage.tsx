@@ -17,11 +17,13 @@ import { Staff } from "../types.ts";
 interface WelcomePageProps {
   googleEmail?: string;
   onLoginSuccess: (session: any) => void;
+  sessionMessage?: string | null;
 }
 
 const WelcomePage: React.FC<WelcomePageProps> = ({
   googleEmail = "user@example.com",
   onLoginSuccess,
+  sessionMessage,
 }) => {
   const [allStaff, setAllStaff] = useState<Staff[]>([]);
   const [selectedStaffId, setSelectedStaffId] = useState<string>("");
@@ -37,25 +39,91 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
   const [setupConfirmPasscode, setSetupConfirmPasscode] = useState<string>("");
   const [setupShowPass, setSetupShowPass] = useState<boolean>(false);
 
+  const refreshStaff = async () => {
+    try {
+      const firebaseStaff = await staffService.loadStaffFromFirebase();
+      const safeStaff = Array.isArray(firebaseStaff) ? firebaseStaff : [];
+      setAllStaff(safeStaff);
+      setIsSetupMode(safeStaff.length === 0);
+      return safeStaff;
+    } catch (error) {
+      console.error("Failed to load staff from Firebase", error);
+      const localStaff = staffService.getAllStaff();
+      const safeLocalStaff = Array.isArray(localStaff) ? localStaff : [];
+      setAllStaff(safeLocalStaff);
+      setIsSetupMode(safeLocalStaff.length === 0);
+      return safeLocalStaff;
+    }
+  };
+
   useEffect(() => {
-    const staff = staffService.getAllStaff();
-    setAllStaff(staff);
-    setIsSetupMode(staff.length === 0);
+    void refreshStaff();
   }, []);
 
   const selectedStaff = allStaff.find((staff) => staff.id === selectedStaffId);
 
-  const refreshStaff = () => {
-    const staff = staffService.getAllStaff();
-    setAllStaff(staff);
-    setIsSetupMode(staff.length === 0);
-  };
-
-  const handleLogin = () => {
+  const handleLogin = async () => {
     setLoginError(null);
 
-    if (!selectedStaff) {
-      setLoginError("Please select a staff member.");
+    if (!selectedStaffId) {
+      setLoginError("Please select your name.");
+      return;
+    }
+
+    let staffToLogin = allStaff.find((staff) => staff.id === selectedStaffId);
+
+    if (!staffToLogin) {
+      const latestStaff = await refreshStaff();
+      staffToLogin = latestStaff.find((staff) => staff.id === selectedStaffId);
+
+      if (!staffToLogin) {
+        setLoginError(
+          "Selected staff profile was not found. Refresh and try again.",
+        );
+        return;
+      }
+    }
+
+    if (
+      staffToLogin.status === "suspended" ||
+      staffToLogin.status === "inactive"
+    ) {
+      setLoginError(
+        "This staff account is suspended or inactive. Contact SysAdmin.",
+      );
+      try {
+        analyticsService.logEvent({
+          eventType: "STAFF_LOGIN_BLOCKED_SUSPENDED",
+          actorType: "system",
+          actorName: "Login System",
+          result: "blocked",
+          details: {
+            staffId: staffToLogin.id,
+            staffName: staffToLogin.fullName,
+            reason: staffToLogin.status,
+          },
+        });
+      } catch (err) {}
+      return;
+    }
+
+    if (staffToLogin.isLocked) {
+      setLoginError(
+        "This account is locked due to too many failed attempts. Contact SysAdmin.",
+      );
+      try {
+        analyticsService.logEvent({
+          eventType: "STAFF_LOGIN_BLOCKED_LOCKED",
+          actorType: "system",
+          actorName: "Login System",
+          result: "locked",
+          details: {
+            staffId: staffToLogin.id,
+            staffName: staffToLogin.fullName,
+            reason: "locked",
+          },
+        });
+      } catch (err) {}
       return;
     }
 
@@ -64,139 +132,107 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
       return;
     }
 
-    if (selectedStaff.status === "suspended") {
-      setLoginError("This staff account is suspended. Contact SysAdmin.");
+    try {
+      if (passcode === staffToLogin.passcode) {
+        const session = {
+          staffId: staffToLogin.id,
+          staffCode: staffToLogin.staffCode,
+          staffName: staffToLogin.fullName,
+          displayName: staffToLogin.displayName,
+          role: staffToLogin.role,
+          desk: staffToLogin.desk,
+          menuPermissions: staffToLogin.menuPermissions,
+          actionPermissions: staffToLogin.actionPermissions,
+          loginAt: new Date().toISOString(),
+          googleEmailUsed: googleEmail,
+        };
 
-      analyticsService.logEvent({
-        eventType: "STAFF_LOGIN_BLOCKED_SUSPENDED",
-        actorType: "system",
-        actorName: "Login System",
-        result: "blocked",
-        details: {
-          staffId: selectedStaff.id,
-          staffName: selectedStaff.fullName,
-          reason: "suspended",
-        },
-      });
+        localStorage.setItem("activeStaffSession", JSON.stringify(session));
 
-      return;
-    }
+        const updatedStaff: Staff = {
+          ...staffToLogin,
+          failedAttemptCount: 0,
+          isLocked: false,
+          updatedAt: new Date().toISOString(),
+        };
 
-    if (selectedStaff.isLocked) {
-      setLoginError(
-        "This account is locked due to too many failed attempts. Contact SysAdmin.",
-      );
+        await staffService.saveStaff(updatedStaff);
 
-      analyticsService.logEvent({
-        eventType: "STAFF_LOGIN_BLOCKED_LOCKED",
-        actorType: "system",
-        actorName: "Login System",
-        result: "locked",
-        details: {
-          staffId: selectedStaff.id,
-          staffName: selectedStaff.fullName,
-          reason: "locked",
-        },
-      });
+        analyticsService.logEvent({
+          eventType: "STAFF_LOGIN_SUCCESS",
+          actorType:
+            staffToLogin.role === "Admin" || staffToLogin.role === "SysAdmin"
+              ? "admin"
+              : "backend_staff",
+          actorName: staffToLogin.fullName,
+          actorId: staffToLogin.id,
+          result: "success",
+          details: {
+            staffId: staffToLogin.id,
+            staffName: staffToLogin.fullName,
+            role: staffToLogin.role,
+            desk: staffToLogin.desk,
+            googleEmail,
+          },
+        });
 
-      return;
-    }
+        onLoginSuccess(session);
+        return;
+      }
 
-    if (passcode === selectedStaff.passcode) {
-      const session = {
-        staffId: selectedStaff.id,
-        staffCode: selectedStaff.staffCode,
-        staffName: selectedStaff.fullName,
-        displayName: selectedStaff.displayName,
-        role: selectedStaff.role,
-        desk: selectedStaff.desk,
-        menuPermissions: selectedStaff.menuPermissions,
-        loginAt: new Date().toISOString(),
-        googleEmailUsed: googleEmail,
-      };
-
-      localStorage.setItem("activeStaffSession", JSON.stringify(session));
+      const failedAttemptCount = (staffToLogin.failedAttemptCount || 0) + 1;
+      const isLocked = failedAttemptCount >= 5;
 
       const updatedStaff: Staff = {
-        ...selectedStaff,
-        failedAttemptCount: 0,
-        isLocked: false,
+        ...staffToLogin,
+        failedAttemptCount,
+        isLocked,
         updatedAt: new Date().toISOString(),
       };
 
-      staffService.saveStaff(updatedStaff);
+      await staffService.saveStaff(updatedStaff);
 
-      analyticsService.logEvent({
-        eventType: "STAFF_LOGIN_SUCCESS",
-        actorType:
-          selectedStaff.role === "Admin" || selectedStaff.role === "SysAdmin"
-            ? "admin"
-            : "backend_staff",
-        actorName: selectedStaff.fullName,
-        actorId: selectedStaff.id,
-        result: "success",
-        details: {
-          staffId: selectedStaff.id,
-          staffName: selectedStaff.fullName,
-          role: selectedStaff.role,
-          desk: selectedStaff.desk,
-          googleEmail,
-        },
-      });
+      if (isLocked) {
+        setLoginError(
+          "Too many failed attempts. Your account has been locked. Contact SysAdmin.",
+        );
 
-      onLoginSuccess(session);
-      return;
+        analyticsService.logEvent({
+          eventType: "STAFF_LOCKED_AFTER_FAILED_ATTEMPTS",
+          actorType: "system",
+          actorName: "Login System",
+          actorId: staffToLogin.id,
+          result: "locked",
+          details: {
+            staffId: staffToLogin.id,
+            staffName: staffToLogin.fullName,
+            attempts: failedAttemptCount,
+          },
+        });
+      } else {
+        setLoginError(
+          `Invalid passcode. ${5 - failedAttemptCount} attempts remaining.`,
+        );
+
+        analyticsService.logEvent({
+          eventType: "STAFF_LOGIN_FAILED",
+          actorType: "system",
+          actorName: "Login System",
+          actorId: staffToLogin.id,
+          result: "failed",
+          details: {
+            staffId: staffToLogin.id,
+            staffName: staffToLogin.fullName,
+            attempts: failedAttemptCount,
+          },
+        });
+      }
+
+      await refreshStaff();
+    } catch (error) {
+      console.error("Login handling error", error);
+      setLoginError("An error occurred during login. Please try again.");
     }
-
-    const failedAttemptCount = (selectedStaff.failedAttemptCount || 0) + 1;
-    const isLocked = failedAttemptCount >= 5;
-
-    const updatedStaff: Staff = {
-      ...selectedStaff,
-      failedAttemptCount,
-      isLocked,
-      updatedAt: new Date().toISOString(),
-    };
-
-    staffService.saveStaff(updatedStaff);
-
-    if (isLocked) {
-      setLoginError(
-        "Too many failed attempts. Your account has been locked. Contact SysAdmin.",
-      );
-
-      analyticsService.logEvent({
-        eventType: "STAFF_LOCKED_AFTER_FAILED_ATTEMPTS",
-        actorType: "system",
-        actorName: "Login System",
-        actorId: selectedStaff.id,
-        result: "locked",
-        details: {
-          staffId: selectedStaff.id,
-          staffName: selectedStaff.fullName,
-          attempts: failedAttemptCount,
-        },
-      });
-    } else {
-      setLoginError(
-        `Invalid passcode. ${5 - failedAttemptCount} attempts remaining.`,
-      );
-
-      analyticsService.logEvent({
-        eventType: "STAFF_LOGIN_FAILED",
-        actorType: "system",
-        actorName: "Login System",
-        actorId: selectedStaff.id,
-        result: "failed",
-        details: {
-          staffId: selectedStaff.id,
-          staffName: selectedStaff.fullName,
-          attempts: failedAttemptCount,
-        },
-      });
-    }
-
-    refreshStaff();
   };
 
   const handleCancel = () => {
@@ -206,7 +242,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
     setLoginError(null);
   };
 
-  const handleFinishSetup = () => {
+  const handleFinishSetup = async () => {
     setLoginError(null);
 
     if (!setupFullName.trim() || !setupDisplayName.trim()) {
@@ -224,64 +260,93 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
       return;
     }
 
-    const now = new Date().toISOString();
+    try {
+      const now = new Date().toISOString();
+      let staffCode = "";
+      try {
+        staffCode = await staffService.generateUniqueStaffCodeFromFirebase();
+      } catch (e) {
+        staffCode = staffService.generateStaffCode();
+      }
 
-    const defaultSysAdmin: Staff = {
-      id: `STAFF-${Date.now()}`,
-      staffCode: staffService.generateStaffCode(),
-      fullName: setupFullName.trim(),
-      displayName: setupDisplayName.trim(),
-      role: "Admin",
-      desk: "SysAdmin Desk",
-      email: setupEmail.trim() || googleEmail || "sysadmin@itred.com",
-      phone: "",
-      whatsapp: "",
-      googleEmailAllowed: googleEmail,
-      assignedBranchId: "BR-MAIN",
-      status: "active",
-      passcode: setupPasscode,
-      mustChangePasscode: true,
-      failedAttemptCount: 0,
-      isLocked: false,
-      menuPermissions: staffService.ROLE_TEMPLATES["SysAdmin"] || {},
-      createdBy: "system",
-      updatedBy: "system",
-      createdAt: now,
-      updatedAt: now,
-    };
+      const defaultSysAdmin: Staff = {
+        id: `STAFF-${Date.now()}`,
+        staffCode,
+        fullName: setupFullName.trim(),
+        displayName: setupDisplayName.trim(),
+        role: "SysAdmin",
+        desk: "SysAdmin Desk",
+        email: setupEmail.trim() || googleEmail || "sysadmin@itred.com",
+        phone: "",
+        whatsapp: "",
+        googleEmailAllowed: googleEmail,
+        assignedBranchId: "BR-MAIN",
+        status: "active",
+        passcode: setupPasscode,
+        mustChangePasscode: true,
+        failedAttemptCount: 0,
+        isLocked: false,
+        menuPermissions:
+          (staffService.ROLE_TEMPLATES["SysAdmin"] as any)?.menuPermissions ||
+          staffService.ROLE_TEMPLATES["SysAdmin"] ||
+          {},
+        actionPermissions:
+          (staffService.ROLE_TEMPLATES["SysAdmin"] as any)?.actionPermissions ||
+          {},
+        createdBy: "system",
+        updatedBy: "system",
+        createdAt: now,
+        updatedAt: now,
+      };
 
-    staffService.saveStaff(defaultSysAdmin);
+      await staffService.saveStaff(defaultSysAdmin);
 
-    analyticsService.logEvent({
-      eventType: "FIRST_SYSADMIN_CREATED",
-      actorType: "system",
-      actorName: "Initial Setup",
-      actorId: defaultSysAdmin.id,
-      result: "success",
-      details: {
-        staffId: defaultSysAdmin.id,
-        staffName: defaultSysAdmin.fullName,
-        role: defaultSysAdmin.role,
-        desk: defaultSysAdmin.desk,
-      },
-    });
+      try {
+        analyticsService.logEvent({
+          eventType: "FIRST_SYSADMIN_CREATED" as any,
+          actorType: "system",
+          actorName: "Initial Setup",
+          actorId: defaultSysAdmin.id,
+          result: "success",
+          details: {
+            staffId: defaultSysAdmin.id,
+            staffName: defaultSysAdmin.fullName,
+            role: defaultSysAdmin.role,
+            desk: defaultSysAdmin.desk,
+          },
+        });
+      } catch (analyticsError) {
+        console.error("Analytics log failed", analyticsError);
+      }
 
-    refreshStaff();
-    setIsSetupMode(false);
-    setSelectedStaffId(defaultSysAdmin.id);
-    setSetupFullName("");
-    setSetupDisplayName("");
-    setSetupEmail("");
-    setSetupPasscode("");
-    setSetupConfirmPasscode("");
-    setLoginError(
-      "First SysAdmin profile created. Please enter your passcode to access the desk.",
-    );
+      await refreshStaff();
+      setIsSetupMode(false);
+      setSelectedStaffId(defaultSysAdmin.id);
+      setSetupFullName("");
+      setSetupDisplayName("");
+      setSetupEmail("");
+      setSetupPasscode("");
+      setSetupConfirmPasscode("");
+      setLoginError(
+        "First SysAdmin profile created. Please enter your passcode to access the desk.",
+      );
+    } catch (error) {
+      console.error("Setup failed", error);
+      setLoginError("Failed to initialize system. Please check console.");
+    }
   };
 
   const isSelectedStaffBlocked =
     !!selectedStaff &&
     (selectedStaff.status === "suspended" || selectedStaff.isLocked);
+
+  const selectableStaff = allStaff.filter(
+    (s) =>
+      s.status === "active" ||
+      s.role === "Admin" ||
+      s.role === "SysAdmin" ||
+      s.desk === "SysAdmin Desk",
+  );
 
   return (
     <div style={styles.page}>
@@ -316,12 +381,23 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
               }}
               disabled={isSetupMode}
             >
-              <option value="">-- Select Staff --</option>
-              {allStaff.map((staff) => (
-                <option key={staff.id} value={staff.id}>
-                  {staff.fullName}
+              {selectableStaff.length > 0 ? (
+                <>
+                  <option value="">-- Select Staff --</option>
+                  {selectableStaff.map((staff) => (
+                    <option key={staff.id} value={staff.id}>
+                      {staff.displayName ||
+                        staff.fullName ||
+                        staff.email ||
+                        staff.staffCode}
+                    </option>
+                  ))}
+                </>
+              ) : (
+                <option value="" disabled>
+                  No active staff profiles found. Create SysAdmin profile first.
                 </option>
-              ))}
+              )}
             </select>
           </div>
 
@@ -574,6 +650,21 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
                   Cancel Selection
                 </button>
               </div>
+            </div>
+          )}
+
+          {!isSetupMode && !selectedStaff && sessionMessage && !loginError && (
+            <div
+              style={{
+                ...styles.errorBox,
+                backgroundColor: "#FFF7ED",
+                borderColor: "#FF6B00",
+              }}
+            >
+              <AlertTriangle size={16} style={{ color: "#FF6B00" }} />
+              <span style={{ ...styles.errorText, color: "#FF6B00" }}>
+                {sessionMessage}
+              </span>
             </div>
           )}
 

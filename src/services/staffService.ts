@@ -114,6 +114,12 @@ const validateUniqueStaffIdentity = async (staff: Staff): Promise<void> => {
     if (s.firestoreDocId && s.firestoreDocId === target.id) return true;
     if (target.firestoreDocId && s.id === target.firestoreDocId) return true;
     if (
+      s.firestoreDocId &&
+      target.firestoreDocId &&
+      s.firestoreDocId === target.firestoreDocId
+    )
+      return true;
+    if (
       s.email &&
       target.email &&
       s.email.toLowerCase() === target.email.toLowerCase() &&
@@ -598,8 +604,15 @@ export const staffService = {
     return `${prefix}${nextNumber.toString().padStart(4, "0")}`;
   },
 
-  findDuplicateStaffCodes: (): { staffCode: string; records: Staff[] }[] => {
-    const allStaff = getLocalStaff();
+  findDuplicateStaffCodes: async (): Promise<
+    { staffCode: string; records: Staff[] }[]
+  > => {
+    let allStaff: Staff[] = [];
+    try {
+      allStaff = await staffService.loadStaffFromFirebase();
+    } catch {
+      allStaff = getLocalStaff();
+    }
     const map = new Map<string, Staff[]>();
     for (const staff of allStaff) {
       if (!staff.staffCode) continue;
@@ -619,7 +632,7 @@ export const staffService = {
   },
 
   repairDuplicateStaffCodes: async (): Promise<{ totalRepaired: number }> => {
-    const duplicates = staffService.findDuplicateStaffCodes();
+    const duplicates = await staffService.findDuplicateStaffCodes();
     let totalRepaired = 0;
 
     for (const { records } of duplicates) {

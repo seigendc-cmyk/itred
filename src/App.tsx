@@ -41,8 +41,10 @@ import { AppRoute, MenuKey, DeskType } from "./types.ts";
 import { ErrorBoundary, PrimaryButton } from "./components/CommonUI.tsx";
 import { permissionService } from "./services/permissionService.ts";
 import { AlertTriangle } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { analyticsService } from "./services/analyticsService.ts";
+import { settingsService } from "./services/settingsService.ts";
+import { staffAuditService } from "./services/staffAuditService.ts";
 
 function RestrictedAccess() {
   const navigate = useNavigate();
@@ -446,6 +448,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [showWarning, setShowWarning] = useState(false);
+  const [logoutMessage, setLogoutMessage] = useState<string | null>(null);
+  const [timeoutSettings, setTimeoutSettings] = useState({
+    enabled: true,
+    minutes: 30,
+  });
+  const lastActivity = useRef<number>(Date.now());
 
   useEffect(() => {
     const storedSession = localStorage.getItem("activeStaffSession");
@@ -454,22 +463,114 @@ export default function App() {
     }
   }, []);
 
-  const handleLoginSuccess = () => {
-    setIsLoggedIn(true);
-  };
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    settingsService.getSettings().then((s) => {
+      setTimeoutSettings({
+        enabled: s.enableSessionTimeout ?? true,
+        minutes: s.sessionTimeoutMinutes ?? 30,
+      });
+    });
+  }, [isLoggedIn]);
 
-  const handleLogout = () => {
+  const handleLogout = useCallback((msg?: string) => {
     localStorage.removeItem("activeStaffSession");
     setIsLoggedIn(false);
+    setShowWarning(false);
+    if (typeof msg === "string") {
+      setLogoutMessage(msg);
+    } else {
+      setLogoutMessage(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isLoggedIn || !timeoutSettings.enabled) return;
+
+    const resetTimer = () => {
+      lastActivity.current = Date.now();
+      setShowWarning((prev) => (prev ? false : prev));
+    };
+
+    const events = ["mousemove", "keydown", "click", "scroll", "touchstart"];
+    events.forEach((e) =>
+      window.addEventListener(e, resetTimer, { passive: true }),
+    );
+
+    const interval = setInterval(() => {
+      const idleTime = Date.now() - lastActivity.current;
+      const timeoutMs = timeoutSettings.minutes * 60 * 1000;
+      const warningTimeMs = Math.max(timeoutMs - 2 * 60 * 1000, 0);
+
+      if (idleTime >= timeoutMs) {
+        void staffAuditService.logAction({
+          eventType: "LOGOUT",
+          module: "auth",
+          severity: "warning",
+          action: "Session timed out due to inactivity",
+        });
+        handleLogout(
+          "Your session expired due to inactivity. Please log in again.",
+        );
+      } else if (idleTime >= warningTimeMs) {
+        setShowWarning((prev) => (!prev ? true : prev));
+      }
+    }, 10000);
+
+    return () => {
+      events.forEach((e) => window.removeEventListener(e, resetTimer));
+      clearInterval(interval);
+    };
+  }, [isLoggedIn, timeoutSettings, handleLogout]);
+
+  const handleLoginSuccess = () => {
+    lastActivity.current = Date.now();
+    setIsLoggedIn(true);
+    setLogoutMessage(null);
   };
 
   return (
     <BrowserRouter>
       <ErrorBoundary>
         {!isLoggedIn ? (
-          <WelcomePage onLoginSuccess={handleLoginSuccess} />
+          <WelcomePage
+            onLoginSuccess={handleLoginSuccess}
+            sessionMessage={logoutMessage}
+          />
         ) : (
-          <AppContent onLogout={handleLogout} />
+          <>
+            <AppContent onLogout={() => handleLogout()} />
+            {showWarning && (
+              <div className="fixed inset-0 z-[9999] bg-brand-charcoal/80 backdrop-blur-sm flex items-center justify-center p-4">
+                <div className="bg-white p-8 max-w-md w-full border-t-4 border-brand-orange shadow-2xl text-center flex flex-col items-center animate-in zoom-in-95 duration-200">
+                  <AlertTriangle size={48} className="text-brand-orange mb-4" />
+                  <h2 className="text-xl font-bold uppercase text-brand-charcoal mb-2">
+                    Session Expiring
+                  </h2>
+                  <p className="text-sm text-stone-600 mb-8 font-medium">
+                    Your session will expire soon due to inactivity.
+                  </p>
+                  <div className="flex gap-4 w-full">
+                    <button
+                      onClick={() => {
+                        lastActivity.current = Date.now();
+                        setShowWarning(false);
+                      }}
+                      className="flex-1 bg-stone-100 hover:bg-stone-200 text-stone-700 py-3 text-xs font-bold uppercase transition-colors"
+                    >
+                      Stay Logged In
+                    </button>
+                    <button
+                      onClick={() => handleLogout()}
+                      className="flex-1 bg-brand-orange hover:bg-brand-orange/90 text-white py-3 text-xs font-bold uppercase transition-colors"
+                    >
+                      Logout Now
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </ErrorBoundary>
     </BrowserRouter>
