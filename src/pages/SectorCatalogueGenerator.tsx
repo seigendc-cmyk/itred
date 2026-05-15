@@ -100,6 +100,7 @@ export const SectorCatalogueGenerator: React.FC = () => {
   const [systemSettings, setSystemSettings] = useState<SystemSettings | null>(
     null,
   );
+  const [linksSource, setLinksSource] = useState("Loading...");
 
   // Filters
   const [filterSector, setFilterSector] = useState("");
@@ -157,7 +158,6 @@ export const SectorCatalogueGenerator: React.FC = () => {
       const [
         rawVendors,
         rawProducts,
-        rawCahLinks,
         rawPlans,
         rawHistory,
         rawSettings,
@@ -165,12 +165,20 @@ export const SectorCatalogueGenerator: React.FC = () => {
       ] = await Promise.all([
         vendorService.getVendors(),
         productService.getProducts(),
-        cahService.getLinks(),
         pricingPlanService.getPlans(),
         catalogueService.getHistory(),
         contactHubService.getSettings(),
         settingsService.getSettings(),
       ]);
+
+      let rawCahLinks: CAHLink[] = [];
+      try {
+        rawCahLinks = await cahService.loadCAHLinksFromFirebase();
+        setLinksSource("Firebase");
+      } catch (e) {
+        rawCahLinks = cahService.getLinks();
+        setLinksSource("Local Fallback");
+      }
 
       setVendors(asArray<Vendor>(rawVendors));
       setProducts(asArray<Product>(rawProducts));
@@ -402,31 +410,54 @@ export const SectorCatalogueGenerator: React.FC = () => {
     [safeHistory],
   );
 
+  const isActiveCatalogueHubLink = (link: CAHLink) => {
+    const status = String(link.status || "active").toLowerCase();
+    const visible = link.showInCatalogue !== false;
+    const url =
+      link.whatsappCommunityLink ||
+      link.whatsappGroupLink ||
+      link.whatsappChannelLink ||
+      link.whatsappUrl ||
+      (link as any).url ||
+      (link as any).link ||
+      "";
+
+    return status === "active" && visible && !!String(url).trim();
+  };
+
   const sectorMatchedCahLinks = useMemo(() => {
-    const s = config.sector?.toLowerCase().trim() || "";
-    const c = config.category?.toLowerCase().trim() || "";
+    const s = config.sector?.toLowerCase().replace(/\s+/g, "") || "";
+    const c = config.category?.toLowerCase().replace(/\s+/g, "") || "";
 
     if (!s && !c) return [];
 
     return safeCahLinks.filter((link) => {
-      if (link.status !== "active" || link.showInCatalogue === false)
-        return false;
+      if (!isActiveCatalogueHubLink(link)) return false;
 
-      const linkSector = (link.sector || "").toLowerCase();
-      const linkCategory = (link.category || "").toLowerCase();
-      const linkName = (link.name || "").toLowerCase();
-      const linkDesc = (link.description || "").toLowerCase();
+      const linkSector = (link.sector || "").toLowerCase().replace(/\s+/g, "");
+      const linkCategory = (link.category || "")
+        .toLowerCase()
+        .replace(/\s+/g, "");
+      const linkName = (link.name || "").toLowerCase().replace(/\s+/g, "");
+      const linkDesc = (link.description || "")
+        .toLowerCase()
+        .replace(/\s+/g, "");
 
       const matchesSector =
-        s &&
-        (linkSector.includes(s) ||
-          linkName.includes(s) ||
-          linkDesc.includes(s));
+        !linkSector ||
+        linkSector === "allsectors" ||
+        (s &&
+          (linkSector.includes(s) ||
+            linkName.includes(s) ||
+            linkDesc.includes(s)));
+
       const matchesCategory =
-        c &&
-        (linkCategory.includes(c) ||
-          linkName.includes(c) ||
-          linkDesc.includes(c));
+        !linkCategory ||
+        linkCategory === "allcategories" ||
+        (c &&
+          (linkCategory.includes(c) ||
+            linkName.includes(c) ||
+            linkDesc.includes(c)));
 
       return matchesSector || matchesCategory;
     });
@@ -489,7 +520,11 @@ export const SectorCatalogueGenerator: React.FC = () => {
       });
     }
 
-    console.log("Selected CAH links for export", finalCahLinks);
+    console.log(
+      "Selected CAH links for export",
+      finalCahLinks.length,
+      finalCahLinks,
+    );
 
     setIsGenerating(true);
     focusMainContent();
@@ -1128,6 +1163,13 @@ export const SectorCatalogueGenerator: React.FC = () => {
                   <p className="text-[10px] text-stone-500 mt-1 leading-tight">
                     Selected WhatsApp/CAH links will appear under the Hub tab in
                     the exported catalogue.
+                    <br />
+                    Loaded Hub Links: {safeCahLinks.length} | Active Catalogue
+                    Links:{" "}
+                    {safeCahLinks.filter(isActiveCatalogueHubLink).length} |
+                    Selected Links: {config.cahLinkIds.length}
+                    <br />
+                    Source: {linksSource}
                   </p>
                 </div>
               </div>
@@ -1150,7 +1192,7 @@ export const SectorCatalogueGenerator: React.FC = () => {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
               {safeCahLinks
-                .filter((link) => link.status === "active")
+                .filter((link) => isActiveCatalogueHubLink(link))
                 .map((link) => (
                   <div
                     key={link.id}
@@ -1183,8 +1225,8 @@ export const SectorCatalogueGenerator: React.FC = () => {
                     )}
                   </div>
                 ))}
-              {safeCahLinks.filter((l) => l.status === "active").length ===
-                0 && (
+              {safeCahLinks.filter((l) => isActiveCatalogueHubLink(l))
+                .length === 0 && (
                 <div className="col-span-2 py-10 text-center text-stone-400 text-xs">
                   No active WhatsApp Access Hub links found.
                 </div>

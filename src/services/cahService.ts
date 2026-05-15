@@ -3,12 +3,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { CAHLink, CAHBooth, CAHBoothAsset } from '../types.ts';
-import { localStorageService } from './localStorageService.ts';
+import { CAHLink, CAHBooth, CAHBoothAsset } from "../types.ts";
+import { localStorageService } from "./localStorageService.ts";
+import {
+  collection,
+  doc,
+  getDocs,
+  setDoc,
+  deleteDoc,
+  serverTimestamp,
+} from "firebase/firestore";
+import { db } from "../lib/firebase.ts";
 
-const CAH_LINKS_KEY = 'itred_cah_links';
-const CAH_BOOTHS_KEY = 'itred_cah_booths';
-const CAH_BOOTH_ASSETS_KEY = 'itred_cah_booth_assets';
+const CAH_LINKS_KEY = "itred_cah_links";
+const CAH_BOOTHS_KEY = "itred_cah_booths";
+const CAH_BOOTH_ASSETS_KEY = "itred_cah_booth_assets";
 
 export const cahService = {
   getLinks: (): CAHLink[] => {
@@ -21,14 +30,14 @@ export const cahService = {
 
   saveLink: (link: CAHLink): void => {
     const links = cahService.getLinks();
-    const index = links.findIndex(l => l.id === link.id);
+    const index = links.findIndex((l) => l.id === link.id);
     if (index >= 0) {
       links[index] = { ...link, updatedAt: new Date().toISOString() };
     } else {
       links.push({
         ...link,
         createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+        updatedAt: new Date().toISOString(),
       });
     }
     cahService.saveLinks(links);
@@ -36,16 +45,59 @@ export const cahService = {
 
   deleteLink: (id: string): void => {
     const links = cahService.getLinks();
-    const filtered = links.filter(l => l.id !== id);
+    const filtered = links.filter((l) => l.id !== id);
     cahService.saveLinks(filtered);
+  },
+
+  loadCAHLinksFromFirebase: async (): Promise<CAHLink[]> => {
+    const snapshot = await getDocs(collection(db, "itred_cah_links"));
+    const links = snapshot.docs.map((docSnap) => {
+      const data = docSnap.data();
+      return {
+        ...data,
+        id: data.id || docSnap.id,
+        firestoreDocId: docSnap.id,
+      } as CAHLink;
+    });
+    cahService.saveLinks(links);
+    return Array.isArray(links) ? links : [];
+  },
+
+  saveLinkToFirebase: async (link: CAHLink): Promise<void> => {
+    const docId = link.id || link.firestoreDocId || `CAH-${Date.now()}`;
+    const linkToSave = {
+      ...link,
+      id: docId,
+      updatedAt: link.updatedAt || new Date().toISOString(),
+      status: link.status || "active",
+      showInCatalogue: link.showInCatalogue !== false,
+    };
+
+    await setDoc(
+      doc(db, "itred_cah_links", docId),
+      {
+        ...linkToSave,
+        firestoreUpdatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+
+    cahService.saveLink(linkToSave);
+  },
+
+  deleteLinkFromFirebase: async (id: string): Promise<void> => {
+    await deleteDoc(doc(db, "itred_cah_links", id));
+    cahService.deleteLink(id);
   },
 
   validateWhatsAppUrl: (url: string): boolean => {
     if (!url) return false;
     // Basic WhatsApp link pattern: https://chat.whatsapp.com/..., https://wa.me/..., etc
-    return url.startsWith('https://chat.whatsapp.com/') || 
-           url.startsWith('https://wa.me/') || 
-           url.startsWith('https://whatsapp.com/channel/');
+    return (
+      url.startsWith("https://chat.whatsapp.com/") ||
+      url.startsWith("https://wa.me/") ||
+      url.startsWith("https://whatsapp.com/channel/")
+    );
   },
 
   getBooths: (): CAHBooth[] => {
@@ -58,14 +110,14 @@ export const cahService = {
 
   saveBooth: (booth: CAHBooth): void => {
     const booths = cahService.getBooths();
-    const index = booths.findIndex(b => b.id === booth.id);
+    const index = booths.findIndex((b) => b.id === booth.id);
     if (index >= 0) {
       booths[index] = { ...booth, updatedAt: new Date().toISOString() };
     } else {
       booths.push({
         ...booth,
         createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+        updatedAt: new Date().toISOString(),
       });
     }
     cahService.saveBooths(booths);
@@ -76,7 +128,7 @@ export const cahService = {
   },
 
   getAssetsForBooth: (boothId: string): CAHBoothAsset[] => {
-    return cahService.getBoothAssets().filter(a => a.boothId === boothId);
+    return cahService.getBoothAssets().filter((a) => a.boothId === boothId);
   },
 
   saveBoothAssets: (assets: CAHBoothAsset[]): void => {
@@ -85,16 +137,16 @@ export const cahService = {
 
   saveBoothAsset: (asset: CAHBoothAsset): void => {
     const assets = cahService.getBoothAssets();
-    const index = assets.findIndex(a => a.id === asset.id);
+    const index = assets.findIndex((a) => a.id === asset.id);
     if (index >= 0) {
       assets[index] = { ...asset, updatedAt: new Date().toISOString() };
     } else {
       assets.push({
         ...asset,
         createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+        updatedAt: new Date().toISOString(),
       });
     }
     cahService.saveBoothAssets(assets);
-  }
+  },
 };

@@ -101,15 +101,17 @@ export const ContactHubSettings: React.FC = () => {
     [settings.marketingWhatsappContacts],
   );
 
-  const saveSettings = () => {
+  const saveSettings = async () => {
     try {
-      const saved = contactHubService.saveSettings(settings);
+      const saved = await contactHubService.saveSettings(settings);
       setSettings(saved);
-      setNotice("Catalogue Contact Hub settings saved successfully.");
-      setTimeout(() => setNotice(""), 3000);
-    } catch (error) {
+      alert("Saved successfully");
+    } catch (error: any) {
       console.error("Failed to save Contact Hub settings", error);
-      setNotice("Could not save settings. Check console for details.");
+      setNotice(
+        error.message || "Could not save settings. Check console for details.",
+      );
+      alert(error.message || "Save failed");
     }
   };
 

@@ -80,13 +80,16 @@ export const generateCatalogueHtml = (
     };
   });
 
+  const exportedCahLinks = cahLinks.filter((l) => {
+    const status = String(l.status || "active").toLowerCase();
+    return status === "active" && l.showInCatalogue !== false;
+  });
+
   const jsonData = {
     metadata: metadata,
     products: activeProducts,
     vendors: scoredVendors,
-    cahLinks: cahLinks.filter(
-      (l) => l.status === "active" && l.showInCatalogue !== false,
-    ),
+    cahLinks: exportedCahLinks,
   };
 
   const logoUrl =

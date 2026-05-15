@@ -1009,6 +1009,7 @@ export type CAHStatus = "active" | "inactive" | "archived";
 
 export interface CAHLink {
   id: string;
+  firestoreDocId?: string;
   /** @deprecated use id */
   cahId?: string;
   name: string;

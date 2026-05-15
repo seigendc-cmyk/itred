@@ -120,11 +120,18 @@ export const CAHLinksPanel: React.FC = () => {
 
   const loadData = async () => {
     try {
-      const [rawLinks, rawVendors, rawEvents] = await Promise.all([
-        cahService.getLinks(),
+      const [rawVendors, rawEvents] = await Promise.all([
         vendorService.getVendors(),
         analyticsService.getEvents(),
       ]);
+
+      let rawLinks: CAHLink[] = [];
+      try {
+        rawLinks = await cahService.loadCAHLinksFromFirebase();
+      } catch (e) {
+        console.warn("Failed to load CAH links from Firebase", e);
+        rawLinks = cahService.getLinks();
+      }
 
       setLinks(asArray<CAHLink>(rawLinks));
       setVendors(asArray<Vendor>(rawVendors));
@@ -381,7 +388,7 @@ export const CAHLinksPanel: React.FC = () => {
     setIsFormOpen(true);
   };
 
-  const handleSaveLink = () => {
+  const handleSaveLink = async () => {
     setFormError("");
 
     const normalizedUrl = getSafeUrl(editingLink).trim();
@@ -418,7 +425,12 @@ export const CAHLinksPanel: React.FC = () => {
       existingLink &&
       existingLink.currentFollowerCount !== linkToSave.currentFollowerCount;
 
-    cahService.saveLink(linkToSave);
+    try {
+      await cahService.saveLinkToFirebase(linkToSave);
+    } catch (e) {
+      console.warn("Firebase save failed, falling back to local storage", e);
+      cahService.saveLink(linkToSave);
+    }
 
     if (followerCountChanged) {
       analyticsService.logEvent({
@@ -483,8 +495,12 @@ export const CAHLinksPanel: React.FC = () => {
       title: "Confirm Deletion",
       message: "Permanently archive and delete this WhatsApp link?",
       variant: "danger",
-      action: () => {
-        cahService.deleteLink(id);
+      action: async () => {
+        try {
+          await cahService.deleteLinkFromFirebase(id);
+        } catch (e) {
+          cahService.deleteLink(id);
+        }
 
         logService.add({
           userId: "STAFF-ADM",
