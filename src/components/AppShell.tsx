@@ -5,6 +5,7 @@
 
 import React, { useState, useEffect } from "react";
 import {
+  Activity as ActivityIcon,
   BarChart3,
   Bell,
   Check,
@@ -121,7 +122,7 @@ const MENU_GROUPS: {
       {
         id: AppRoute.RPN_PERFORMANCE,
         label: "RPN Performance",
-        icon: Activity,
+        icon: ActivityIcon,
       },
     ],
   },
@@ -194,6 +195,7 @@ export const AppShell: React.FC<AppShellProps> = ({
   const [openGroupId, setOpenGroupId] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<ITredNotification[]>([]);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isNotifDropdownOpen, setIsNotifDropdownOpen] = useState(false);
   const [toasts, setToasts] = useState<
     { id: number; message: string; type: string }[]
   >([]);
@@ -508,7 +510,7 @@ export const AppShell: React.FC<AppShellProps> = ({
             <div className="relative group">
               <div
                 className="w-8 h-8 bg-gray-100 flex items-center justify-center text-stone-400 group-hover:bg-brand-orange group-hover:text-white transition-colors cursor-pointer"
-                onClick={() => setIsDrawerOpen(true)}
+                onClick={() => setIsNotifDropdownOpen(!isNotifDropdownOpen)}
               >
                 <Bell size={16} />
                 {openAlertsCount > 0 && (
@@ -517,6 +519,76 @@ export const AppShell: React.FC<AppShellProps> = ({
                   </span>
                 )}
               </div>
+
+              {/* Notification Dropdown */}
+              {isNotifDropdownOpen && (
+                <div className="absolute top-10 right-0 w-80 bg-white shadow-2xl border border-stone-200 z-[100] max-h-96 flex flex-col animate-in slide-in-from-top-2">
+                  <div className="p-3 border-b border-stone-100 bg-stone-50 flex justify-between items-center shrink-0">
+                    <span className="font-bold uppercase tracking-widest text-[10px] text-brand-charcoal">
+                      Notifications
+                    </span>
+                    <button onClick={() => setIsNotifDropdownOpen(false)}>
+                      <X
+                        size={14}
+                        className="text-stone-400 hover:text-brand-charcoal"
+                      />
+                    </button>
+                  </div>
+                  <div className="overflow-y-auto flex-1 custom-scrollbar">
+                    {notifications.filter((n) => n.status === "unread")
+                      .length === 0 ? (
+                      <div className="p-6 text-center text-xs text-stone-400 font-bold uppercase tracking-widest">
+                        No active notifications.
+                      </div>
+                    ) : (
+                      notifications
+                        .filter((n) => n.status === "unread")
+                        .sort(
+                          (a, b) =>
+                            new Date(b.createdAt).getTime() -
+                            new Date(a.createdAt).getTime(),
+                        )
+                        .map((n) => (
+                          <div
+                            key={n.id}
+                            className={`p-4 border-b border-stone-50 hover:bg-stone-50 transition-colors cursor-pointer ${n.priority === "critical" ? "border-l-4 border-l-red-500" : ""}`}
+                          >
+                            <div className="font-bold text-[11px] text-brand-charcoal uppercase leading-tight mb-1">
+                              {n.title}
+                            </div>
+                            <div className="text-[10px] text-stone-500 leading-relaxed">
+                              {n.message}
+                            </div>
+                            <div className="mt-3 flex gap-2">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  notificationService.markAsRead(n.id);
+                                  loadNotifs();
+                                }}
+                                className="px-2 py-1 bg-stone-100 text-[9px] uppercase font-bold text-stone-600 hover:bg-stone-200"
+                              >
+                                Mark Read
+                              </button>
+                              {permissionService.canResolveNotification() && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    notificationService.markAsResolved(n.id);
+                                    loadNotifs();
+                                  }}
+                                  className="px-2 py-1 bg-emerald-50 border border-emerald-100 text-[9px] uppercase font-bold text-emerald-700 hover:bg-emerald-100"
+                                >
+                                  Resolve
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
             <div className="relative group">
               <div className="w-8 h-8 bg-gray-100 flex items-center justify-center text-stone-400 group-hover:bg-brand-orange group-hover:text-white transition-colors cursor-pointer">

@@ -9,6 +9,16 @@ import { getStorageAdapter } from "./storageService.ts";
 const STORAGE_KEY = "itred_staff_audit_logs";
 const SESSION_KEY = "activeStaffSession";
 
+const sanitizeSnapshot = (data: any): any => {
+  if (!data) return data;
+  try {
+    // Deep copy and remove undefined by dropping them in serialization
+    return JSON.parse(JSON.stringify(data));
+  } catch (e) {
+    return data;
+  }
+};
+
 export const staffAuditService = {
   getLogs: async (): Promise<StaffAuditLog[]> => {
     const data =
@@ -68,6 +78,8 @@ export const staffAuditService = {
         staffSession.displayName ||
         "Unknown Staff",
       staffRole: input.staffRole || staffSession.role || "Unknown",
+      beforeSnapshot: sanitizeSnapshot(input.beforeSnapshot),
+      afterSnapshot: sanitizeSnapshot(input.afterSnapshot),
       sessionId: staffSession.loginAt,
       deviceInfo: {
         userAgent: navigator.userAgent,
@@ -77,10 +89,18 @@ export const staffAuditService = {
       createdAt: new Date().toISOString(),
     };
 
-    const logs =
-      (await getStorageAdapter().getItem<StaffAuditLog[]>(STORAGE_KEY)) || [];
-    logs.push(newLog);
-    await getStorageAdapter().setItem(STORAGE_KEY, logs);
+    // Execute save asynchronously without blocking the caller
+    Promise.resolve().then(async () => {
+      try {
+        const logs =
+          (await getStorageAdapter().getItem<StaffAuditLog[]>(STORAGE_KEY)) ||
+          [];
+        logs.push(newLog);
+        await getStorageAdapter().setItem(STORAGE_KEY, logs);
+      } catch (err) {
+        console.error("Failed to persist staff audit log non-blockingly:", err);
+      }
+    });
   },
 
   logCreate: async (

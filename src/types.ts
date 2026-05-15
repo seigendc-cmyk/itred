@@ -148,7 +148,12 @@ export type ActionPermissionKey =
   | "roles.createRoleTemplate"
   | "roles.deleteRoleTemplate"
   | "roles.assignRoleToStaff"
-  | "roles.auditPermissionChanges";
+  | "roles.auditPermissionChanges"
+  | "approvalQueue.reject"
+  | "approvalQueue.returnForCorrection"
+  | "staffAudit.view"
+  | "staffAudit.viewAll"
+  | "staffAudit.export";
 
 export type ActionPermissions = Partial<Record<ActionPermissionKey, boolean>>;
 
@@ -1169,7 +1174,8 @@ export type NotificationType =
   | "lead_followup"
   | "catalogue_warning"
   | "customer_feedback"
-  | "system_alert";
+  | "system_alert"
+  | "permission_change";
 export type NotificationPriority = "low" | "medium" | "high" | "critical";
 export type NotificationStatus = "unread" | "read" | "resolved" | "dismissed";
 
@@ -1200,9 +1206,22 @@ export type RequestRiskLevel = "low" | "medium" | "high" | "critical";
 
 export interface ApprovalRequest {
   id: string;
-  requestType: string;
+  requestType:
+    | "vendor_create"
+    | "vendor_update"
+    | "product_create"
+    | "product_update"
+    | "price_change"
+    | "catalogue_deploy"
+    | "cah_link_create"
+    | "subscription_change"
+    | "lead_conversion"
+    | "rpn_agent_update"
+    | "staff_kyc_update"
+    | "permission_change";
   recordType: string;
   recordId: string;
+  recordName?: string;
   submittedByStaffId: string;
   submittedByName: string;
   assignedManagerId?: string;
@@ -1216,6 +1235,7 @@ export interface ApprovalRequest {
   submittedAt: string;
   reviewedAt?: string;
   reviewedByStaffId?: string;
+  reviewedByName?: string;
 }
 
 export type StaffTaskType =

@@ -14,7 +14,16 @@ import {
 } from "../components/CommonUI.tsx";
 import { staffAuditService } from "../services/staffAuditService.ts";
 import { StaffAuditLog } from "../types.ts";
-import { Shield, AlertTriangle, UserX, Trash2, Activity } from "lucide-react";
+import {
+  Shield,
+  AlertTriangle,
+  UserX,
+  Trash2,
+  Activity as ActivityIcon,
+  PlusCircle,
+  Edit3,
+  Key,
+} from "lucide-react";
 
 export const StaffAccessLogs: React.FC = () => {
   const [logs, setLogs] = useState<StaffAuditLog[]>([]);
@@ -65,7 +74,11 @@ export const StaffAccessLogs: React.FC = () => {
         (l) => l.severity === "high" || l.severity === "critical",
       ).length,
       accessDenied: logs.filter((l) => l.eventType === "ACCESS_DENIED").length,
-      deletions: logs.filter((l) => l.eventType === "RECORD_DELETED").length,
+      created: logs.filter((l) => l.eventType === "RECORD_CREATED").length,
+      updated: logs.filter((l) => l.eventType === "RECORD_UPDATED").length,
+      permChanges: logs.filter((l) => l.eventType === "PERMISSION_CHANGED")
+        .length,
+      critical: logs.filter((l) => l.severity === "critical").length,
     };
   }, [logs]);
 
@@ -85,17 +98,23 @@ export const StaffAccessLogs: React.FC = () => {
         subtitle="Immutable ledger of operational activity, access attempts, and administrative actions."
       />
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
         <StatCard
-          label="Total Audit Events"
+          label="Total Logs"
           value={stats.totalLogs}
-          icon={Activity}
+          icon={ActivityIcon}
         />
         <StatCard
-          label="High Risk Actions"
+          label="High Risk"
           value={stats.highRisk}
           icon={AlertTriangle}
           variant={stats.highRisk > 0 ? "error" : "neutral"}
+        />
+        <StatCard
+          label="Critical Actions"
+          value={stats.critical}
+          icon={Shield}
+          variant={stats.critical > 0 ? "error" : "neutral"}
         />
         <StatCard
           label="Access Denied"
@@ -103,11 +122,13 @@ export const StaffAccessLogs: React.FC = () => {
           icon={UserX}
           variant={stats.accessDenied > 0 ? "warning" : "neutral"}
         />
+        <StatCard label="Created" value={stats.created} icon={PlusCircle} />
+        <StatCard label="Updated" value={stats.updated} icon={Edit3} />
         <StatCard
-          label="Delete Actions"
-          value={stats.deletions}
-          icon={Trash2}
-          variant={stats.deletions > 0 ? "error" : "neutral"}
+          label="Perm Changes"
+          value={stats.permChanges}
+          icon={Key}
+          variant={stats.permChanges > 0 ? "warning" : "neutral"}
         />
       </div>
 
@@ -117,7 +138,7 @@ export const StaffAccessLogs: React.FC = () => {
       >
         <div className="p-4 grid grid-cols-1 md:grid-cols-5 gap-4">
           <SearchInput
-            placeholder="Search Actions or Records..."
+            placeholder="Search Action/Record..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -177,7 +198,7 @@ export const StaffAccessLogs: React.FC = () => {
           "Date/Time",
           "Staff Member",
           "Module / Context",
-          "Event Type",
+          "Action Trace",
           "Action",
           "Target Record",
           "Severity",
@@ -196,7 +217,7 @@ export const StaffAccessLogs: React.FC = () => {
                 {new Date(log.createdAt).toLocaleTimeString()}
               </p>
             </td>
-            <td className="px-6 py-4">
+            <td className="px-6 py-4 flex flex-col justify-center">
               <p className="text-xs font-bold uppercase text-brand-charcoal">
                 {log.staffName}
               </p>
@@ -213,6 +234,8 @@ export const StaffAccessLogs: React.FC = () => {
               <StatusBadge
                 status={log.eventType.replace(/_/g, " ")}
                 variant={
+                  log.severity === "high" ||
+                  log.severity === "critical" ||
                   log.eventType.includes("FAIL") ||
                   log.eventType.includes("DENIED") ||
                   log.eventType.includes("DELETE")

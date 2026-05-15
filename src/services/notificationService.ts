@@ -77,6 +77,10 @@ export const notificationService = {
     await notificationService.updateStatus(id, "resolved");
   },
 
+  dismissNotification: async (id: string): Promise<void> => {
+    await notificationService.updateStatus(id, "dismissed");
+  },
+
   getNotificationsForStaff: async (
     staffId: string,
   ): Promise<ITredNotification[]> => {

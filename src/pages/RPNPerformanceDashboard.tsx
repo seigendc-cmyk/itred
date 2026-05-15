@@ -15,11 +15,12 @@ import {
   SearchInput,
 } from "../components/CommonUI.tsx";
 import {
-  Activity,
+  Activity as ActivityIcon,
   Users,
   Target,
   DollarSign,
   TrendingUp,
+  TrendingDown,
   AlertTriangle,
   FileText,
   X,
@@ -460,7 +461,7 @@ export const RPNPerformanceDashboard: React.FC = () => {
         <StatCard
           label="Onboarded Today"
           value={overviewStats.onboardedToday.toString()}
-          icon={Activity}
+          icon={ActivityIcon}
         />
         <StatCard
           label="Daily Compliance"
@@ -473,7 +474,7 @@ export const RPNPerformanceDashboard: React.FC = () => {
         <StatCard
           label="Onboarded This Month"
           value={overviewStats.onboardedMonth.toString()}
-          icon={Activity}
+          icon={ActivityIcon}
         />
         <StatCard
           label="Recurring Vendors"

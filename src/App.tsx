@@ -36,6 +36,7 @@ import { RPNPerformanceDashboard } from "./pages/RPNPerformanceDashboard.tsx";
 import { ContactHubSettings } from "./pages/ContactHubSettings.tsx";
 import WelcomePage from "./pages/WelcomePage.tsx";
 import { HowToPage } from "./pages/HowToPage.tsx";
+import { ApprovalQueue } from "./pages/ApprovalQueue.tsx";
 import { AppRoute, MenuKey, DeskType } from "./types.ts";
 import { ErrorBoundary, PrimaryButton } from "./components/CommonUI.tsx";
 import { permissionService } from "./services/permissionService.ts";
@@ -368,7 +369,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           path="/staff-access-logs"
           element={
             checkAccess("staff-access-logs") ? (
-              <StaffManagement />
+              <StaffAccessLogs />
             ) : (
               <RestrictedAccess />
             )
@@ -378,7 +379,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           path="/system-settings"
           element={
             checkAccess("system-settings") ? (
-              <StaffManagement />
+              <SystemSettings />
             ) : (
               <RestrictedAccess />
             )
@@ -398,7 +399,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           path="/approval-queue"
           element={
             checkAccess("approval-queue") ? (
-              <AdminDashboard onNavigate={handleNavigate} />
+              <ApprovalQueue />
             ) : (
               <RestrictedAccess />
             )

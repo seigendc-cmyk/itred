@@ -6,7 +6,8 @@
 import { ApprovalRequest } from "../types.ts";
 import { getStorageAdapter } from "./storageService.ts";
 import { notificationService } from "./notificationService.ts";
-import { logService } from "./logService.ts";
+import { staffAuditService } from "./staffAuditService.ts";
+import { taskService } from "./taskService.ts";
 
 const STORAGE_KEY = "itred_approval_requests";
 
@@ -15,6 +16,11 @@ export const approvalService = {
     const data =
       await getStorageAdapter().getItem<ApprovalRequest[]>(STORAGE_KEY);
     return data || [];
+  },
+
+  getPending: async (): Promise<ApprovalRequest[]> => {
+    const all = await approvalService.getAll();
+    return all.filter((r) => r.status === "pending");
   },
 
   getById: async (id: string): Promise<ApprovalRequest | undefined> => {
@@ -67,21 +73,29 @@ export const approvalService = {
       priority: request.riskLevel === "critical" ? "critical" : "high",
       recordType: "approval_request",
       recordId: newReq.id,
-      targetRole: "Admin",
+      targetRole: "Admin", // Can be enhanced later depending on requestType
     });
 
-    await logService.add({
-      action: "APPROVAL_REQUEST_SUBMITTED",
-      userId: request.submittedByStaffId,
-      entityType: request.recordType,
-      entityId: request.recordId,
-      details: { requestType: request.requestType, approvalId: newReq.id },
+    void staffAuditService.logAction({
+      eventType: "APPROVAL_SUBMITTED",
+      module: "approval",
+      action: `Submitted ${request.requestType} approval request`,
+      severity:
+        request.riskLevel === "critical"
+          ? "critical"
+          : request.riskLevel === "high"
+            ? "high"
+            : "info",
+      recordType: request.recordType,
+      recordId: request.recordId,
+      recordName: request.recordName,
     });
   },
 
   approveRequest: async (
     id: string,
     managerId: string,
+    managerName: string,
     comment?: string,
   ): Promise<void> => {
     const all = await approvalService.getAll();
@@ -90,14 +104,37 @@ export const approvalService = {
       req.status = "approved";
       req.reviewedAt = new Date().toISOString();
       req.reviewedByStaffId = managerId;
+      req.reviewedByName = managerName;
       req.managerComment = comment;
       await getStorageAdapter().setItem(STORAGE_KEY, all);
+
+      await notificationService.createNotification({
+        title: "Approval Granted",
+        message: `Your ${req.requestType} request was approved.`,
+        type: "approval_request",
+        priority: "low",
+        recordType: "approval_request",
+        recordId: req.id,
+        assignedToStaffId: req.submittedByStaffId,
+      });
+
+      void staffAuditService.logAction({
+        eventType: "APPROVAL_APPROVED",
+        module: "approval",
+        action: `Approved request ${req.id}`,
+        severity: "info",
+        recordType: req.recordType,
+        recordId: req.recordId,
+        recordName: req.recordName,
+        managerComment: comment,
+      });
     }
   },
 
   rejectRequest: async (
     id: string,
     managerId: string,
+    managerName: string,
     comment?: string,
   ): Promise<void> => {
     const all = await approvalService.getAll();
@@ -106,14 +143,37 @@ export const approvalService = {
       req.status = "rejected";
       req.reviewedAt = new Date().toISOString();
       req.reviewedByStaffId = managerId;
+      req.reviewedByName = managerName;
       req.managerComment = comment;
       await getStorageAdapter().setItem(STORAGE_KEY, all);
+
+      await notificationService.createNotification({
+        title: "Approval Rejected",
+        message: `Your ${req.requestType} request was rejected by ${managerName}.`,
+        type: "approval_request",
+        priority: "high",
+        recordType: "approval_request",
+        recordId: req.id,
+        assignedToStaffId: req.submittedByStaffId,
+      });
+
+      void staffAuditService.logAction({
+        eventType: "APPROVAL_REJECTED",
+        module: "approval",
+        action: `Rejected request ${req.id}`,
+        severity: "warning",
+        recordType: req.recordType,
+        recordId: req.recordId,
+        recordName: req.recordName,
+        managerComment: comment,
+      });
     }
   },
 
   returnForCorrection: async (
     id: string,
     managerId: string,
+    managerName: string,
     correctionNotes: string,
   ): Promise<void> => {
     const all = await approvalService.getAll();
@@ -122,8 +182,59 @@ export const approvalService = {
       req.status = "returned_for_correction";
       req.reviewedAt = new Date().toISOString();
       req.reviewedByStaffId = managerId;
+      req.reviewedByName = managerName;
       req.correctionNotes = correctionNotes;
       await getStorageAdapter().setItem(STORAGE_KEY, all);
+
+      await notificationService.createNotification({
+        title: "Correction Required",
+        message: `Your ${req.requestType} request was returned. See task board for details.`,
+        type: "task_due",
+        priority: "high",
+        recordType: "approval_request",
+        recordId: req.id,
+        assignedToStaffId: req.submittedByStaffId,
+      });
+
+      await taskService.createTask({
+        title: `Correction Required: ${req.requestType}`,
+        description: correctionNotes,
+        taskType: "catalogue_review",
+        assignedToStaffId: req.submittedByStaffId,
+        assignedByStaffId: managerId,
+        relatedRecordType: req.recordType,
+        relatedRecordId: req.recordId,
+        priority: "high",
+      });
+
+      void staffAuditService.logAction({
+        eventType: "APPROVAL_RETURNED",
+        module: "approval",
+        action: `Returned request ${req.id} for correction`,
+        severity: "warning",
+        recordType: req.recordType,
+        recordId: req.recordId,
+        recordName: req.recordName,
+        reason: correctionNotes,
+      });
+    }
+  },
+
+  cancelRequest: async (id: string, staffId: string): Promise<void> => {
+    const all = await approvalService.getAll();
+    const req = all.find((r) => r.id === id);
+    if (req && req.submittedByStaffId === staffId && req.status === "pending") {
+      req.status = "cancelled";
+      await getStorageAdapter().setItem(STORAGE_KEY, all);
+
+      void staffAuditService.logAction({
+        eventType: "RECORD_UPDATED",
+        module: "approval",
+        action: `Cancelled request ${req.id}`,
+        severity: "info",
+        recordType: req.recordType,
+        recordId: req.recordId,
+      });
     }
   },
 };

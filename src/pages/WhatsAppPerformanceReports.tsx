@@ -15,7 +15,7 @@ import {
   SecondaryButton,
 } from "../components/CommonUI.tsx";
 import {
-  Activity,
+  Activity as ActivityIcon,
   MessageSquare,
   CheckCircle2,
   PhoneCall,
@@ -677,7 +677,7 @@ export const WhatsAppPerformanceReports: React.FC = () => {
         <StatCard
           label="Total Logs"
           value={execSummary.totalLogs}
-          icon={Activity}
+          icon={ActivityIcon}
         />
         <StatCard
           label="Enquiries"

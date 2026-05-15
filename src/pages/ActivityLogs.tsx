@@ -15,7 +15,7 @@ import {
   User,
   Zap,
   MoreVertical,
-  Activity,
+  Activity as ActivityIcon,
 } from "lucide-react";
 import {
   TablePanel,
@@ -302,7 +302,7 @@ export const ActivityLogs: React.FC = () => {
               <div className="flex flex-col gap-1">
                 {log.vendorName && (
                   <p className="text-[10px] font-bold text-stone-800 uppercase flex items-center gap-2">
-                    <Activity size={10} className="text-stone-300" />{" "}
+                    <ActivityIcon size={10} className="text-stone-300" />{" "}
                     {log.vendorName}
                   </p>
                 )}

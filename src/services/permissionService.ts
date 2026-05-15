@@ -238,6 +238,51 @@ export const permissionService = {
     return level === "export" || level === "full";
   },
 
+  canViewApprovalQueue: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return (
+      permissionService.hasActionPermission("approvalQueue.view") ||
+      permissionService.hasMenuAccess("approvalQueue")
+    );
+  },
+
+  canApproveWork: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return permissionService.hasActionPermission("approvalQueue.approve");
+  },
+
+  canRejectWork: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return permissionService.hasActionPermission("approvalQueue.reject");
+  },
+
+  canReturnWorkForCorrection: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return permissionService.hasActionPermission(
+      "approvalQueue.returnForCorrection",
+    );
+  },
+
+  canViewOwnNotifications: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return permissionService.hasActionPermission("notifications.viewOwn");
+  },
+
+  canViewTeamNotifications: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return permissionService.hasActionPermission("notifications.viewTeam");
+  },
+
+  canViewStaffAuditLogs: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return permissionService.hasActionPermission("staffAudit.view");
+  },
+
+  canViewAllStaffAuditLogs: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return permissionService.hasActionPermission("staffAudit.viewAll");
+  },
+
   canUseAction: (
     menuKey: MenuKey,
     action: "view" | "create" | "edit" | "approve" | "delete" | "export",
