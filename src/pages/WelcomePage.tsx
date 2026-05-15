@@ -319,20 +319,37 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
         console.error("Analytics log failed", analyticsError);
       }
 
-      await refreshStaff();
+      const latestStaff = await refreshStaff();
+
+      const savedStaff =
+        latestStaff.find((s) => s.id === defaultSysAdmin.id) ||
+        latestStaff.find((s) => s.staffCode === defaultSysAdmin.staffCode) ||
+        latestStaff.find((s) => s.email === defaultSysAdmin.email);
+
+      if (!savedStaff) {
+        setLoginError(
+          "SysAdmin was saved but could not be reloaded. Refresh the page and check Staff Management.",
+        );
+      } else {
+        setLoginError(
+          "First SysAdmin profile created. Please enter your passcode to access the desk.",
+        );
+      }
+
       setIsSetupMode(false);
-      setSelectedStaffId(defaultSysAdmin.id);
+      setSelectedStaffId(savedStaff?.id || defaultSysAdmin.id);
       setSetupFullName("");
       setSetupDisplayName("");
       setSetupEmail("");
       setSetupPasscode("");
       setSetupConfirmPasscode("");
-      setLoginError(
-        "First SysAdmin profile created. Please enter your passcode to access the desk.",
-      );
     } catch (error) {
       console.error("Setup failed", error);
-      setLoginError("Failed to initialize system. Please check console.");
+      setLoginError(
+        error instanceof Error
+          ? error.message
+          : "Failed to initialize system. Please check console.",
+      );
     }
   };
 
@@ -340,13 +357,18 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
     !!selectedStaff &&
     (selectedStaff.status === "suspended" || selectedStaff.isLocked);
 
-  const selectableStaff = allStaff.filter(
-    (s) =>
-      s.status === "active" ||
-      s.role === "Admin" ||
-      s.role === "SysAdmin" ||
-      s.desk === "SysAdmin Desk",
-  );
+  const selectableStaff = allStaff.filter((s) => {
+    const status = (s.status || "").toLowerCase();
+    const role = (s.role || "").toLowerCase();
+    const desk = (s.desk || "").toLowerCase();
+
+    return (
+      status === "active" ||
+      role === "admin" ||
+      role === "sysadmin" ||
+      desk === "sysadmin desk"
+    );
+  });
 
   return (
     <div style={styles.page}>
@@ -389,7 +411,8 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
                       {staff.displayName ||
                         staff.fullName ||
                         staff.email ||
-                        staff.staffCode}
+                        staff.staffCode ||
+                        staff.id}
                     </option>
                   ))}
                 </>
@@ -399,6 +422,17 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
                 </option>
               )}
             </select>
+            <div
+              style={{
+                fontSize: "10px",
+                color: "#888",
+                marginTop: "4px",
+                textAlign: "right",
+              }}
+            >
+              Loaded staff profiles: {allStaff.length} | Selectable profiles:{" "}
+              {selectableStaff.length}
+            </div>
           </div>
 
           {isSetupMode && (

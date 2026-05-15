@@ -474,11 +474,22 @@ export const staffService = {
 
   saveStaff: async (staff: Staff): Promise<void> => {
     const now = new Date().toISOString();
-    const staffId = staff.id || staff.staffCode || `STF-${Date.now()}`;
+    let staffCode = staff.staffCode;
+
+    if (!staffCode) {
+      try {
+        staffCode = await staffService.generateUniqueStaffCodeFromFirebase();
+      } catch (e) {
+        staffCode = staffService.generateStaffCode();
+      }
+    }
+
+    const staffId = staff.id || staffCode || `STF-${Date.now()}`;
 
     const staffToSave = removeUndefinedDeep({
       ...staff,
       id: staffId,
+      staffCode,
       updatedAt: now,
       createdAt: staff.createdAt || now,
     } as Staff);
