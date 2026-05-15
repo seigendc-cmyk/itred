@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   Activity as ActivityIcon,
   BarChart3,
@@ -201,6 +201,16 @@ export const AppShell: React.FC<AppShellProps> = ({
   >([]);
   const [sessionIgnored, setSessionIgnored] = useState<Set<string>>(new Set());
 
+  const loadNotifications = useCallback(async () => {
+    try {
+      const latestNotifications = await notificationService.getAll();
+      setNotifications(latestNotifications);
+    } catch (error) {
+      console.error("Failed to load notifications", error);
+      setNotifications([]);
+    }
+  }, [loadNotifications]);
+
   const openAlertsCount = notifications.filter(
     (n) =>
       n.status === "unread" &&
@@ -217,11 +227,11 @@ export const AppShell: React.FC<AppShellProps> = ({
   );
 
   useEffect(() => {
-    const loadNotifs = async () =>
-      setNotifications(await notificationService.getAll());
-    loadNotifs();
+    void loadNotifications();
 
-    const handleUpdate = () => loadNotifs();
+    const handleUpdate = () => {
+      void loadNotifications();
+    };
     const handleToast = (e: any) => {
       const newToast = {
         id: Date.now(),
@@ -564,7 +574,7 @@ export const AppShell: React.FC<AppShellProps> = ({
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   notificationService.markAsRead(n.id);
-                                  loadNotifs();
+                                  loadNotifications();
                                 }}
                                 className="px-2 py-1 bg-stone-100 text-[9px] uppercase font-bold text-stone-600 hover:bg-stone-200"
                               >
@@ -575,7 +585,7 @@ export const AppShell: React.FC<AppShellProps> = ({
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     notificationService.markAsResolved(n.id);
-                                    loadNotifs();
+                                    loadNotifications();
                                   }}
                                   className="px-2 py-1 bg-emerald-50 border border-emerald-100 text-[9px] uppercase font-bold text-emerald-700 hover:bg-emerald-100"
                                 >

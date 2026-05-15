@@ -1,10 +1,36 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-  
+
     function isConsoleAdmin() {
-       // Simplified access for pilot phase
-       return true;
+      return true;
+    }
+
+    // Pilot-safe open rules for iTred active build.
+    // Lock these down before full production.
+    match /itred_system_settings/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+
+    match /itred_activity_logs/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+
+    match /itred_console_staff/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+
+    match /itred_role_templates/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+
+    match /itred_staff_audit_logs/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
     }
 
     match /itred_approval_requests/{document=**} {
@@ -22,7 +48,42 @@ service cloud.firestore {
       allow delete: if isConsoleAdmin();
     }
 
-    match /itred_staff_audit_logs/{document=**} {
+    match /itred_vendors/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+
+    match /itred_products/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+
+    match /itred_catalogue_history/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+
+    match /itred_catalogues/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+
+    match /itred_storefronts/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+
+    match /itred_pricing_plans/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+
+    match /itred_cah_links/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+
+    match /{document=**} {
       allow get, list, create, update: if true;
       allow delete: if isConsoleAdmin();
     }

@@ -38,6 +38,7 @@ import { cahService } from "../services/cahService.ts";
 import { pricingPlanService } from "../services/pricingPlanService.ts";
 import { permissionService } from "../services/permissionService.ts";
 import { storefrontService } from "../services/storefrontService.ts";
+import { settingsService } from "../services/settingsService.ts";
 import { analyticsService } from "../services/analyticsService.ts";
 import { generateVendorStorefrontHtml } from "../lib/storefrontTemplate.ts";
 import {
@@ -244,6 +245,32 @@ export const VendorStorefrontBuilder: React.FC = () => {
   const selectedStaffLimit = selectedVendorPlan?.maxStaffPerVendor ?? 0;
   const selectedDeliveryLimit =
     selectedVendorPlan?.maxDeliveryContactsPerVendor ?? 0;
+
+
+  const readinessScore = useMemo(() => {
+    let score = 0;
+
+    if (selectedVendor) score += 15;
+    if (selectedVendor?.logoAssetUrl || selectedVendor?.logoUrl || selectedVendor?.businessLogoUrl) score += 10;
+    if (selectedVendor?.bannerAssetUrl || selectedVendor?.bannerUrl || selectedVendor?.businessBannerUrl) score += 10;
+    if (selectedProducts.length > 0) score += 20;
+    if (selectedImages.length > 0) score += 10;
+    if (selectedVendor?.whatsappNumber || selectedVendor?.whatsapp) score += 10;
+    if (selectedBranches.length > 0) score += 10;
+    if (selectedStaff.length > 0) score += 5;
+    if (selectedDelivery.length > 0) score += 5;
+    if (selectedCAHLinks.length > 0) score += 5;
+
+    return Math.min(100, score);
+  }, [
+    selectedVendor,
+    selectedProducts.length,
+    selectedImages.length,
+    selectedBranches.length,
+    selectedStaff.length,
+    selectedDelivery.length,
+    selectedCAHLinks.length,
+  ]);
 
   const generatedStorefront = useMemo(
     () => safeStorefronts.find((sf) => sf.id === activeStorefrontId) || null,
