@@ -51,6 +51,7 @@ import { notificationService } from "../services/notificationService.ts";
 type TabMode = "vendor" | "rpn" | "product" | "followup";
 
 export const WhatsAppPerformanceReports: React.FC = () => {
+  // WHATSAPP_REPORTS_RUNTIME_STABILITY_PATCH
   const [rawLogs, setRawLogs] = useState<WhatsAppActivityLog[]>([]);
   const [activeTab, setActiveTab] = useState<TabMode>("vendor");
   const [rpns, setRpns] = useState<RPN[]>([]);
@@ -328,43 +329,8 @@ export const WhatsAppPerformanceReports: React.FC = () => {
       .sort((a, b) => b.totalActivities - a.totalActivities);
   }, [filteredLogs]);
 
-  
-  useEffect(() => {
-    if (execSummary.overdueFollowUps > 0) {
-      void notificationService.createNotification({
-        type: "task_due",
-        priority: "critical",
-        title: "Overdue Follow-ups Detected",
-        message: `${execSummary.overdueFollowUps} follow-ups are currently overdue across the network.`,
-        recordType: "WhatsApp Reports",
-        recordId: "bi-overdue-followups",
-      });
-    }
-
-    if (execSummary.highPriority > 0) {
-      void notificationService.createNotification({
-        type: "lead_followup",
-        priority: "critical",
-        title: "High Priority Issues Pending",
-        message: `${execSummary.highPriority} critical priority items remain unresolved.`,
-        recordType: "WhatsApp Reports",
-        recordId: "bi-high-priority",
-      });
-    }
-
-    vendorReports.forEach((v) => {
-      if (v.missedResponses >= 2) {
-        void notificationService.createNotification({
-          type: "customer_feedback",
-          priority: "medium",
-          title: "Repeated Missed Responses",
-          message: `${v.vendorName} has missed ${v.missedResponses} responses.`,
-          recordType: "WhatsApp Reports",
-          recordId: `vendor-missed-${v.vendorId || v.vendorName}`,
-        });
-      }
-    });
-  }, [execSummary, vendorReports]);
+  // WhatsApp report notification automation temporarily disabled for runtime stability.
+  // Rebuild this later through a debounced service after all report arrays are initialized.
 
 // RPN Reports
   const rpnReports = useMemo(() => {
