@@ -31,6 +31,7 @@ import {
   ConfirmDialog,
   DataPanel,
   FormField,
+  BrandedAlertModal,
 } from "../components/CommonUI.tsx";
 import { staffService, ROLE_TEMPLATES } from "../services/staffService.ts";
 import { analyticsService } from "../services/analyticsService.ts";
@@ -187,9 +188,13 @@ const ACTION_GROUPS = [
   {
     name: "Notifications",
     keys: [
+      "notifications.view",
+      "notifications.markRead",
+      "notifications.resolve",
+      "notifications.archive",
+      "notifications.viewAll",
       "notifications.viewOwn",
       "notifications.viewTeam",
-      "notifications.resolve",
     ],
   },
   {
@@ -252,6 +257,8 @@ const JUNIOR_STAFF_PERMS: ActionPermissions = {
   "pricing.submitApproval": true,
   "whatsapp.view": true,
   "whatsapp.logActivity": true,
+  "notifications.view": true,
+  "notifications.markRead": true,
   "notifications.viewOwn": true,
   "staffTasks.viewOwn": true,
   "staffTasks.complete": true,
@@ -266,8 +273,10 @@ const MANAGER_PERMS: ActionPermissions = {
   "cah.approveLink": true,
   "pricing.approve": true,
   "whatsapp.verifyConversion": true,
-  "notifications.viewTeam": true,
+  "notifications.viewAll": true,
   "notifications.resolve": true,
+  "notifications.archive": true,
+  "notifications.viewTeam": true,
   "approvalQueue.view": true,
   "approvalQueue.approve": true,
   "staffTasks.assign": true,
@@ -378,6 +387,21 @@ export const StaffManagement: React.FC = () => {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [staffToDelete, setStaffToDelete] = useState<Staff | null>(null);
   const [deleteReason, setDeleteReason] = useState("");
+
+  const [alertConfig, setAlertConfig] = useState<{
+    isOpen: boolean;
+    title?: string;
+    message: string;
+    type?: "success" | "error" | "warning" | "info";
+  }>({ isOpen: false, title: "seiGEN Commerce", message: "", type: "success" });
+
+  const showBrandedAlert = (config: {
+    title?: string;
+    message: string;
+    type?: "success" | "error" | "warning" | "info";
+  }) => {
+    setAlertConfig({ ...config, isOpen: true });
+  };
 
   const canRepairDuplicates =
     permissionService.isSysAdmin() ||
@@ -599,11 +623,19 @@ export const StaffManagement: React.FC = () => {
       const dups = await staffService.findDuplicateStaffCodes();
       setDuplicateScanResult(dups);
       if (dups.length === 0) {
-        alert("No duplicate staff codes found.");
+        showBrandedAlert({
+          title: "seiGEN Commerce",
+          message: "No duplicate staff codes found.",
+          type: "info",
+        });
       }
     } catch (e) {
       console.error(e);
-      alert("Failed to scan duplicates.");
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message: "Failed to scan duplicates.",
+        type: "error",
+      });
     } finally {
       setIsScanningDuplicates(false);
     }
@@ -629,12 +661,20 @@ export const StaffManagement: React.FC = () => {
         action: "Repaired duplicate staff codes",
       });
 
-      alert(`Repaired ${totalRepaired} duplicate staff records.`);
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message: `Repaired ${totalRepaired} duplicate staff records.`,
+        type: "success",
+      });
       setDuplicateScanResult([]);
       void loadStaff();
     } catch (e: any) {
       console.error(e);
-      alert(e.message || "Failed to repair duplicates.");
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message: e.message || "Failed to repair duplicates.",
+        type: "error",
+      });
     } finally {
       setIsRepairingDuplicates(false);
     }
@@ -848,7 +888,11 @@ export const StaffManagement: React.FC = () => {
       setConfirmTempPasscode("");
       setSelectedStaff(null);
       setFormData({});
-      alert("Staff saved successfully.");
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message: "Staff saved successfully.",
+        type: "success",
+      });
       setView("list");
       focusMainContent();
     } catch (error: any) {
@@ -874,7 +918,12 @@ export const StaffManagement: React.FC = () => {
         setFormError(error.message);
       }
 
-      alert(error instanceof Error ? error.message : "Failed to save staff.");
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message:
+          error instanceof Error ? error.message : "Failed to save staff.",
+        type: "error",
+      });
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
   };
@@ -887,11 +936,19 @@ export const StaffManagement: React.FC = () => {
 
     if (type === "suspend" || type === "archive") {
       if (activeSession && activeSession.staffId === staff.id) {
-        alert("You cannot suspend or archive your own active session.");
+        showBrandedAlert({
+          title: "seiGEN Commerce",
+          message: "You cannot suspend or archive your own active session.",
+          type: "warning",
+        });
         return;
       }
       if (staffService.isLastActiveSysAdmin(staff.id)) {
-        alert("At least one active SysAdmin must remain in the system.");
+        showBrandedAlert({
+          title: "seiGEN Commerce",
+          message: "At least one active SysAdmin must remain in the system.",
+          type: "warning",
+        });
         return;
       }
     }
@@ -995,10 +1052,18 @@ export const StaffManagement: React.FC = () => {
             void loadLogs();
           }, 800);
 
-          alert("Staff saved successfully.");
+          showBrandedAlert({
+            title: "seiGEN Commerce",
+            message: "Staff saved successfully.",
+            type: "success",
+          });
         } catch (error: any) {
           console.error(error);
-          alert(error.message || "Failed to save staff.");
+          showBrandedAlert({
+            title: "seiGEN Commerce",
+            message: error.message || "Failed to save staff.",
+            type: "error",
+          });
           window.scrollTo({ top: 0, behavior: "smooth" });
         }
       },
@@ -1013,7 +1078,11 @@ export const StaffManagement: React.FC = () => {
     isOverride: boolean,
   ) => {
     if (newPasscode.length !== 6 || !/^\d{6}$/.test(newPasscode)) {
-      alert("Passcode must be exactly 6 digits.");
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message: "Passcode must be exactly 6 digits.",
+        type: "warning",
+      });
       return;
     }
 
@@ -1054,10 +1123,18 @@ export const StaffManagement: React.FC = () => {
       setConfirmTempPasscode("");
       setIsPasscodeModalOpen(false);
 
-      alert("Staff saved successfully.");
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message: "Staff saved successfully.",
+        type: "success",
+      });
     } catch (error: any) {
       console.error(error);
-      alert(error.message || "Failed to save staff.");
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message: error.message || "Failed to save staff.",
+        type: "error",
+      });
     }
   };
 
@@ -1117,6 +1194,11 @@ export const StaffManagement: React.FC = () => {
 
   return (
     <div className="space-y-8 pb-20">
+      <BrandedAlertModal
+        {...alertConfig}
+        onClose={() => setAlertConfig({ ...alertConfig, isOpen: false })}
+      />
+
       <div
         className="flex bg-stone-100 p-1 rounded-none w-fit"
         id="staff-management-header"
@@ -1323,9 +1405,12 @@ export const StaffManagement: React.FC = () => {
                     <PrimaryButton
                       onClick={() => {
                         if (!permissionService.canEditRolePermissions()) {
-                          alert(
-                            "You do not have permission to edit role permissions.",
-                          );
+                          showBrandedAlert({
+                            title: "seiGEN Commerce",
+                            message:
+                              "You do not have permission to edit role permissions.",
+                            type: "error",
+                          });
                           return;
                         }
                         const updatedRole = selectedStaff.role as string;
@@ -2044,7 +2129,11 @@ export const StaffManagement: React.FC = () => {
                               ...prev,
                               staffCode: newCode,
                             }));
-                            alert("New staff code generated.");
+                            showBrandedAlert({
+                              title: "seiGEN Commerce",
+                              message: "New staff code generated.",
+                              type: "success",
+                            });
                           }}
                         >
                           Generate New Staff Code
@@ -2085,7 +2174,11 @@ export const StaffManagement: React.FC = () => {
                           ...prev,
                           staffCode: newCode,
                         }));
-                        alert("New staff code generated.");
+                        showBrandedAlert({
+                          title: "seiGEN Commerce",
+                          message: "New staff code generated.",
+                          type: "success",
+                        });
                       }}
                       className="whitespace-nowrap px-3 py-2 text-xs"
                     >
@@ -2693,9 +2786,12 @@ export const StaffManagement: React.FC = () => {
                 <PrimaryButton
                   onClick={async () => {
                     if (!permissionService.canEditRolePermissions()) {
-                      alert(
-                        "You do not have permission to edit role permissions.",
-                      );
+                      showBrandedAlert({
+                        title: "seiGEN Commerce",
+                        message:
+                          "You do not have permission to edit role permissions.",
+                        type: "error",
+                      });
                       return;
                     }
                     if (selectedStaff) {
@@ -2748,10 +2844,18 @@ export const StaffManagement: React.FC = () => {
 
                         setView("list");
                         focusMainContent();
-                        alert("Staff saved successfully.");
+                        showBrandedAlert({
+                          title: "seiGEN Commerce",
+                          message: "Staff saved successfully.",
+                          type: "success",
+                        });
                       } catch (error: any) {
                         console.error(error);
-                        alert(error.message || "Failed to save staff.");
+                        showBrandedAlert({
+                          title: "seiGEN Commerce",
+                          message: error.message || "Failed to save staff.",
+                          type: "error",
+                        });
                       }
                     }
                   }}
@@ -2982,7 +3086,11 @@ export const StaffManagement: React.FC = () => {
         variant="warning"
         onConfirm={() => {
           if (tempPasscode !== confirmTempPasscode) {
-            alert("Passcodes do not match.");
+            showBrandedAlert({
+              title: "seiGEN Commerce",
+              message: "Passcodes do not match.",
+              type: "error",
+            });
             return;
           }
 
@@ -3077,10 +3185,18 @@ export const StaffManagement: React.FC = () => {
                 setTimeout(() => setFormSuccess(""), 3000);
               } catch (error: any) {
                 console.error(error);
-                alert(error.message || "Failed to save staff.");
+                showBrandedAlert({
+                  title: "seiGEN Commerce",
+                  message: error.message || "Failed to save staff.",
+                  type: "error",
+                });
               }
             } else {
-              alert("No staff found with this role.");
+              showBrandedAlert({
+                title: "seiGEN Commerce",
+                message: "No staff found with this role.",
+                type: "warning",
+              });
             }
           }
         }}

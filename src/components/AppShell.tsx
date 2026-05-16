@@ -35,7 +35,7 @@ import {
   Wallet,
   X,
 } from "lucide-react";
-import { AppRoute, ITredNotification } from "../types.ts";
+import { AppRoute, ITredNotification, MenuKey } from "../types.ts";
 import { motion, AnimatePresence } from "motion/react";
 import { permissionService } from "../services/permissionService.ts";
 import { notificationService } from "../services/notificationService.ts";
@@ -205,7 +205,18 @@ export const AppShell: React.FC<AppShellProps> = ({
 
   const loadNotifications = useCallback(async () => {
     try {
-      const latestNotifications = await notificationService.getAll();
+      let session: any = {};
+      try {
+        const sessionStr = localStorage.getItem("activeStaffSession");
+        session = sessionStr ? JSON.parse(sessionStr) : {};
+      } catch (sessionError) {
+        console.error("Failed to parse activeStaffSession", sessionError);
+      }
+
+      const staffId = session.staffId || session.id || "";
+      const latestNotifications = permissionService.canViewAllNotifications()
+        ? await notificationService.getAll()
+        : await notificationService.getByStaff(staffId);
       setNotifications(
         Array.isArray(latestNotifications) ? latestNotifications : [],
       );
@@ -229,6 +240,14 @@ export const AppShell: React.FC<AppShellProps> = ({
       (n.priority === "critical" || n.priority === "high") &&
       !sessionIgnored.has(n.id),
   );
+
+  const latestUnreadNotifications = notifications
+    .filter((n) => n.status === "unread")
+    .sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    )
+    .slice(0, 8);
 
   useEffect(() => {
     void loadNotifications();
@@ -553,21 +572,24 @@ export const AppShell: React.FC<AppShellProps> = ({
                       />
                     </button>
                   </div>
+                  <div className="p-3 border-b border-stone-100 bg-white shrink-0">
+                    <button
+                      onClick={() => {
+                        setIsNotifDropdownOpen(false);
+                        handleNavigate(AppRoute.NOTIFICATIONS);
+                      }}
+                      className="w-full px-3 py-2 bg-brand-charcoal text-white text-[10px] uppercase font-bold tracking-widest hover:bg-brand-orange transition-colors"
+                    >
+                      View All Notifications
+                    </button>
+                  </div>
                   <div className="overflow-y-auto flex-1 custom-scrollbar">
-                    {notifications.filter((n) => n.status === "unread")
-                      .length === 0 ? (
+                    {latestUnreadNotifications.length === 0 ? (
                       <div className="p-6 text-center text-xs text-stone-400 font-bold uppercase tracking-widest">
                         No active notifications.
                       </div>
                     ) : (
-                      notifications
-                        .filter((n) => n.status === "unread")
-                        .sort(
-                          (a, b) =>
-                            new Date(b.createdAt).getTime() -
-                            new Date(a.createdAt).getTime(),
-                        )
-                        .map((n) => (
+                      latestUnreadNotifications.map((n) => (
                           <div
                             key={n.id}
                             className={`p-4 border-b border-stone-50 hover:bg-stone-50 transition-colors cursor-pointer ${n.priority === "critical" ? "border-l-4 border-l-red-500" : ""}`}
@@ -582,8 +604,9 @@ export const AppShell: React.FC<AppShellProps> = ({
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  notificationService.markAsRead(n.id);
-                                  loadNotifications();
+                                  void notificationService
+                                    .markRead(n.id)
+                                    .then(loadNotifications);
                                 }}
                                 className="px-2 py-1 bg-stone-100 text-[9px] uppercase font-bold text-stone-600 hover:bg-stone-200"
                               >
@@ -593,8 +616,9 @@ export const AppShell: React.FC<AppShellProps> = ({
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    notificationService.markAsResolved(n.id);
-                                    loadNotifications();
+                                    void notificationService
+                                      .resolve(n.id)
+                                      .then(loadNotifications);
                                   }}
                                   className="px-2 py-1 bg-emerald-50 border border-emerald-100 text-[9px] uppercase font-bold text-emerald-700 hover:bg-emerald-100"
                                 >
@@ -682,9 +706,9 @@ export const AppShell: React.FC<AppShellProps> = ({
                 className="flex-1 p-3 bg-brand-orange text-white text-[10px] tracking-wider font-bold uppercase hover:bg-brand-orange/90 transition-colors"
                 onClick={() =>
                   notificationService
-                    .markAsRead(criticalAlert.id)
+                    .markRead(criticalAlert.id)
                     .then(async () =>
-                      setNotifications(await notificationService.getAll()),
+                      loadNotifications(),
                     )
                 }
               >
@@ -762,12 +786,8 @@ export const AppShell: React.FC<AppShellProps> = ({
                           <button
                             onClick={() =>
                               notificationService
-                                .markAsRead(n.id)
-                                .then(async () =>
-                                  setNotifications(
-                                    await notificationService.getAll(),
-                                  ),
-                                )
+                              .markAsRead(n.id)
+                                .then(loadNotifications)
                             }
                             className="text-[9px] font-bold uppercase tracking-wider bg-stone-100 text-stone-600 px-3 py-1.5 hover:bg-stone-200 transition-colors"
                           >
@@ -778,11 +798,7 @@ export const AppShell: React.FC<AppShellProps> = ({
                           onClick={() =>
                             notificationService
                               .markAsResolved(n.id)
-                              .then(async () =>
-                                setNotifications(
-                                  await notificationService.getAll(),
-                                ),
-                              )
+                              .then(loadNotifications)
                           }
                           className="text-[9px] font-bold uppercase tracking-wider bg-orange-50 text-brand-orange border border-orange-200 px-3 py-1.5 hover:bg-brand-orange hover:text-white transition-colors"
                         >

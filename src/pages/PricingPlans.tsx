@@ -11,6 +11,7 @@ import {
   ConfirmDialog,
   FormSection,
   FormField,
+  BrandedAlertModal,
 } from "../components/CommonUI.tsx";
 import {
   Plus,
@@ -50,10 +51,26 @@ export const PricingPlans: React.FC = () => {
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
   const [vendorToAssign, setVendorToAssign] = useState<Vendor | null>(null);
   const [targetPlanId, setTargetPlanId] = useState<string>("");
+  const [planDeleteId, setPlanDeleteId] = useState<string | null>(null);
 
   const [newFeature, setNewFeature] = useState("");
 
   const [isSavingPlan, setIsSavingPlan] = useState(false);
+
+  const [alertConfig, setAlertConfig] = useState<{
+    isOpen: boolean;
+    title?: string;
+    message: string;
+    type?: "success" | "error" | "warning" | "info";
+  }>({ isOpen: false, title: "seiGEN Commerce", message: "", type: "success" });
+
+  const showBrandedAlert = (config: {
+    title?: string;
+    message: string;
+    type?: "success" | "error" | "warning" | "info";
+  }) => {
+    setAlertConfig({ ...config, isOpen: true });
+  };
 
   const safePlans = asArray<PricingPlan>(plans);
   const safeVendors = asArray<Vendor>(vendors);
@@ -108,7 +125,11 @@ export const PricingPlans: React.FC = () => {
     e.preventDefault();
 
     if (!editingPlan?.name) {
-      alert("Plan name is required.");
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message: "Plan name is required.",
+        type: "error",
+      });
       return;
     }
 
@@ -212,13 +233,20 @@ export const PricingPlans: React.FC = () => {
       await loadData();
       setIsFormOpen(false);
       setEditingPlan(null);
-      alert("Saved successfully");
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message: "Pricing plan saved successfully.",
+        type: "success",
+      });
     } catch (error: any) {
       console.error("Pricing plan save failed", error);
-      alert(
-        error.message ||
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message:
+          error.message ||
           "Pricing plan was not saved. Check Firebase permissions or network.",
-      );
+        type: "error",
+      });
     } finally {
       setIsSavingPlan(false);
     }
@@ -226,13 +254,12 @@ export const PricingPlans: React.FC = () => {
 
   const handleDeletePlan = async (id: string) => {
     if ((vendorsByPlan[id] || []).length > 0) {
-      alert(
-        "Cannot delete plan with active subscribers. Reassign vendors first.",
-      );
-      return;
-    }
-
-    if (!confirm("Are you sure you want to delete this pricing plan?")) {
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message:
+          "Cannot delete plan with active subscribers. Reassign vendors first.",
+        type: "error",
+      });
       return;
     }
 
@@ -253,7 +280,11 @@ export const PricingPlans: React.FC = () => {
       });
 
       await loadData();
-      alert("Deleted successfully");
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message: "Deleted successfully.",
+        type: "success",
+      });
 
       // Non-blocking staff audit logging
       try {
@@ -268,7 +299,11 @@ export const PricingPlans: React.FC = () => {
       }
     } catch (error: any) {
       console.error(error);
-      alert(error.message || "Delete failed");
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message: error.message || "Delete failed",
+        type: "error",
+      });
     }
   };
 
@@ -291,7 +326,11 @@ export const PricingPlans: React.FC = () => {
       });
 
       await loadData();
-      alert("Saved successfully");
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message: "Saved successfully.",
+        type: "success",
+      });
 
       // Non-blocking staff audit logging
       try {
@@ -309,7 +348,11 @@ export const PricingPlans: React.FC = () => {
       }
     } catch (error: any) {
       console.error(error);
-      alert(error.message || "Save failed");
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message: error.message || "Save failed",
+        type: "error",
+      });
     }
   };
 
@@ -339,10 +382,18 @@ export const PricingPlans: React.FC = () => {
       setIsAssignModalOpen(false);
       setVendorToAssign(null);
       setTargetPlanId("");
-      alert("Saved successfully");
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message: "Saved successfully.",
+        type: "success",
+      });
     } catch (error: any) {
       console.error(error);
-      alert(error.message || "Save failed");
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message: error.message || "Save failed",
+        type: "error",
+      });
     }
   };
 
@@ -399,6 +450,10 @@ export const PricingPlans: React.FC = () => {
 
   return (
     <div className="pb-20" id="pricing-header" tabIndex={-1}>
+      <BrandedAlertModal
+        {...alertConfig}
+        onClose={() => setAlertConfig({ ...alertConfig, isOpen: false })}
+      />
       <div className="flex justify-between items-center mb-8">
         <PageHeader
           title="Pricing"
@@ -1010,7 +1065,11 @@ export const PricingPlans: React.FC = () => {
                         setEditingPlan(plan);
                         setIsFormOpen(true);
                       } else {
-                        alert("Permission denied to edit pricing plans.");
+                        showBrandedAlert({
+                          title: "seiGEN Commerce",
+                          message: "Permission denied to edit pricing plans.",
+                          type: "error",
+                        });
                       }
                     }}
                     className={`p-2 text-stone-400 hover:text-brand-orange transition-all ${
@@ -1025,9 +1084,13 @@ export const PricingPlans: React.FC = () => {
                   <button
                     onClick={() => {
                       if (permissionService.canDelete("pricing")) {
-                        void handleDeletePlan(plan.id);
+                        setPlanDeleteId(plan.id);
                       } else {
-                        alert("Permission denied to delete pricing plans.");
+                        showBrandedAlert({
+                          title: "seiGEN Commerce",
+                          message: "Permission denied to delete pricing plans.",
+                          type: "error",
+                        });
                       }
                     }}
                     className={`p-2 text-stone-400 hover:text-red-500 transition-all ${
@@ -1106,7 +1169,11 @@ export const PricingPlans: React.FC = () => {
                     if (permissionService.canEdit("pricing")) {
                       void handleToggleStatus(plan.id, plan.status);
                     } else {
-                      alert("Permission denied to change plan status.");
+                      showBrandedAlert({
+                        title: "seiGEN Commerce",
+                        message: "Permission denied to change plan status.",
+                        type: "error",
+                      });
                     }
                   }}
                   className={`w-full py-3 text-[9px] font-bold uppercase tracking-widest border border-stone-200 hover:bg-white transition-all ${
@@ -1127,7 +1194,11 @@ export const PricingPlans: React.FC = () => {
                 setEditingPlan({});
                 setIsFormOpen(true);
               } else {
-                alert("Permission denied to create pricing plans.");
+                showBrandedAlert({
+                  title: "seiGEN Commerce",
+                  message: "Permission denied to create pricing plans.",
+                  type: "error",
+                });
               }
             }}
             className={`flex flex-col items-center justify-center p-12 border-2 border-dashed border-stone-200 hover:border-brand-orange hover:bg-orange-50 transition-all text-stone-400 hover:text-brand-orange group ${
@@ -1337,6 +1408,20 @@ export const PricingPlans: React.FC = () => {
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        isOpen={!!planDeleteId}
+        title="seiGEN Commerce"
+        message="Delete this pricing plan? This action cannot be undone."
+        confirmLabel="Delete Plan"
+        cancelLabel="Cancel"
+        variant="danger"
+        onConfirm={() => {
+          if (planDeleteId) void handleDeletePlan(planDeleteId);
+          setPlanDeleteId(null);
+        }}
+        onCancel={() => setPlanDeleteId(null)}
+      />
 
       <ConfirmDialog
         isOpen={isAssignModalOpen}

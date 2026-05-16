@@ -196,6 +196,21 @@ const DEFAULT_STAFF: Staff[] = [
       roleMenuPermissions: "full",
       staffAccessLogs: "full",
       systemSettings: "full",
+      staffTasks: "full",
+      notifications: "full",
+    },
+    actionPermissions: {
+      "notifications.view": true,
+      "notifications.markRead": true,
+      "notifications.resolve": true,
+      "notifications.archive": true,
+      "notifications.viewAll": true,
+      "staffTasks.view": true,
+      "staffTasks.create": true,
+      "staffTasks.assign": true,
+      "staffTasks.updateStatus": true,
+      "staffTasks.review": true,
+      "staffTasks.cancel": true,
     },
     createdBy: "system",
     updatedBy: "system",
@@ -332,6 +347,8 @@ const ROLE_TEMPLATES_OBJECT: Record<string, MenuPermissions> = {
     staffAccessLogs: "full",
     systemSettings: "full",
     rpnPerformance: "full",
+    staffTasks: "full",
+    notifications: "full",
     howTo: "view",
   },
   Admin: {
@@ -361,6 +378,8 @@ const ROLE_TEMPLATES_OBJECT: Record<string, MenuPermissions> = {
     staffAccessLogs: "full",
     systemSettings: "full",
     rpnPerformance: "full",
+    staffTasks: "full",
+    notifications: "full",
     howTo: "view",
   },
   "Backoffice Operator": {
@@ -377,6 +396,8 @@ const ROLE_TEMPLATES_OBJECT: Record<string, MenuPermissions> = {
     activityLogs: "view",
     pricing: "view",
     inventorySpotChecks: "view",
+    staffTasks: "view",
+    notifications: "view",
   },
   "Product Data Clerk": {
     dashboard: "view",
@@ -385,6 +406,8 @@ const ROLE_TEMPLATES_OBJECT: Record<string, MenuPermissions> = {
     productList: "edit",
     vendorManagement: "view",
     createCatalogue: "view",
+    staffTasks: "view",
+    notifications: "view",
   },
   "Catalogue Officer": {
     dashboard: "view",
@@ -395,6 +418,8 @@ const ROLE_TEMPLATES_OBJECT: Record<string, MenuPermissions> = {
     createStorefront: "full",
     accessHub: "view",
     analytics: "view",
+    staffTasks: "view",
+    notifications: "view",
   },
   "Collections Officer": {
     dashboard: "view",
@@ -402,6 +427,8 @@ const ROLE_TEMPLATES_OBJECT: Record<string, MenuPermissions> = {
     collectionCalendar: "full",
     vendorManagement: "view",
     activityLogs: "view",
+    staffTasks: "view",
+    notifications: "view",
   },
   "RPN Manager": {
     dashboard: "view",
@@ -413,6 +440,8 @@ const ROLE_TEMPLATES_OBJECT: Record<string, MenuPermissions> = {
     inventorySpotChecks: "full",
     analytics: "view",
     rpnPerformance: "full",
+    staffTasks: "view",
+    notifications: "view",
   },
   "CAH Officer": {
     dashboard: "view",
@@ -420,6 +449,8 @@ const ROLE_TEMPLATES_OBJECT: Record<string, MenuPermissions> = {
     cahBooths: "full",
     createCatalogue: "view",
     analytics: "view",
+    staffTasks: "view",
+    notifications: "view",
   },
   "BI Analyst": {
     dashboard: "view",
@@ -427,6 +458,8 @@ const ROLE_TEMPLATES_OBJECT: Record<string, MenuPermissions> = {
     biMarketAnalytics: "full",
     performanceMetrics: "full",
     activityLogs: "view",
+    staffTasks: "view",
+    notifications: "view",
   },
   Viewer: {
     dashboard: "view",
@@ -441,6 +474,8 @@ const ROLE_TEMPLATES_OBJECT: Record<string, MenuPermissions> = {
     performanceMetrics: "view",
     activityLogs: "view",
     rpnPerformance: "view",
+    staffTasks: "view",
+    notifications: "view",
   },
 };
 

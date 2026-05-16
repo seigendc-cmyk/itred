@@ -109,8 +109,15 @@ export const RPNPerformanceDashboard: React.FC = () => {
       weeklyOnboardingThreshold: 20,
       monthlyOnboardingThreshold: 80,
       churnWarningPercent: 15,
+      churnWarningRate: 15,
+      recurringVendorRetentionTarget: 85,
+      minimumRecurringRevenueTarget: 0,
+      overdueVendorFollowUpDays: 2,
+      inactiveAssignedVendorDays: 14,
       minimumCollectionRatePercent: 70,
       graceDaysBeforeWarning: 3,
+      subscriptionDueWarningDays: 3,
+      subscriptionOverdueEscalationDays: 2,
       enableThresholdAlerts: true,
       requireApprovalForThresholdChange: false,
       updatedAt: new Date().toISOString(),
@@ -142,11 +149,14 @@ export const RPNPerformanceDashboard: React.FC = () => {
       let activeVendors = 0;
       let trialVendors = 0;
       let overdueVendors = 0;
+      let dueSoonVendors = 0;
       let churnedVendors = 0;
       let recurringVendors = 0;
       let monthlyRecurringValue = 0;
       let lifetimeValueOnboarded = 0;
       let churnValueLost = 0;
+      const assignedVendorFollowUps: Vendor[] = [];
+      const retentionRiskVendors: Vendor[] = [];
 
       rpnVendors.forEach((v) => {
         const onboardedAt = v.onboardedAt
@@ -163,6 +173,38 @@ export const RPNPerformanceDashboard: React.FC = () => {
         if (v.subscriptionStatus === "trial") trialVendors++;
         if (v.subscriptionStatus === "overdue") overdueVendors++;
         if (v.churnStatus === "churned") churnedVendors++;
+
+        if (v.subscriptionDueDate) {
+          const dueDate = new Date(v.subscriptionDueDate);
+          const daysUntilDue = Math.ceil(
+            (dueDate.getTime() - now.getTime()) / (1000 * 3600 * 24),
+          );
+          const overdueDays = Math.max(0, -daysUntilDue);
+          if (
+            daysUntilDue >= 0 &&
+            daysUntilDue <= rpnSettings.subscriptionDueWarningDays
+          ) {
+            dueSoonVendors++;
+            assignedVendorFollowUps.push(v);
+          }
+          if (overdueDays >= rpnSettings.subscriptionOverdueEscalationDays) {
+            if (!assignedVendorFollowUps.some((item) => item.id === v.id)) {
+              assignedVendorFollowUps.push(v);
+            }
+            retentionRiskVendors.push(v);
+          }
+        }
+
+        if (
+          v.subscriptionStatus === "overdue" ||
+          v.churnStatus === "at_risk" ||
+          v.churnStatus === "churned" ||
+          v.status === "cancelled"
+        ) {
+          if (!retentionRiskVendors.some((item) => item.id === v.id)) {
+            retentionRiskVendors.push(v);
+          }
+        }
 
         const planValue =
           v.monthlyPlanValue ||
@@ -188,6 +230,15 @@ export const RPNPerformanceDashboard: React.FC = () => {
         vendorsOnboardedToDate > 0
           ? (churnedVendors / vendorsOnboardedToDate) * 100
           : 0;
+      const retentionScore = Math.max(
+        0,
+        Math.round(
+          100 -
+            overdueVendors * 8 -
+            churnedVendors * 15 -
+            retentionRiskVendors.length * 5,
+        ),
+      );
 
       let thresholdStatus = "dormant";
       if (
@@ -220,8 +271,13 @@ export const RPNPerformanceDashboard: React.FC = () => {
         activeVendors,
         trialVendors,
         overdueVendors,
+        dueSoonVendors,
         churnedVendors,
         churnRate,
+        retentionScore,
+        retentionRiskCount: retentionRiskVendors.length,
+        assignedVendorFollowUps,
+        retentionRiskVendors,
         recurringVendors,
         monthlyRecurringValue,
         lifetimeValueOnboarded,
@@ -387,6 +443,8 @@ export const RPNPerformanceDashboard: React.FC = () => {
     let totalChurnValue = 0;
     let dailyThresholdHits = 0;
     let atRiskRpns = 0;
+    let assignedFollowUps = 0;
+    let retentionRiskCount = 0;
 
     rpnPerformance.forEach((r) => {
       onboardedToday += r.vendorsOnboardedToday;
@@ -395,9 +453,12 @@ export const RPNPerformanceDashboard: React.FC = () => {
       totalMRR += r.monthlyRecurringValue;
       totalChurnRateSum += r.churnRate;
       totalChurnValue += r.churnValueLost;
+      assignedFollowUps += r.assignedVendorFollowUps.length;
+      retentionRiskCount += r.retentionRiskCount;
       if (r.dailyVariance >= 0 && r.vendorsOnboardedToDate > 0)
         dailyThresholdHits++;
-      if (r.thresholdStatus === "at_risk") atRiskRpns++;
+      if (r.thresholdStatus === "at_risk" || r.retentionScore < 70)
+        atRiskRpns++;
     });
 
     const avgChurn =
@@ -429,6 +490,8 @@ export const RPNPerformanceDashboard: React.FC = () => {
       avgChurn,
       totalChurnValue,
       atRiskRpns,
+      assignedFollowUps,
+      retentionRiskCount,
       topRpnName: topRpn ? topRpn.name : "N/A",
     };
   }, [rpnPerformance]);
@@ -513,6 +576,18 @@ export const RPNPerformanceDashboard: React.FC = () => {
           icon={AlertTriangle}
           variant={overviewStats.atRiskRpns > 0 ? "error" : "success"}
         />
+        <StatCard
+          label="Assigned Follow-ups"
+          value={overviewStats.assignedFollowUps.toString()}
+          icon={Clock}
+          variant={overviewStats.assignedFollowUps > 0 ? "warning" : "neutral"}
+        />
+        <StatCard
+          label="Retention Risks"
+          value={overviewStats.retentionRiskCount.toString()}
+          icon={AlertTriangle}
+          variant={overviewStats.retentionRiskCount > 0 ? "error" : "neutral"}
+        />
       </div>
 
       <div className="bg-stone-50 border border-stone-200 p-6 flex flex-wrap gap-4 items-center">
@@ -543,6 +618,8 @@ export const RPNPerformanceDashboard: React.FC = () => {
           "Month",
           "Total Portfolio",
           "Active",
+          "Follow-ups",
+          "Retention",
           "Churn %",
           "MRR Value",
           "Threshold Status",
@@ -593,6 +670,22 @@ export const RPNPerformanceDashboard: React.FC = () => {
             <td className="px-6 py-4 font-mono text-xs text-blue-600 font-bold">
               {rpn.activeVendors}
             </td>
+            <td className="px-6 py-4 font-mono text-xs text-brand-orange font-bold">
+              {rpn.assignedVendorFollowUps.length}
+            </td>
+            <td className="px-6 py-4 font-mono text-xs font-bold">
+              <span
+                className={
+                  rpn.retentionScore >= 80
+                    ? "text-emerald-600"
+                    : rpn.retentionScore >= 60
+                      ? "text-brand-orange"
+                      : "text-red-500"
+                }
+              >
+                {rpn.retentionScore}
+              </span>
+            </td>
             <td className="px-6 py-4 font-mono text-xs text-red-500 font-bold">
               {rpn.churnRate.toFixed(1)}%
             </td>
@@ -610,7 +703,7 @@ export const RPNPerformanceDashboard: React.FC = () => {
         {filteredPerformance.length === 0 && (
           <tr>
             <td
-              colSpan={11}
+              colSpan={13}
               className="px-6 py-12 text-center text-[10px] uppercase font-bold text-stone-400"
             >
               No RPN records match the current filters.
@@ -664,7 +757,7 @@ export const RPNPerformanceDashboard: React.FC = () => {
             <div className="flex-1 overflow-y-auto p-6 bg-stone-50 custom-scrollbar">
               {activeTab === "portfolio" && (
                 <div className="space-y-4">
-                  <div className="grid grid-cols-3 gap-4 mb-6">
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
                     <div className="bg-white border border-stone-200 p-4">
                       <p className="text-[9px] uppercase font-bold text-stone-400 mb-1">
                         Total Onboarded
@@ -689,7 +782,64 @@ export const RPNPerformanceDashboard: React.FC = () => {
                         {selectedRpn.overdueVendors}
                       </p>
                     </div>
+                    <div className="bg-white border border-stone-200 p-4">
+                      <p className="text-[9px] uppercase font-bold text-stone-400 mb-1">
+                        Due Soon
+                      </p>
+                      <p className="text-xl font-bold font-mono text-brand-orange">
+                        {selectedRpn.dueSoonVendors}
+                      </p>
+                    </div>
+                    <div className="bg-white border border-stone-200 p-4">
+                      <p className="text-[9px] uppercase font-bold text-stone-400 mb-1">
+                        Retention Score
+                      </p>
+                      <p className="text-xl font-bold font-mono text-brand-charcoal">
+                        {selectedRpn.retentionScore}
+                      </p>
+                    </div>
                   </div>
+
+                  {selectedRpn.assignedVendorFollowUps.length > 0 && (
+                    <DataPanel
+                      title="Assigned Vendor Follow-up List"
+                      subtitle="Subscription due/overdue vendors where RPN collections or retention follow-up is required."
+                      className="border-l-4 border-l-brand-orange"
+                    >
+                      <div className="p-4 space-y-2">
+                        {selectedRpn.assignedVendorFollowUps.map(
+                          (v: Vendor) => (
+                            <div
+                              key={v.id}
+                              className="flex items-center justify-between gap-3 border border-stone-200 bg-white p-3"
+                            >
+                              <div>
+                                <p className="text-xs font-bold uppercase text-brand-charcoal">
+                                  {v.name}
+                                </p>
+                                <p className="text-[10px] font-mono text-stone-500">
+                                  Due:{" "}
+                                  {v.subscriptionDueDate
+                                    ? new Date(
+                                        v.subscriptionDueDate,
+                                      ).toLocaleDateString()
+                                    : "N/A"}
+                                </p>
+                              </div>
+                              <StatusBadge
+                                status={v.subscriptionStatus}
+                                variant={
+                                  v.subscriptionStatus === "overdue"
+                                    ? "error"
+                                    : "warning"
+                                }
+                              />
+                            </div>
+                          ),
+                        )}
+                      </div>
+                    </DataPanel>
+                  )}
 
                   <TablePanel
                     headers={[

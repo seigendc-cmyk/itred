@@ -128,8 +128,8 @@ export const generateCatalogueHtml = (
         }
         /* CRITICAL MOBILE-FIRST RULES */
         html, body {
-            width: 100%;
-            max-width: 100%;
+            width: 100vw; /* Occupy full viewport width */
+            max-width: 100vw;
             overflow-x: hidden;
             margin: 0;
             padding: 0;
@@ -137,7 +137,7 @@ export const generateCatalogueHtml = (
             font-family: 'Inter', system-ui, -apple-system, sans-serif;
             background: var(--brand-silver);
             color: var(--brand-charcoal);
-            padding-bottom: 60px; /* nav space */
+            padding-bottom: 116px; /* floating controls space */
         }
         *, *:before, *:after { box-sizing: border-box; border-radius: 0; }
         
@@ -154,8 +154,8 @@ export const generateCatalogueHtml = (
 
         /* App Shell */
         .app-shell {
-            width: 100%;
-            max-width: 480px;
+            width: 100vw;
+            max-width: 100vw;
             margin: 0 auto;
             background: #fff;
             min-height: 100vh;
@@ -163,6 +163,69 @@ export const generateCatalogueHtml = (
             box-shadow: 0 0 20px rgba(0,0,0,0.05);
             display: flex;
             flex-direction: column;
+        }
+
+        /* Window Controls */
+        .window-controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 1001;
+            display: flex;
+            gap: 8px;
+        }
+        .window-control-btn {
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            font-weight: bold;
+            cursor: pointer;
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+        }
+        .window-control-btn:hover { background: rgba(255, 255, 255, 0.4); }
+        .window-control-btn.close-btn:hover { background: #ef4444; }
+
+        /* Minimized State */
+        .minimized-catalogue-bar {
+            display: none;
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--brand-orange);
+            color: white;
+            padding: 12px 24px;
+            font-weight: 800;
+            font-size: 14px;
+            text-transform: uppercase;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            z-index: 2000;
+            cursor: pointer;
+            border: 2px solid white;
+            white-space: nowrap;
+        }
+        .catalogue-minimized .app-shell main,
+        .catalogue-minimized .menu-button,
+        .catalogue-minimized .menu-sheet,
+        .catalogue-minimized .menu-backdrop,
+        .catalogue-minimized .search-area,
+        .catalogue-minimized footer {
+            display: none !important;
+        }
+        .catalogue-minimized .minimized-catalogue-bar {
+            display: block;
+        }
+        /* Responsive Constraint for Desktop */
+        @media (min-width: 1024px) {
+            .app-shell { max-width: 480px; }
+            .search-area { max-width: 480px; }
         }
 
         /* Header */
@@ -257,27 +320,61 @@ export const generateCatalogueHtml = (
 
         /* Search */
         .search-area {
-            position: sticky;
-            top: 0;
-            z-index: 902;
-            padding: 10px 14px;
-            margin-top: 8px;
-            background: rgba(255, 255, 255, 0.96);
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
-            border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+            position: fixed;
+            left: 50%;
+            right: auto;
+            bottom: 12px;
+            transform: translateX(-50%);
+            z-index: 1001;
+            width: calc(100vw - 84px);
+            max-width: 480px;
+            padding: 8px 10px;
+            background: rgba(255, 255, 255, 0.92);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border: 1px solid rgba(255, 107, 0, 0.34);
+            box-shadow: 0 14px 38px rgba(0, 0, 0, 0.18);
+        }
+        .search-box {
+            position: relative;
+            display: flex;
+            align-items: center;
         }
         .search-input {
             width: 100%;
-            padding: 13px 14px;
-            background: #ffffff;
-            border: 1px solid #e0e0e0;
+            padding: 12px 40px 12px 12px;
+            background: rgba(255, 255, 255, 0.96);
+            border: 1px solid rgba(46, 46, 46, 0.14);
             font-size: 14px;
             font-weight: 800;
             outline: none;
         }
         .search-input:focus {
-            background: #fff; border-color: var(--brand-orange);
+            background: #fff; border-color: var(--brand-orange); box-shadow: 0 0 0 2px rgba(255, 107, 0, 0.14);
+        }
+        .search-clear {
+            display: none;
+            position: absolute;
+            right: 6px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 30px;
+            height: 30px;
+            border: none;
+            background: transparent;
+            color: var(--brand-charcoal);
+            font-size: 18px;
+            font-weight: 900;
+            cursor: pointer;
+        }
+        .search-clear.visible { display: flex; align-items: center; justify-content: center; }
+        #searchStats {
+            font-size: 9px;
+            font-weight: 900;
+            color: #666;
+            margin-top: 6px;
+            text-transform: uppercase;
+            display: none;
         }
 
         /* Tabs */
@@ -345,20 +442,71 @@ export const generateCatalogueHtml = (
         .m-val { font-weight: 700; color: var(--brand-charcoal); }
         .m-image { width: 100%; height: 300px; object-fit: cover; background: #f9f9f9; margin-bottom: 16px; }
 
-        /* Nav */
-        .bottom-nav {
-            position: fixed; bottom: 0; left: 0; right: 0; height: 60px;
-            background: #fff; display: flex; border-top: 1px solid #eee; z-index: 1000;
-            max-width: 480px; margin: 0 auto;
-            overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; scrollbar-width: none;
+        /* Floating Menu */
+        .menu-button {
+            position: fixed;
+            right: max(12px, calc((100vw - 480px) / 2 + 12px));
+            bottom: 12px;
+            z-index: 1002;
+            width: 52px;
+            height: 52px;
+            border: none;
+            background: var(--brand-charcoal);
+            color: #fff;
+            box-shadow: 0 14px 34px rgba(0,0,0,0.26);
+            font-size: 24px;
+            font-weight: 900;
+            cursor: pointer;
         }
-        .bottom-nav::-webkit-scrollbar { display: none; }
-        .nav-item {
-            flex: 1 0 auto; display: flex; flex-direction: column; align-items: center; justify-content: center;
-            font-size: 9px; font-weight: 900; color: #888; text-transform: uppercase; background: none; border: none;
-            cursor: pointer; transition: 0.2s; padding: 0 16px;
+        .menu-button.active { background: var(--brand-orange); }
+        .menu-backdrop {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 1000;
+            background: rgba(0,0,0,0.18);
         }
-        .nav-item.active { color: var(--brand-orange); border-top: 2px solid var(--brand-orange); background: #fffaf5; }
+        .menu-backdrop.open { display: block; }
+        .menu-sheet {
+            position: fixed;
+            left: 50%;
+            bottom: 76px;
+            transform: translate(-50%, 16px);
+            z-index: 1002;
+            width: calc(100vw - 24px);
+            max-width: 480px;
+            background: rgba(255,255,255,0.96);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(0,0,0,0.08);
+            box-shadow: 0 18px 48px rgba(0,0,0,0.24);
+            padding: 10px;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.18s ease, transform 0.18s ease;
+        }
+        .menu-sheet.open {
+            opacity: 1;
+            pointer-events: auto;
+            transform: translate(-50%, 0);
+        }
+        .menu-item {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border: none;
+            background: transparent;
+            padding: 14px 12px;
+            color: var(--brand-charcoal);
+            font-size: 12px;
+            font-weight: 900;
+            text-transform: uppercase;
+            cursor: pointer;
+            text-align: left;
+        }
+        .menu-item.active { color: var(--brand-orange); background: #fff3ed; }
+        .menu-item.active::after { content: "ACTIVE"; font-size: 8px; color: var(--brand-orange); }
 
         /* Typography Utilities */
         .text-center { text-align: center; }
@@ -447,6 +595,7 @@ export const generateCatalogueHtml = (
             position: relative;
             z-index: 1;
             background: #fff;
+            padding-bottom: 100px;
         }
         .svy-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9999; display:none; align-items:center; justify-content:center; padding:16px; font-family:system-ui, sans-serif; }
         .svy-box { background:var(--brand-silver, #fff); width:100%; max-width:400px; padding:24px; position:relative; color:var(--brand-charcoal, #333); max-height:90vh; overflow-y:auto; }
@@ -465,6 +614,10 @@ export const generateCatalogueHtml = (
         
         <div class="fixed-catalogue-header-wrapper">
             <header class="sector-header">
+                <div class="window-controls">
+                    <button class="window-control-btn" onclick="minimizeCatalogue()" title="Minimize">−</button>
+                    <button class="window-control-btn close-btn" onclick="closeCatalogue()" title="Close">×</button>
+                </div>
                 <div class="header-overlay"></div>
                 <div class="header-content">
                     <div class="itred-wordmark">
@@ -478,11 +631,6 @@ export const generateCatalogueHtml = (
                     ${logoUrl ? `<img src="${logoUrl}" alt="seiGEN Commerce" onerror="this.outerHTML='<span class=\\'seigen-logo-fallback\\'>SCI</span>'"/>` : `<span class="seigen-logo-fallback">SCI</span>`}
                 </div>
             </header>
-
-            <div class="search-area" id="searchArea">
-                <input type="text" id="searchInput" class="search-input" placeholder="Search products, brands, locations...">
-                <div id="searchStats" style="font-size: 9px; font-weight: 900; color: #888; margin-top: 8px; text-transform: uppercase; display: none;"></div>
-            </div>
         </div>
 
         <main>
@@ -541,14 +689,28 @@ export const generateCatalogueHtml = (
             <div style="font-size: 10px; font-weight: 900; text-transform: uppercase; color: #aaa;">Powered by seiGEN Commerce</div>
         </footer>
 
-        <nav class="bottom-nav">
-            <button class="nav-item active" data-target="tab-products">Products</button>
-            <button class="nav-item" data-target="tab-vendors">Vendors</button>
-            <button class="nav-item" data-target="tab-hub">Hub</button>
-            <button class="nav-item" data-target="tab-branches">Branches</button>
-            <button class="nav-item" data-target="tab-staff">Staff</button>
-            <button class="nav-item" data-target="tab-terms">Terms</button>
+        <div class="search-area" id="searchArea">
+            <div class="search-box">
+                <input type="text" id="searchInput" class="search-input" placeholder="Search products, vendors, locations...">
+                <button type="button" id="searchClear" class="search-clear" aria-label="Clear search">×</button>
+            </div>
+            <div id="searchStats"></div>
+        </div>
+
+        <button type="button" id="menuButton" class="menu-button" aria-label="Open catalogue menu" aria-expanded="false">⋯</button>
+        <div id="menuBackdrop" class="menu-backdrop"></div>
+        <nav id="menuSheet" class="menu-sheet" aria-label="Catalogue sections">
+            <button class="menu-item active" data-target="tab-products">Products</button>
+            <button class="menu-item" data-target="tab-vendors">Vendors</button>
+            <button class="menu-item" data-target="tab-hub">Hub</button>
+            <button class="menu-item" data-target="tab-staff">Staff</button>
+            <button class="menu-item" data-target="tab-branches">Branches</button>
+            <button class="menu-item" data-target="tab-terms">Terms</button>
         </nav>
+
+        <div id="minimizedBar" class="minimized-catalogue-bar" onclick="restoreCatalogue()">
+            iTred Catalogue — Tap to reopen
+        </div>
     </div>
 
     <!-- PRODUCT MODAL -->
@@ -643,6 +805,26 @@ export const generateCatalogueHtml = (
         const ITRED_SESSION_KEY = 'itred_device_session_id';
         const FEEDBACK_WA = ${JSON.stringify(metadata.feedbackWhatsAppNumber || "").replace(/</g, "\\u003c")};
         const SYNC_ENDPOINT = ${JSON.stringify(metadata.syncEndpointUrl || "").replace(/</g, "\\u003c")};
+
+        function minimizeCatalogue() {
+            document.body.classList.add('catalogue-minimized');
+            logOfflineEvent({ eventType: 'CATALOGUE_MINIMIZED', sourceType: 'catalogue', catalogueId: CATALOGUE_ID });
+        }
+
+        function restoreCatalogue() {
+            document.body.classList.remove('catalogue-minimized');
+            logOfflineEvent({ eventType: 'CATALOGUE_RESTORED', sourceType: 'catalogue', catalogueId: CATALOGUE_ID });
+        }
+
+        function closeCatalogue() {
+            logOfflineEvent({ eventType: 'CATALOGUE_CLOSE_ATTEMPTED', sourceType: 'catalogue', catalogueId: CATALOGUE_ID });
+            // Attempt native tab close
+            window.close();
+            // Show branded fallback message if browser blocks window.close()
+            setTimeout(function() {
+                showSurveyHtml('<h3 class="svy-h3">Exit Catalogue</h3><p class="svy-p">Catalogue cannot close this browser tab automatically. Please use your phone back button or close the browser tab manually.</p><button class="svy-btn" onclick="closeSurvey()">Return to Catalogue</button>');
+            }, 300);
+        }
 
         function getFeedbackUrl(encodedText) {
             if (FEEDBACK_WA) {
@@ -988,20 +1170,42 @@ export const generateCatalogueHtml = (
         const vendors = Array.isArray(db.vendors) ? db.vendors : [];
         const cahLinks = Array.isArray(db.cahLinks) ? db.cahLinks : [];
 
-        // Tab Navigation
-        document.querySelectorAll('.nav-item').forEach(function(btn) {
+        function setMenuOpen(isOpen) {
+            const menuButton = document.getElementById('menuButton');
+            const menuSheet = document.getElementById('menuSheet');
+            const menuBackdrop = document.getElementById('menuBackdrop');
+            if (!menuButton || !menuSheet || !menuBackdrop) return;
+            menuButton.classList.toggle('active', isOpen);
+            menuButton.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+            menuSheet.classList.toggle('open', isOpen);
+            menuBackdrop.classList.toggle('open', isOpen);
+        }
+
+        function switchTab(targetId) {
+            document.querySelectorAll('.menu-item').forEach(function(b) {
+                b.classList.toggle('active', b.getAttribute('data-target') === targetId);
+            });
+            document.querySelectorAll('.tab-content').forEach(function(t) { t.classList.remove('active'); });
+            const target = document.getElementById(targetId);
+            if (target) target.classList.add('active');
+            const searchArea = document.getElementById('searchArea');
+            if (searchArea) searchArea.style.display = targetId === 'tab-products' ? 'block' : 'none';
+            setMenuOpen(false);
+            window.scrollTo(0,0);
+        }
+
+        const menuButton = document.getElementById('menuButton');
+        if (menuButton) {
+            menuButton.addEventListener('click', function() {
+                const menuSheet = document.getElementById('menuSheet');
+                setMenuOpen(!(menuSheet && menuSheet.classList.contains('open')));
+            });
+        }
+        const menuBackdrop = document.getElementById('menuBackdrop');
+        if (menuBackdrop) menuBackdrop.addEventListener('click', function() { setMenuOpen(false); });
+        document.querySelectorAll('.menu-item').forEach(function(btn) {
             btn.addEventListener('click', function(e) {
-                document.querySelectorAll('.nav-item').forEach(function(b) { b.classList.remove('active'); });
-                document.querySelectorAll('.tab-content').forEach(function(t) { t.classList.remove('active'); });
-                e.currentTarget.classList.add('active');
-                document.getElementById(e.currentTarget.dataset.target).classList.add('active');
-                
-                if(e.currentTarget.dataset.target === 'tab-products') {
-                    document.getElementById('searchArea').style.display = 'block';
-                } else {
-                    document.getElementById('searchArea').style.display = 'none';
-                }
-                window.scrollTo(0,0);
+                switchTab(e.currentTarget.getAttribute('data-target'));
             });
         });
 
@@ -1019,6 +1223,28 @@ export const generateCatalogueHtml = (
         function getBranch(vendor, id) { 
             const branches = vendor && Array.isArray(vendor.branches) ? vendor.branches : [];
             return branches.find(function(b) { return b.id === id; }); 
+        }
+
+        function textBlob(parts) {
+            return parts.filter(function(value) {
+                return value !== undefined && value !== null && value !== '';
+            }).join(' ').toLowerCase();
+        }
+
+        function getProductSearchBlob(p, vendor, branch) {
+            return textBlob([
+                p.name, p.productName, p.sku, p.productCode, p.standardSku, p.barcode,
+                p.category, p.sector, p.brand, p.description, p.searchableText,
+                Array.isArray(p.tags) ? p.tags.join(' ') : '',
+                Array.isArray(p.keywords) ? p.keywords.join(' ') : '',
+                vendor ? vendor.name : '', vendor ? vendor.tradingName : '', vendor ? vendor.sector : '',
+                vendor ? vendor.country : '', vendor ? vendor.province : '', vendor ? vendor.cityTown : '',
+                vendor ? vendor.district : '', vendor ? vendor.suburb : '', vendor ? vendor.streetAddress : '',
+                vendor ? vendor.businessAddress : '',
+                branch ? branch.name : '', branch ? branch.country : '', branch ? branch.province : '',
+                branch ? branch.cityTown : '', branch ? branch.district : '', branch ? branch.suburb : '',
+                branch ? branch.streetAddress : '', branch ? branch.address : '', branch ? branch.landmark : ''
+            ]);
         }
 
         function getHubUrl(l) {
@@ -1164,7 +1390,7 @@ export const generateCatalogueHtml = (
                         html += "<div class=\\"vendor-card\\">" +
                             "<div style=\\"font-size: 10px; font-weight: 900; color: var(--brand-orange); text-transform: uppercase; margin-bottom: 4px;\\">" + escapeHtml(v.name) + "</div>" +
                             "<div style=\\"font-size: 14px; font-weight: 800; margin-bottom: 6px;\\">" + escapeHtml(b.name) + "</div>" +
-                            "<div style=\\"font-size: 12px; color: #666; margin-bottom: 4px;\\">" + escapeHtml(b.address) + (b.cityTown ? ", " + escapeHtml(b.cityTown) : "") + "</div>" +
+                            "<div style=\\"font-size: 12px; color: #666; margin-bottom: 4px;\\">" + escapeHtml([b.address || b.streetAddress, b.suburb, b.district, b.cityTown, b.province, b.country].filter(Boolean).join(', ')) + "</div>" +
                             "<div style=\\"font-size: 12px; font-weight: 700; margin-bottom: 12px;\\">" + (b.phone ? "Phone: " + escapeHtml(b.phone) : "") + "</div>" +
                             "<div style=\\"display: flex; gap: 8px;\\">" +
                             (b.phone ? "<a href=\\"tel:" + b.phone.replace(/[^0-9+]/g, '') + "\\" class=\\"c-btn\\" style=\\"margin-top:0;\\">Call</a>" : "") +
@@ -1216,19 +1442,21 @@ export const generateCatalogueHtml = (
             const vendor = getVendor(p.vendorId);
             const branch = getBranch(vendor, p.branchId);
 
-            const searchBlob = [
-                p.name, p.sku, p.category, p.description,
-                vendor ? vendor.name : '', vendor ? vendor.tradingName : '', vendor ? vendor.sector : '', vendor ? vendor.cityTown : '', vendor ? vendor.province : '',
-                branch ? branch.name : '', branch ? branch.cityTown : '', branch ? branch.address : '',
-                p.tags ? p.tags.join(' ') : ''
-            ].join(' ').toLowerCase();
+            const searchBlob = getProductSearchBlob(p, vendor, branch);
 
             if (tokens.some(function(t) { return searchBlob === t; })) score += 100; // Exact match somewhere
             if (tokens.some(function(t) { return (p.name || '').toLowerCase().includes(t); })) score += 50;
-            if (tokens.some(function(t) { return (p.category || '').toLowerCase().includes(t); })) score += 30;
-            if (tokens.some(function(t) { return ((branch ? branch.cityTown : '') || (vendor ? vendor.cityTown : '') || '').toLowerCase().includes(t); })) score += 20;
+            if (tokens.some(function(t) { return ((vendor ? vendor.name : '') || '').toLowerCase().includes(t); })) score += 42;
+            if (tokens.some(function(t) { return (p.category || '').toLowerCase().includes(t) || (p.sector || '').toLowerCase().includes(t); })) score += 30;
+            if (tokens.some(function(t) {
+                return textBlob([
+                    vendor ? vendor.suburb : '', vendor ? vendor.cityTown : '',
+                    branch ? branch.suburb : '', branch ? branch.cityTown : ''
+                ]).includes(t);
+            })) score += 34;
             
-            if (vendor) score += (vendor.trustScore / 10);
+            if (vendor && String(vendor.status || '').toLowerCase() === 'active') score += 16;
+            if (vendor) score += ((vendor.trustScore || 0) / 10);
             if (p.stockQuantity > 0) score += 10;
             if (p.imageUrl) score += 15;
 
@@ -1293,12 +1521,7 @@ export const generateCatalogueHtml = (
                 filtered = products.map(function(p) {
                     const vendor = getVendor(p.vendorId);
                     const branch = getBranch(vendor, p.branchId);
-                    const searchBlob = [
-                        p.name, p.sku, p.category, p.description,
-                        vendor ? vendor.name : '', vendor ? vendor.tradingName : '', vendor ? vendor.sector : '', vendor ? vendor.cityTown : '',
-                        branch ? branch.name : '', branch ? branch.cityTown : '', branch ? branch.address : '',
-                        p.tags ? p.tags.join(' ') : ''
-                    ].join(' ').toLowerCase();
+                    const searchBlob = getProductSearchBlob(p, vendor, branch);
 
                     const matches = tokens.every(function(token) { return searchBlob.includes(token); });
                     if(matches) {
@@ -1323,7 +1546,7 @@ export const generateCatalogueHtml = (
             grid.innerHTML = filtered.map(function(p) {
                 const vendor = getVendor(p.vendorId);
                 const branch = getBranch(vendor, p.branchId);
-                const location = (branch ? branch.cityTown : null) || (vendor ? vendor.cityTown : null) || p.branchName || 'Various';
+                const location = (branch ? (branch.suburb || branch.cityTown) : null) || (vendor ? (vendor.suburb || vendor.cityTown) : null) || p.branchName || 'Various';
                 const vendorName = (vendor ? vendor.name : null) || p.vendorName || 'Vendor';
                 
                 return "<div class=\\"card product-card\\" data-product-id=\\"" + escapeHtml(p.id) + "\\">" +
@@ -1456,13 +1679,13 @@ export const generateCatalogueHtml = (
 
             document.getElementById('mv-name').textContent = vendorName;
             document.getElementById('mv-score').textContent = (vendor && vendor.trustTier) ? vendor.trustTier + ' (' + vendor.trustScore + ')' : 'New Vendor';
-            document.getElementById('mv-loc').textContent = vendor ? (vendor.streetAddress || '') + ' ' + (vendor.cityTown || '') + ' ' + (vendor.province || '') : 'N/A';
+            document.getElementById('mv-loc').textContent = vendor ? [vendor.streetAddress, vendor.suburb, vendor.district, vendor.cityTown, vendor.province, vendor.country].filter(Boolean).join(', ') : 'N/A';
             document.getElementById('mv-hours').textContent = (vendor && vendor.openingHours) ? vendor.openingHours : 'Not provided';
 
             if(branch) {
                 document.getElementById('m-branch').innerHTML = 
                     "<div class=\\"m-row\\"><span class=\\"m-lbl\\">Branch Name</span><span class=\\"m-val\\">" + escapeHtml(branch.name) + "</span></div>" +
-                    "<div class=\\"m-row\\"><span class=\\"m-lbl\\">Address</span><span class=\\"m-val\\">" + escapeHtml(branch.address) + ", " + escapeHtml(branch.cityTown) + "</span></div>" +
+                    "<div class=\\"m-row\\"><span class=\\"m-lbl\\">Address</span><span class=\\"m-val\\">" + escapeHtml([branch.address || branch.streetAddress, branch.suburb, branch.district, branch.cityTown, branch.province, branch.country, branch.landmark].filter(Boolean).join(', ')) + "</span></div>" +
                     "<div class=\\"m-row\\"><span class=\\"m-lbl\\">Contact</span><span class=\\"m-val\\">" + escapeHtml(branch.phone || branch.whatsapp || 'N/A') + "</span></div>";
             } else {
                 document.getElementById('m-branch').innerHTML = '<div class="m-val">Branch details not supplied</div>';
@@ -1549,11 +1772,25 @@ export const generateCatalogueHtml = (
         }
 
         const searchInputEl = document.getElementById('searchInput');
+        const searchClearEl = document.getElementById('searchClear');
+        function updateSearchClear() {
+            if (!searchInputEl || !searchClearEl) return;
+            searchClearEl.classList.toggle('visible', searchInputEl.value.trim().length > 0);
+        }
         if(searchInputEl) {
             searchInputEl.addEventListener('input', function() {
+                updateSearchClear();
                 renderProducts();
                 clearTimeout(searchTimeout);
                 searchTimeout = setTimeout(debouncedSearchLog, 900);
+            });
+        }
+        if(searchClearEl && searchInputEl) {
+            searchClearEl.addEventListener('click', function() {
+                searchInputEl.value = '';
+                updateSearchClear();
+                renderProducts();
+                searchInputEl.focus();
             });
         }
         

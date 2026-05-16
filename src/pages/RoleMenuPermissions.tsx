@@ -71,9 +71,13 @@ const ACTION_GROUPS = [
   {
     name: "Notifications",
     keys: [
+      "notifications.view",
+      "notifications.markRead",
+      "notifications.resolve",
+      "notifications.archive",
+      "notifications.viewAll",
       "notifications.viewOwn",
       "notifications.viewTeam",
-      "notifications.resolve",
     ],
   },
   {

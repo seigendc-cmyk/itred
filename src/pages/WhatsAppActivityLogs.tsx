@@ -3,1306 +3,1374 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   PageHeader,
   DataPanel,
   TablePanel,
   PrimaryButton,
   SecondaryButton,
-  EmptyState,
   SearchInput,
   StatCard,
   StatusBadge,
+  EmptyState,
 } from "../components/CommonUI.tsx";
 import {
-  MessageSquare,
-  Plus,
-  Edit2,
-  Trash2,
-  CheckCircle2,
-  Users,
-  Activity,
-  PhoneCall,
   AlertTriangle,
-  X,
-  TrendingUp,
+  BarChart3,
+  Bell,
+  CheckCircle2,
+  Download,
+  History,
+  Map as MapIcon,
+  MessageSquare,
+  PackageSearch,
+  Phone,
+  Search,
+  ShieldAlert,
+  Star,
+  UserPlus,
+  Users,
 } from "lucide-react";
 import {
+  IntelligenceSource,
+  InteractionType,
+  Product,
+  ResolutionStatus,
+  Sentiment,
+  Staff,
+  UrgencyLevel,
+  Vendor,
   WhatsAppActivityLog,
-  WhatsAppActivityType,
-  WhatsAppSourceType,
-  WhatsAppLeadStatus,
-  WhatsAppPriority,
-  WhatsAppResponseStatus,
-  WhatsAppSource,
+  WhatsAppIntelligenceLog,
 } from "../types.ts";
 import { whatsappActivityService } from "../services/whatsappActivityService.ts";
-import { rpnService } from "../services/rpnService.ts";
 import { staffService } from "../services/staffService.ts";
-import { RPN, Staff } from "../types.ts";
-import { focusMainContent } from "../utils/uiHelpers.ts";
-import { whatsappSourceService } from "../services/whatsappSourceService.ts";
+import { vendorService } from "../services/vendorService.ts";
+import { productService } from "../services/productService.ts";
 import { staffAuditService } from "../services/staffAuditService.ts";
+import { permissionService } from "../services/permissionService.ts";
+import { notificationService } from "../services/notificationService.ts";
+
+type IntelTab =
+  | "feed"
+  | "customer"
+  | "risks"
+  | "market"
+  | "alerts"
+  | "reputation"
+  | "regional"
+  | "product";
+
+const tabs: Array<{ id: IntelTab; label: string; icon: React.ElementType }> = [
+  { id: "feed", label: "Activity Feed", icon: History },
+  { id: "customer", label: "Customer Intelligence", icon: UserPlus },
+  { id: "risks", label: "Complaints & Risks", icon: ShieldAlert },
+  { id: "market", label: "Market Analytics", icon: BarChart3 },
+  { id: "alerts", label: "Live Alerts", icon: Bell },
+  { id: "reputation", label: "Vendor Reputation", icon: Star },
+  { id: "regional", label: "Regional BI", icon: MapIcon },
+  { id: "product", label: "Product Intelligence", icon: PackageSearch },
+];
+
+const interactionTypes: InteractionType[] = [
+  "Enquiry",
+  "Complaint",
+  "Compliment",
+  "Price Request",
+  "Delivery Complaint",
+  "Stock Request",
+  "Warranty Issue",
+  "Fraud Alert",
+  "Product Search",
+  "Service Request",
+  "Market Feedback",
+];
+
+const sources: IntelligenceSource[] = [
+  "WhatsApp",
+  "Call",
+  "Walk-in",
+  "Catalogue",
+  "CAH",
+  "Storefront",
+];
+
+const urgencyLevels: UrgencyLevel[] = ["Low", "Medium", "High", "Critical"];
+const statuses: ResolutionStatus[] = [
+  "Pending",
+  "In Progress",
+  "Resolved",
+  "Escalated",
+];
+const sentiments: Sentiment[] = ["Positive", "Neutral", "Negative"];
+
+const inputClass =
+  "w-full border-2 border-stone-200 bg-white p-3 text-xs font-bold uppercase outline-none rounded-none focus:border-brand-orange";
+
+const today = () => new Date().toISOString().split("T")[0];
+const asList = (value: Record<string, number>, limit = 8) =>
+  Object.entries(value || {})
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit);
+
+const isComplaint = (type?: InteractionType) =>
+  type === "Complaint" ||
+  type === "Delivery Complaint" ||
+  type === "Warranty Issue" ||
+  type === "Fraud Alert";
+
+const badgeVariant = (value?: string) => {
+  if (value === "Critical" || value === "Escalated" || value === "Negative")
+    return "error" as const;
+  if (value === "High" || value === "Pending" || value === "In Progress")
+    return "warning" as const;
+  if (value === "Resolved" || value === "Positive" || value === "Low")
+    return "success" as const;
+  return "neutral" as const;
+};
 
 export const WhatsAppActivityLogs: React.FC = () => {
-  const [logs, setLogs] = useState<WhatsAppActivityLog[]>([]);
-  const [isFormOpen, setIsFormOpen] = useState(false);
-  const [formData, setFormData] = useState<Partial<WhatsAppActivityLog>>({});
-  const [rpns, setRpns] = useState<RPN[]>([]);
+  const [activityLogs, setActivityLogs] = useState<WhatsAppActivityLog[]>([]);
+  const [intelLogs, setIntelLogs] = useState<WhatsAppIntelligenceLog[]>([]);
   const [staffList, setStaffList] = useState<Staff[]>([]);
-  const [sources, setSources] = useState<WhatsAppSource[]>([]);
-  const [sourceSearch, setSourceSearch] = useState("");
-  const [showSourceDropdown, setShowSourceDropdown] = useState(false);
-  const [isSourceModalOpen, setIsSourceModalOpen] = useState(false);
-  const [newSourceData, setNewSourceData] = useState<Partial<WhatsAppSource>>(
-    {},
-  );
-
-  const sessionStr = localStorage.getItem("activeStaffSession");
-  let session: any = {};
-  if (sessionStr) {
-    try {
-      session = JSON.parse(sessionStr);
-    } catch (e) {}
-  }
-
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [activeTab, setActiveTab] = useState<IntelTab>("customer");
   const [search, setSearch] = useState("");
-  const [filterActivityType, setFilterActivityType] = useState("all");
-  const [filterSourceType, setFilterSourceType] = useState("all");
-  const [filterLeadStatus, setFilterLeadStatus] = useState("all");
-  const [filterPriority, setFilterPriority] = useState("all");
-  const [filterFollowUp, setFilterFollowUp] = useState("all");
+  const [showPopupFeed, setShowPopupFeed] = useState(true);
+  const [formData, setFormData] = useState<Partial<WhatsAppIntelligenceLog>>({
+    source: "WhatsApp",
+    interactionType: "Enquiry",
+    urgencyLevel: "Medium",
+    resolutionStatus: "Pending",
+    sentiment: "Neutral",
+    followUpRequired: false,
+    actionRequired: false,
+    tags: [],
+  });
 
-  useEffect(() => {
-    loadData();
-    setRpns(rpnService.getAll());
-    setStaffList(staffService.getAllStaff());
-    setSources(whatsappSourceService.getSources());
+  const session = useMemo(() => {
+    try {
+      return JSON.parse(localStorage.getItem("activeStaffSession") || "{}");
+    } catch {
+      return {};
+    }
   }, []);
 
-  const loadData = () => {
-    setLogs(whatsappActivityService.getLogs());
+  const canCreate = permissionService.hasActionPermission("whatsapp.logs.create");
+  const canViewAnalytics =
+    permissionService.hasActionPermission("whatsapp.analytics.view") ||
+    permissionService.canView("whatsappActivity");
+  const canViewReputation = permissionService.canViewVendorReputation();
+
+  const loadData = async () => {
+    setActivityLogs(whatsappActivityService.getLogs());
+    setIntelLogs(whatsappActivityService.getIntelligenceLogs());
+    setStaffList(staffService.getAllStaff());
+    setVendors(await vendorService.getVendors());
+    setProducts(await productService.getProducts());
   };
 
-  const bi = useMemo(() => whatsappActivityService.getBI(logs), [logs]);
+  useEffect(() => {
+    void loadData();
+  }, []);
 
-  const filteredLogs = useMemo(() => {
-    return logs
+  const commerceBI = useMemo(
+    () => whatsappActivityService.calculateCommerceBI(intelLogs),
+    [intelLogs],
+  );
+
+  const filteredIntelLogs = useMemo(() => {
+    const terms = search.toLowerCase().split(" ").filter(Boolean);
+    return intelLogs
       .filter((log) => {
-        const searchTerms = search
-          .toLowerCase()
-          .split(" ")
-          .filter((t) => t.length > 0);
-
-        const logText = [
-          log.activityType,
-          log.sourceType,
-          log.sourceName,
-          log.communityName,
-          log.sector,
-          log.category,
-          log.province,
-          log.cityTown,
-          log.district,
+        const text = [
+          log.customerPhone,
+          log.customerName,
           log.vendorName,
           log.productName,
-          log.customerNeed,
-          log.leadStatus,
-          log.priority,
-          log.notes,
-          log.assignedRpnName,
-          log.capturedByStaffName,
-          log.assignedStaffName,
+          log.category,
+          log.sector,
+          log.region,
+          log.province,
+          log.city,
+          log.interactionType,
+          log.customerMessage,
+          log.internalNotes,
+          ...(log.tags || []),
         ]
           .filter(Boolean)
           .join(" ")
           .toLowerCase();
-
-        const matchesSearch = searchTerms.every((term) =>
-          logText.includes(term),
-        );
-
-        const matchesActivity =
-          filterActivityType === "all" ||
-          log.activityType === filterActivityType;
-        const matchesSource =
-          filterSourceType === "all" || log.sourceType === filterSourceType;
-        const matchesLeadStatus =
-          filterLeadStatus === "all" || log.leadStatus === filterLeadStatus;
-        const matchesPriority =
-          filterPriority === "all" || log.priority === filterPriority;
-        const matchesFollowUp =
-          filterFollowUp === "all" ||
-          (filterFollowUp === "yes"
-            ? log.followUpRequired
-            : !log.followUpRequired);
-
-        return (
-          matchesSearch &&
-          matchesActivity &&
-          matchesSource &&
-          matchesLeadStatus &&
-          matchesPriority &&
-          matchesFollowUp
-        );
+        return terms.every((term) => text.includes(term));
       })
       .sort(
         (a, b) =>
-          new Date(b.activityDate).getTime() -
-          new Date(a.activityDate).getTime(),
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
       );
-  }, [
-    logs,
-    search,
-    filterActivityType,
-    filterSourceType,
-    filterLeadStatus,
-    filterPriority,
-    filterFollowUp,
-  ]);
+  }, [intelLogs, search]);
 
-  const handleAddLog = () => {
+  const customerTimeline = useMemo(() => {
+    if (!formData.customerPhone) return [];
+    return intelLogs
+      .filter((log) => log.customerPhone === formData.customerPhone)
+      .sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      );
+  }, [formData.customerPhone, intelLogs]);
+
+  const legacyFeed = useMemo(() => {
+    const terms = search.toLowerCase().split(" ").filter(Boolean);
+    return activityLogs
+      .filter((log) => {
+        const text = [
+          log.activityType,
+          log.sourceName,
+          log.vendorName,
+          log.productName,
+          log.customerNeed,
+          log.cityTown,
+          log.province,
+          log.notes,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        return terms.every((term) => text.includes(term));
+      })
+      .sort(
+        (a, b) =>
+          new Date(b.activityDate).getTime() - new Date(a.activityDate).getTime(),
+      );
+  }, [activityLogs, search]);
+
+  const handlePullCustomer = () => {
+    if (!formData.customerPhone) {
+      alert("Enter a customer phone number first.");
+      return;
+    }
+    const latest = customerTimeline[0];
+    if (!latest) {
+      alert("No existing customer intelligence records found.");
+      return;
+    }
+    setFormData((prev) => ({
+      ...prev,
+      customerName: latest.customerName,
+      region: latest.region,
+      province: latest.province,
+      city: latest.city,
+      vendorName: latest.vendorName,
+      productName: latest.productName,
+    }));
+  };
+
+  const handleVendorChange = (vendorId: string) => {
+    const vendor = vendors.find((v) => v.id === vendorId);
+    setFormData((prev) => ({
+      ...prev,
+      vendorId,
+      vendorName: vendor?.tradingName || vendor?.name || prev.vendorName,
+      sector: vendor?.sector || prev.sector,
+      province: vendor?.province || prev.province,
+      city: vendor?.cityTown || prev.city,
+      region: vendor?.suburb || prev.region,
+    }));
+  };
+
+  const handleProductChange = (productId: string) => {
+    const product = products.find((p) => p.id === productId);
+    setFormData((prev) => ({
+      ...prev,
+      productId,
+      productName: product?.name || prev.productName,
+      category: product?.category || prev.category,
+      sector: product?.sector || prev.sector,
+      vendorId: product?.vendorId || prev.vendorId,
+      vendorName: product?.vendorName || prev.vendorName,
+    }));
+  };
+
+  const handleAssignStaff = (staffId: string) => {
+    const staff = staffList.find((s) => s.id === staffId);
+    setFormData((prev) => ({
+      ...prev,
+      assignedToStaffId: staff?.id || "",
+      assignedToStaffName: staff?.displayName || staff?.fullName || "",
+    }));
+  };
+
+  const resetForm = () => {
     setFormData({
-      activityDate: new Date().toISOString().split("T")[0],
-      activityType: "OTHER" as WhatsAppActivityType,
-      sourceType: "OTHER" as WhatsAppSourceType,
-      leadStatus: "NOT_APPLICABLE" as WhatsAppLeadStatus,
-      priority: "LOW" as WhatsAppPriority,
-      responseStatus: "NOT_REQUIRED" as WhatsAppResponseStatus,
+      source: "WhatsApp",
+      interactionType: "Enquiry",
+      urgencyLevel: "Medium",
+      resolutionStatus: "Pending",
+      sentiment: "Neutral",
       followUpRequired: false,
+      actionRequired: false,
+      tags: [],
     });
-    setSourceSearch("");
-    setIsFormOpen(true);
-    focusMainContent();
   };
 
-  const handleEditLog = (log: WhatsAppActivityLog) => {
-    setFormData({ ...log });
-    setSourceSearch(log.sourceName || "");
-    setIsFormOpen(true);
-    focusMainContent();
-  };
-
-  const handleDeleteLog = async (id: string) => {
-    if (!confirm("Permanently delete this activity log?")) return;
-
-    try {
-      await whatsappActivityService.deleteLog(id);
-
-      try {
-        void staffAuditService.logAction({
-          eventType: "RECORD_DELETED",
-          module: "whatsapp",
-          severity: "warning",
-          action: `Deleted WhatsApp activity log ${id}`,
-          recordType: "whatsapp_activity",
-          recordId: id,
-        });
-      } catch (auditError) {
-        console.error("Audit log failed", auditError);
-      }
-
-      loadData();
-      alert("WhatsApp activity log deleted.");
-    } catch (error) {
-      console.error("Failed to delete WhatsApp activity log", error);
-      alert(
-        error instanceof Error
-          ? error.message
-          : "Failed to delete WhatsApp activity log.",
-      );
+  const handleSaveIntel = async () => {
+    if (!canCreate) {
+      alert("You do not have permission to create WhatsApp logs.");
+      return;
     }
-  };
-
-  const handleMarkFollowUpDone = async (log: WhatsAppActivityLog) => {
-    try {
-      await whatsappActivityService.updateLog(log.id, {
-        followUpRequired: false,
-        responseStatus: "RESPONDED",
-        notes: log.notes
-          ? `${log.notes}\n[Follow-up marked done on ${new Date().toLocaleDateString()}]`
-          : `[Follow-up marked done on ${new Date().toLocaleDateString()}]`,
-      });
-
-      const newLog: WhatsAppActivityLog = {
-        ...log,
-        id: `WA-${Date.now()}`,
-        activityDate: new Date().toISOString().split("T")[0],
-        activityType: "FOLLOW_UP_DONE",
-        notes: `Follow-up completed for original log: ${log.id}`,
-        followUpRequired: false,
-        followUpDate: undefined,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      await whatsappActivityService.saveLog(newLog);
-      loadData();
-
-      // Non-blocking staff audit logging
-      try {
-        void staffAuditService.logAction({
-          eventType: "WHATSAPP_ACTIVITY_LOGGED",
-          module: "whatsapp",
-          action: `Follow-up marked done for log ${log.id}`,
-          severity: "info",
-          recordType: "whatsapp_log",
-          recordId: log.id,
-        });
-      } catch (auditErr) {
-        console.error("Audit log failed", auditErr);
-      }
-      alert("Saved successfully");
-    } catch (error: any) {
-      console.error(error);
-      alert(error.message || "Save failed");
-    }
-  };
-
-  const handleSave = async () => {
-    if (
-      !formData.activityType ||
-      !formData.sourceType ||
-      !formData.sourceName ||
-      !formData.activityDate
-    ) {
-      alert(
-        "Please fill all required fields: Activity Type, Source Type, Source Name, and Activity Date",
-      );
+    if (!formData.customerPhone || !formData.interactionType) {
+      alert("Customer Phone and Interaction Type are required.");
       return;
     }
 
-    const cleanObj = (obj: any) => {
-      const cleaned = { ...obj };
-      Object.keys(cleaned).forEach((key) => {
-        if (cleaned[key] === undefined) delete cleaned[key];
+    const now = new Date().toISOString();
+    const record: WhatsAppIntelligenceLog = {
+      id: formData.id || `INTEL-${Date.now()}`,
+      createdAt: formData.createdAt || now,
+      updatedAt: now,
+      loggedByStaffId: session.staffId || "unknown",
+      loggedByStaffName: session.staffName || session.displayName || "Unknown Staff",
+      customerName: formData.customerName || "",
+      customerPhone: formData.customerPhone,
+      vendorId: formData.vendorId || "",
+      vendorName: formData.vendorName || "",
+      productId: formData.productId || "",
+      productName: formData.productName || "",
+      category: formData.category || "",
+      sector: formData.sector || "",
+      region: formData.region || "",
+      province: formData.province || "",
+      city: formData.city || "",
+      source: (formData.source as IntelligenceSource) || "WhatsApp",
+      interactionType: formData.interactionType as InteractionType,
+      customerMessage: formData.customerMessage || "",
+      internalNotes: formData.internalNotes || "",
+      actionRequired: !!formData.actionRequired,
+      urgencyLevel: (formData.urgencyLevel as UrgencyLevel) || "Medium",
+      resolutionStatus:
+        (formData.resolutionStatus as ResolutionStatus) || "Pending",
+      assignedToStaffId: formData.assignedToStaffId || "",
+      assignedToStaffName: formData.assignedToStaffName || "",
+      followUpRequired: !!formData.followUpRequired,
+      followUpDate: formData.followUpDate || "",
+      tags: formData.tags || [],
+      sentiment: (formData.sentiment as Sentiment) || "Neutral",
+    };
+
+    whatsappActivityService.saveIntelligenceLog(record);
+    await staffAuditService.logAction({
+      eventType: formData.id ? "RECORD_UPDATED" : "WHATSAPP_INTELLIGENCE_LOGGED",
+      module: "whatsapp",
+      severity:
+        record.urgencyLevel === "Critical" || record.interactionType === "Fraud Alert"
+          ? "critical"
+          : isComplaint(record.interactionType)
+            ? "high"
+            : "info",
+      action: `${formData.id ? "Updated" : "Created"} customer intelligence record ${record.id}`,
+      recordType: "whatsapp_intelligence",
+      recordId: record.id,
+      afterSnapshot: record,
+    });
+    if (record.followUpRequired) {
+      await staffAuditService.logAction({
+        eventType: "FOLLOWUP_ASSIGNED",
+        module: "whatsapp",
+        severity: "info",
+        action: `Assigned follow-up for ${record.customerPhone}`,
+        recordType: "whatsapp_intelligence",
+        recordId: record.id,
       });
-      return cleaned;
-    };
-
-    const logToSave: WhatsAppActivityLog = {
-      ...(formData as WhatsAppActivityLog),
-      id: formData.id || `WA-${Date.now()}`,
-      createdAt: formData.createdAt || new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      loggedBy: formData.loggedBy || "Staff",
-      capturedByStaffId:
-        formData.capturedByStaffId || session.staffId || "unknown",
-      capturedByStaffName:
-        formData.capturedByStaffName || session.staffName || "Unknown Staff",
-      capturedByRole: formData.capturedByRole || session.role || "Unknown Role",
-      capturedAt: formData.capturedAt || new Date().toISOString(),
-      assignedToType: formData.assignedToType || "RPN",
-      assignedStaffId: formData.assignedStaffId || "",
-      assignedStaffName: formData.assignedStaffName || "",
-    };
-
-    try {
-      await whatsappActivityService.saveLog(cleanObj(logToSave));
-
-      // Non-blocking staff audit logging
-      try {
-        let severity: "info" | "high" = "info";
-        if (
-          logToSave.activityType === "COMPLAINT_RECEIVED" ||
-          logToSave.priority === "HIGH" ||
-          logToSave.priority === "CRITICAL"
-        )
-          severity = "high";
-
-        void staffAuditService.logAction({
-          eventType: "WHATSAPP_ACTIVITY_LOGGED",
-          module: "whatsapp",
-          action: `Logged WhatsApp activity: ${logToSave.activityType}`,
-          severity,
-          recordType: "whatsapp_log",
-          recordId: logToSave.id,
-          afterSnapshot: logToSave,
-        });
-
-        if (logToSave.leadStatus === "CONVERTED") {
-          void staffAuditService.logAction({
-            eventType: "LEAD_FOLLOWED_UP",
-            module: "whatsapp",
-            action: `Lead converted in log ${logToSave.id}`,
-            severity: "info",
-            recordType: "whatsapp_log",
-            recordId: logToSave.id,
-          });
-        }
-      } catch (auditErr) {
-        console.error("Audit log failed", auditErr);
-      }
-
-      loadData();
-      setIsFormOpen(false);
-      setFormData({});
-      alert("Saved successfully");
-    } catch (error: any) {
-      console.error(error);
-      alert(error.message || "Save failed");
     }
+    await loadData();
+    resetForm();
+    setActiveTab("feed");
+    notificationService.toast("Customer intelligence saved.", "success");
   };
 
-  const inputClass =
-    "w-full border-2 border-stone-200 p-3 text-xs font-bold outline-none focus:border-brand-orange bg-white rounded-none uppercase";
-
-  const matchingSources = useMemo(() => {
-    const terms = sourceSearch
-      .toLowerCase()
-      .split(" ")
-      .filter((t) => t.length > 0);
-    return sources.filter((s) => {
-      const text = [
-        s.communityName,
-        s.sourceName,
-        s.sector,
-        s.category,
-        s.province,
-        s.cityTown,
-        s.district,
-        s.whatsappUrl,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      return terms.every((term) => text.includes(term));
+  const handleResolve = async (log: WhatsAppIntelligenceLog) => {
+    const updated = {
+      ...log,
+      resolutionStatus: "Resolved" as ResolutionStatus,
+      followUpRequired: false,
+      updatedAt: new Date().toISOString(),
+    };
+    whatsappActivityService.saveIntelligenceLog(updated);
+    await staffAuditService.logAction({
+      eventType: "COMPLAINT_RESOLVED",
+      module: "whatsapp",
+      severity: "info",
+      action: `Resolved intelligence issue ${log.id}`,
+      recordType: "whatsapp_intelligence",
+      recordId: log.id,
+      beforeSnapshot: log,
+      afterSnapshot: updated,
     });
-  }, [sources, sourceSearch]);
-
-  const handleSelectSource = (s: WhatsAppSource) => {
-    setSourceSearch(s.sourceName);
-    setFormData({
-      ...formData,
-      sourceId: s.id,
-      sourceName: s.sourceName,
-      sourceType: s.sourceType,
-      whatsappUrl: s.whatsappUrl || formData.whatsappUrl,
-      communityId: s.communityId || formData.communityId,
-      communityName: s.communityName || formData.communityName,
-      sector: s.sector || formData.sector,
-      category: s.category || formData.category,
-      province: s.province || formData.province,
-      cityTown: s.cityTown || formData.cityTown,
-      district: s.district || formData.district,
-    });
-    setShowSourceDropdown(false);
+    await loadData();
   };
 
-  const uniqueCommunities = useMemo(() => {
-    return Array.from(
-      new Set(sources.map((s) => s.communityName).filter(Boolean)),
-    ) as string[];
-  }, [sources]);
+  const handleEscalate = async (log: WhatsAppIntelligenceLog) => {
+    const updated = {
+      ...log,
+      resolutionStatus: "Escalated" as ResolutionStatus,
+      urgencyLevel: "Critical" as UrgencyLevel,
+      flaggedRisk: true,
+      updatedAt: new Date().toISOString(),
+    };
+    whatsappActivityService.saveIntelligenceLog(updated);
+    await staffAuditService.logAction({
+      eventType: "ISSUE_ESCALATED",
+      module: "whatsapp",
+      severity: "critical",
+      action: `Escalated intelligence issue ${log.id}`,
+      recordType: "whatsapp_intelligence",
+      recordId: log.id,
+      beforeSnapshot: log,
+      afterSnapshot: updated,
+    });
+    await notificationService.createNotification({
+      type: "system_alert",
+      priority: "critical",
+      title: "WhatsApp Issue Escalated",
+      message: `${log.interactionType} for ${log.vendorName || log.customerPhone} was escalated.`,
+      recordType: "whatsapp_intelligence",
+      recordId: log.id,
+      dedupeKey: `intel-escalated:${log.id}:${today()}`,
+    });
+    await loadData();
+  };
+
+  const exportCsv = () => {
+    const headers = [
+      "createdAt",
+      "customerPhone",
+      "customerName",
+      "vendorName",
+      "productName",
+      "category",
+      "sector",
+      "region",
+      "province",
+      "city",
+      "source",
+      "interactionType",
+      "urgencyLevel",
+      "resolutionStatus",
+      "sentiment",
+      "assignedToStaffName",
+      "followUpDate",
+      "tags",
+      "customerMessage",
+    ];
+    const csv = [
+      headers.join(","),
+      ...filteredIntelLogs.map((log) =>
+        headers
+          .map((key) => {
+            const value = key === "tags" ? log.tags?.join("|") : (log as any)[key];
+            return `"${String(value || "").replace(/"/g, '""')}"`;
+          })
+          .join(","),
+      ),
+    ].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `whatsapp-intelligence-${today()}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    void staffAuditService.logAction({
+      eventType: "EXPORT_DOWNLOADED",
+      module: "whatsapp",
+      severity: "info",
+      action: "Exported WhatsApp intelligence CSV",
+      recordType: "whatsapp_intelligence",
+      recordId: "csv-export",
+    });
+  };
+
+  const renderRankList = (
+    title: string,
+    data: Record<string, number>,
+    empty = "No signals yet.",
+  ) => (
+    <DataPanel title={title} className="border-t-4 border-t-brand-orange">
+      <div className="p-4 space-y-3">
+        {asList(data).map(([name, count], index) => (
+          <div
+            key={name}
+            className="flex items-center justify-between border border-stone-200 p-3"
+          >
+            <div className="min-w-0">
+              <p className="text-xs font-black uppercase text-brand-charcoal truncate">
+                {index + 1}. {name}
+              </p>
+              <p className="text-[10px] font-bold uppercase text-stone-400">
+                Commerce signal count
+              </p>
+            </div>
+            <span className="font-mono text-xl font-black text-brand-orange">
+              {count}
+            </span>
+          </div>
+        ))}
+        {asList(data).length === 0 && (
+          <p className="p-6 text-center text-xs font-bold uppercase text-stone-400">
+            {empty}
+          </p>
+        )}
+      </div>
+    </DataPanel>
+  );
+
+  const renderCustomerForm = () => (
+    <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.8fr)] gap-6">
+      <DataPanel
+        title="Customer Intelligence Intake"
+        subtitle="Structured market intelligence capture with audit, alerts and follow-up routing."
+        className="border-t-4 border-t-brand-orange"
+      >
+        <div className="p-5 space-y-5">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 bg-stone-50 border border-stone-200 p-4">
+            <div>
+              <p className="text-[10px] font-bold uppercase text-stone-400">
+                Auto Date / Time
+              </p>
+              <p className="text-xs font-black text-brand-charcoal">
+                {new Date().toLocaleString()}
+              </p>
+            </div>
+            <div>
+              <p className="text-[10px] font-bold uppercase text-stone-400">
+                Logged By
+              </p>
+              <p className="text-xs font-black text-brand-charcoal">
+                {session.staffName || session.displayName || "Unknown Staff"}
+              </p>
+            </div>
+            <div>
+              <label className="text-[10px] font-bold uppercase text-stone-400">
+                Source
+              </label>
+              <select
+                className={inputClass}
+                value={formData.source || "WhatsApp"}
+                onChange={(e) =>
+                  setFormData({ ...formData, source: e.target.value as IntelligenceSource })
+                }
+              >
+                {sources.map((source) => (
+                  <option key={source} value={source}>
+                    {source}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-end">
+              <SecondaryButton className="w-full" onClick={handlePullCustomer}>
+                <Search size={13} className="mr-2" /> Pull Existing Customer
+              </SecondaryButton>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <label className="space-y-2">
+              <span className="text-[10px] font-bold uppercase text-stone-400">
+                Customer Phone *
+              </span>
+              <input
+                className={inputClass}
+                value={formData.customerPhone || ""}
+                onChange={(e) =>
+                  setFormData({ ...formData, customerPhone: e.target.value })
+                }
+                placeholder="+263..."
+              />
+            </label>
+            <label className="space-y-2">
+              <span className="text-[10px] font-bold uppercase text-stone-400">
+                Customer Name
+              </span>
+              <input
+                className={inputClass}
+                value={formData.customerName || ""}
+                onChange={(e) =>
+                  setFormData({ ...formData, customerName: e.target.value })
+                }
+              />
+            </label>
+            <label className="space-y-2">
+              <span className="text-[10px] font-bold uppercase text-stone-400">
+                Vendor
+              </span>
+              <select
+                className={inputClass}
+                value={formData.vendorId || ""}
+                onChange={(e) => handleVendorChange(e.target.value)}
+              >
+                <option value="">Manual / Unlinked Vendor</option>
+                {vendors.map((vendor) => (
+                  <option key={vendor.id} value={vendor.id}>
+                    {vendor.tradingName || vendor.name}
+                  </option>
+                ))}
+              </select>
+              <input
+                className={inputClass}
+                value={formData.vendorName || ""}
+                onChange={(e) =>
+                  setFormData({ ...formData, vendorName: e.target.value })
+                }
+                placeholder="Vendor name"
+              />
+            </label>
+            <label className="space-y-2">
+              <span className="text-[10px] font-bold uppercase text-stone-400">
+                Product
+              </span>
+              <select
+                className={inputClass}
+                value={formData.productId || ""}
+                onChange={(e) => handleProductChange(e.target.value)}
+              >
+                <option value="">Manual / Unlinked Product</option>
+                {products.map((product) => (
+                  <option key={product.id} value={product.id}>
+                    {product.name}
+                  </option>
+                ))}
+              </select>
+              <input
+                className={inputClass}
+                value={formData.productName || ""}
+                onChange={(e) =>
+                  setFormData({ ...formData, productName: e.target.value })
+                }
+                placeholder="Product name"
+              />
+            </label>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            {(["sector", "category", "province", "city"] as const).map((field) => (
+              <label key={field} className="space-y-2">
+                <span className="text-[10px] font-bold uppercase text-stone-400">
+                  {field}
+                </span>
+                <input
+                  className={inputClass}
+                  value={(formData[field] as string) || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, [field]: e.target.value })
+                  }
+                />
+              </label>
+            ))}
+            <label className="space-y-2 md:col-span-2">
+              <span className="text-[10px] font-bold uppercase text-stone-400">
+                Region / Suburb
+              </span>
+              <input
+                className={inputClass}
+                value={formData.region || ""}
+                onChange={(e) =>
+                  setFormData({ ...formData, region: e.target.value })
+                }
+              />
+            </label>
+            <label className="space-y-2 md:col-span-2">
+              <span className="text-[10px] font-bold uppercase text-stone-400">
+                Interaction Type *
+              </span>
+              <select
+                className={inputClass}
+                value={formData.interactionType || "Enquiry"}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    interactionType: e.target.value as InteractionType,
+                  })
+                }
+              >
+                {interactionTypes.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <label className="space-y-2 block">
+            <span className="text-[10px] font-bold uppercase text-stone-400">
+              Query / Complaint / Compliment
+            </span>
+            <textarea
+              className={`${inputClass} min-h-[120px] normal-case`}
+              value={formData.customerMessage || ""}
+              onChange={(e) =>
+                setFormData({ ...formData, customerMessage: e.target.value })
+              }
+            />
+          </label>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <label className="flex items-center gap-3 border border-stone-200 p-3">
+              <input
+                type="checkbox"
+                className="h-5 w-5 accent-brand-orange"
+                checked={!!formData.actionRequired}
+                onChange={(e) =>
+                  setFormData({ ...formData, actionRequired: e.target.checked })
+                }
+              />
+              <span className="text-xs font-black uppercase">Action Required</span>
+            </label>
+            <label className="flex items-center gap-3 border border-stone-200 p-3">
+              <input
+                type="checkbox"
+                className="h-5 w-5 accent-brand-orange"
+                checked={!!formData.followUpRequired}
+                onChange={(e) =>
+                  setFormData({ ...formData, followUpRequired: e.target.checked })
+                }
+              />
+              <span className="text-xs font-black uppercase">Follow-up Required</span>
+            </label>
+            <label className="space-y-2">
+              <span className="text-[10px] font-bold uppercase text-stone-400">
+                Urgency
+              </span>
+              <select
+                className={inputClass}
+                value={formData.urgencyLevel || "Medium"}
+                onChange={(e) =>
+                  setFormData({ ...formData, urgencyLevel: e.target.value as UrgencyLevel })
+                }
+              >
+                {urgencyLevels.map((level) => (
+                  <option key={level} value={level}>
+                    {level}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-2">
+              <span className="text-[10px] font-bold uppercase text-stone-400">
+                Sentiment
+              </span>
+              <select
+                className={inputClass}
+                value={formData.sentiment || "Neutral"}
+                onChange={(e) =>
+                  setFormData({ ...formData, sentiment: e.target.value as Sentiment })
+                }
+              >
+                {sentiments.map((sentiment) => (
+                  <option key={sentiment} value={sentiment}>
+                    {sentiment}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <label className="space-y-2">
+              <span className="text-[10px] font-bold uppercase text-stone-400">
+                Assigned Staff
+              </span>
+              <select
+                className={inputClass}
+                value={formData.assignedToStaffId || ""}
+                onChange={(e) => handleAssignStaff(e.target.value)}
+              >
+                <option value="">Unassigned</option>
+                {staffList.map((staff) => (
+                  <option key={staff.id} value={staff.id}>
+                    {staff.displayName || staff.fullName}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-2">
+              <span className="text-[10px] font-bold uppercase text-stone-400">
+                Follow-up Date
+              </span>
+              <input
+                type="date"
+                className={inputClass}
+                value={formData.followUpDate || ""}
+                onChange={(e) =>
+                  setFormData({ ...formData, followUpDate: e.target.value })
+                }
+              />
+            </label>
+            <label className="space-y-2">
+              <span className="text-[10px] font-bold uppercase text-stone-400">
+                Resolution Status
+              </span>
+              <select
+                className={inputClass}
+                value={formData.resolutionStatus || "Pending"}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    resolutionStatus: e.target.value as ResolutionStatus,
+                  })
+                }
+              >
+                {statuses.map((status) => (
+                  <option key={status} value={status}>
+                    {status}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <label className="space-y-2 block">
+            <span className="text-[10px] font-bold uppercase text-stone-400">
+              Tags
+            </span>
+            <input
+              className={inputClass}
+              value={(formData.tags || []).join(", ")}
+              onChange={(e) =>
+                setFormData({
+                  ...formData,
+                  tags: e.target.value
+                    .split(",")
+                    .map((tag) => tag.trim())
+                    .filter(Boolean),
+                })
+              }
+              placeholder="delivery, stock, pricing"
+            />
+          </label>
+
+          <label className="space-y-2 block">
+            <span className="text-[10px] font-bold uppercase text-stone-400">
+              Internal Notes
+            </span>
+            <textarea
+              className={`${inputClass} min-h-[90px] normal-case`}
+              value={formData.internalNotes || ""}
+              onChange={(e) =>
+                setFormData({ ...formData, internalNotes: e.target.value })
+              }
+            />
+          </label>
+
+          <div className="flex flex-col sm:flex-row gap-3 border-t border-stone-200 pt-5">
+            <SecondaryButton className="sm:w-40" onClick={resetForm}>
+              Clear
+            </SecondaryButton>
+            <PrimaryButton className="flex-1" onClick={handleSaveIntel}>
+              <CheckCircle2 size={15} className="mr-2" /> Save Intelligence Record
+            </PrimaryButton>
+          </div>
+        </div>
+      </DataPanel>
+
+      <DataPanel
+        title="Customer Timeline"
+        subtitle="Previous interactions pulled by phone number."
+      >
+        <div className="p-4 space-y-3">
+          {customerTimeline.map((log) => (
+            <div key={log.id} className="border-l-4 border-brand-orange bg-stone-50 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-black uppercase text-brand-charcoal">
+                    {log.interactionType}
+                  </p>
+                  <p className="text-[10px] font-bold text-stone-400">
+                    {new Date(log.createdAt).toLocaleString()} by {log.loggedByStaffName}
+                  </p>
+                </div>
+                <StatusBadge
+                  status={log.resolutionStatus}
+                  variant={badgeVariant(log.resolutionStatus)}
+                />
+              </div>
+              <p className="mt-3 text-xs font-semibold text-stone-700">
+                {log.customerMessage || log.internalNotes || "No message captured."}
+              </p>
+              <p className="mt-2 text-[10px] font-bold uppercase text-stone-400">
+                {log.vendorName || "No vendor"} / {log.productName || "No product"}
+              </p>
+            </div>
+          ))}
+          {customerTimeline.length === 0 && (
+            <EmptyState
+              icon={Phone}
+              title="No Customer History"
+              description="Enter a phone number and pull an existing customer to view the timeline."
+            />
+          )}
+        </div>
+      </DataPanel>
+    </div>
+  );
 
   return (
-    <div className="pb-20">
+    <div className="pb-20 space-y-6">
       <PageHeader
         title="WhatsApp Activity"
-        subtitle="Track operational engagement across WhatsApp communities, groups and channels."
+        subtitle="Commerce intelligence operations layer for SCI / iTred."
         actions={
-          <PrimaryButton onClick={handleAddLog}>
-            <Plus size={14} className="mr-2" /> Log Activity
-          </PrimaryButton>
+          <div className="flex gap-2">
+            <SecondaryButton onClick={exportCsv}>
+              <Download size={14} className="mr-2" /> Export
+            </SecondaryButton>
+            <PrimaryButton onClick={() => setActiveTab("customer")}>
+              <UserPlus size={14} className="mr-2" /> Customer Intelligence
+            </PrimaryButton>
+          </div>
         }
       />
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-8">
+      <div className="sticky top-0 z-20 border-b-4 border-brand-charcoal bg-white">
+        <div className="flex overflow-x-auto">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex min-h-[54px] items-center gap-2 whitespace-nowrap px-4 text-[10px] font-black uppercase tracking-tight transition-colors ${
+                activeTab === tab.id
+                  ? "bg-brand-orange text-white"
+                  : "text-stone-500 hover:bg-stone-50"
+              }`}
+            >
+              <tab.icon size={14} /> {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4">
         <StatCard
-          label="Total Activities"
-          value={bi.totalLogs.toString()}
-          icon={Activity}
-        />
-        <StatCard
-          label="Product Enquiries"
-          value={bi.totalEnquiries.toString()}
+          label="Total Interactions"
+          value={commerceBI.totalInteractions}
           icon={MessageSquare}
         />
         <StatCard
-          label="Converted Leads"
-          value={bi.convertedLeads.toString()}
-          icon={CheckCircle2}
-          variant="success"
-        />
-        <StatCard
-          label="Follow-ups Due"
-          value={bi.followUpsDue.toString()}
-          icon={PhoneCall}
-          variant={bi.followUpsDue > 0 ? "warning" : "neutral"}
-        />
-        <StatCard
-          label="High Priority"
-          value={bi.highPriorityCount.toString()}
+          label="Complaints Today"
+          value={commerceBI.complaintsToday}
           icon={AlertTriangle}
-          variant={bi.highPriorityCount > 0 ? "error" : "neutral"}
+          variant={commerceBI.complaintsToday > 0 ? "error" : "neutral"}
         />
         <StatCard
-          label="Member Growth"
-          value={
-            bi.memberGrowthTotal > 0
-              ? `+${bi.memberGrowthTotal}`
-              : bi.memberGrowthTotal.toString()
-          }
-          icon={TrendingUp}
+          label="Compliments Today"
+          value={commerceBI.complimentsToday}
+          icon={Star}
           variant="success"
+        />
+        <StatCard
+          label="Unresolved Complaints"
+          value={commerceBI.unresolvedComplaints}
+          icon={ShieldAlert}
+          variant={commerceBI.unresolvedComplaints > 0 ? "warning" : "neutral"}
+        />
+        <StatCard
+          label="Follow-ups Overdue"
+          value={commerceBI.followUpsOverdue}
+          icon={Bell}
+          variant={commerceBI.followUpsOverdue > 0 ? "error" : "neutral"}
+        />
+        <StatCard
+          label="Return Rate"
+          value={`${commerceBI.returnInteractionRate}%`}
+          icon={Users}
         />
       </div>
 
-      {!isFormOpen ? (
-        <div className="space-y-6">
-          <div className="bg-white border border-stone-200 p-6 flex flex-wrap gap-4 items-center">
-            <SearchInput
-              placeholder="Search activity..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="flex-1 min-w-[200px]"
-            />
-            <select
-              className={inputClass}
-              style={{ width: "auto" }}
-              value={filterActivityType}
-              onChange={(e) => setFilterActivityType(e.target.value)}
-            >
-              <option value="all">All Activities</option>
-              <option value="CATALOGUE_SHARED">Catalogue Shared</option>
-              <option value="STOREFRONT_SHARED">Storefront Shared</option>
-              <option value="PRODUCT_ENQUIRY">Product Enquiry</option>
-              <option value="VENDOR_REFERRAL">Vendor Referral</option>
-              <option value="MEMBER_COUNT_UPDATE">Member Count Update</option>
-              <option value="FOLLOW_UP_DONE">Follow Up Done</option>
-            </select>
-            <select
-              className={inputClass}
-              style={{ width: "auto" }}
-              value={filterSourceType}
-              onChange={(e) => setFilterSourceType(e.target.value)}
-            >
-              <option value="all">All Sources</option>
-              <option value="WHATSAPP_COMMUNITY">Community</option>
-              <option value="WHATSAPP_GROUP">Group</option>
-              <option value="WHATSAPP_CHANNEL">Channel</option>
-            </select>
-            <select
-              className={inputClass}
-              style={{ width: "auto" }}
-              value={filterFollowUp}
-              onChange={(e) => setFilterFollowUp(e.target.value)}
-            >
-              <option value="all">Follow-up: All</option>
-              <option value="yes">Follow-up Required</option>
-              <option value="no">No Follow-up</option>
-            </select>
-          </div>
-
-          <TablePanel
-            title="Activity Registry"
-            subtitle={`${filteredLogs.length} records matching criteria`}
-            headers={[
-              "Date",
-              "Activity",
-              "Source",
-              "Sector",
-              "Details",
-              "Priority",
-              "Follow-up",
-              "Actions",
-            ]}
-          >
-            {filteredLogs.length === 0 ? (
-              <tr>
-                <td colSpan={8} className="p-12">
-                  <EmptyState
-                    title="No Activity Logs"
-                    description="Try adjusting your filters or log a new activity."
-                  />
-                </td>
-              </tr>
-            ) : (
-              filteredLogs.map((log) => (
-                <tr
-                  key={log.id}
-                  className="hover:bg-stone-50 border-b border-stone-100"
-                >
-                  <td className="px-6 py-4 font-mono text-xs text-stone-500 whitespace-nowrap">
-                    {log.activityDate}
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className="text-xs font-bold uppercase text-brand-charcoal">
-                      {log.activityType.replace(/_/g, " ")}
-                    </span>
-                    <p className="text-[10px] text-stone-400 mt-1">
-                      {log.leadStatus}
-                    </p>
-                  </td>
-                  <td className="px-6 py-4">
-                    <p className="text-xs font-bold">{log.sourceName}</p>
-                    <p className="text-[10px] text-stone-400 uppercase">
-                      {log.sourceType.replace(/_/g, " ")}{" "}
-                      {log.communityName ? `• ${log.communityName}` : ""}
-                    </p>
-                  </td>
-                  <td className="px-6 py-4 text-xs font-medium uppercase text-stone-600">
-                    {log.sector || "—"}
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="text-xs max-w-xs truncate text-stone-600">
-                      {log.vendorName && (
-                        <span className="font-bold">{log.vendorName}</span>
-                      )}
-                      {log.productName && <span>: {log.productName}</span>}
-                      {log.customerNeed && (
-                        <p className="truncate opacity-80 mt-0.5">
-                          {log.customerNeed}
-                        </p>
-                      )}
-                      {!log.vendorName &&
-                        !log.productName &&
-                        !log.customerNeed &&
-                        "—"}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <StatusBadge
-                      status={log.priority}
-                      variant={
-                        log.priority === "HIGH" || log.priority === "CRITICAL"
-                          ? "error"
-                          : log.priority === "MEDIUM"
-                            ? "warning"
-                            : "neutral"
-                      }
-                    />
-                  </td>
-                  <td className="px-6 py-4">
-                    {log.followUpRequired ? (
-                      <div className="flex flex-col gap-1">
-                        <span className="text-[10px] font-bold text-red-500 uppercase bg-red-50 px-2 py-0.5 rounded-none self-start">
-                          Required
-                        </span>
-                        <span className="text-[10px] text-stone-500">
-                          {log.followUpDate || "No date set"}
-                        </span>
-                      </div>
-                    ) : (
-                      <span className="text-[10px] text-stone-400">—</span>
-                    )}
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <div className="flex justify-end gap-2">
-                      {log.followUpRequired && (
-                        <button
-                          onClick={() => handleMarkFollowUpDone(log)}
-                          className="p-1.5 text-stone-400 hover:text-emerald-600 hover:bg-emerald-50 border border-transparent hover:border-emerald-200 transition-all"
-                          title="Mark Follow-up Done"
-                        >
-                          <CheckCircle2 size={14} />
-                        </button>
-                      )}
-                      <button
-                        onClick={() => handleEditLog(log)}
-                        className="p-1.5 text-stone-400 hover:text-brand-charcoal hover:bg-stone-100 transition-all border border-transparent hover:border-stone-200"
-                      >
-                        <Edit2 size={14} />
-                      </button>
-                      <button
-                        onClick={() => handleDeleteLog(log.id)}
-                        className="p-1.5 text-stone-400 hover:text-red-600 hover:bg-red-50 transition-all border border-transparent hover:border-red-200"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </TablePanel>
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-4">
+        <SearchInput
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Advanced search: customer, vendor, product, region, tags..."
+          className="w-full"
+        />
+        <div className="flex gap-2">
+          <StatusBadge status={`Avg Resolution ${commerceBI.averageResolutionDays}d`} />
+          <StatusBadge
+            status={`${commerceBI.fraudAlerts} Fraud Alerts`}
+            variant={commerceBI.fraudAlerts > 0 ? "error" : "neutral"}
+          />
         </div>
-      ) : (
-        <DataPanel
-          title={
-            formData.id ? "Edit Activity Log" : "Log New WhatsApp Activity"
-          }
-          className="max-w-4xl mx-auto shadow-xl border-t-4 border-t-brand-charcoal rounded-none"
-        >
-          <div className="p-8 space-y-8">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold uppercase text-stone-400">
-                  Activity Type *
-                </label>
-                <select
-                  className={inputClass}
-                  value={formData.activityType || ""}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      activityType: e.target.value as WhatsAppActivityType,
-                    })
-                  }
-                >
-                  <option value="">Select Type</option>
-                  <option value="CATALOGUE_SHARED">Catalogue Shared</option>
-                  <option value="STOREFRONT_SHARED">Storefront Shared</option>
-                  <option value="PRODUCT_ENQUIRY">Product Enquiry</option>
-                  <option value="VENDOR_REFERRAL">Vendor Referral</option>
-                  <option value="CUSTOMER_REQUEST">Customer Request</option>
-                  <option value="MEMBER_COUNT_UPDATE">
-                    Member Count Update
-                  </option>
-                  <option value="FOLLOW_UP_DONE">Follow Up Done</option>
-                  <option value="VENDOR_RESPONDED">Vendor Responded</option>
-                  <option value="VENDOR_DID_NOT_RESPOND">
-                    Vendor Did Not Respond
-                  </option>
-                  <option value="COMPLAINT_RECEIVED">Complaint Received</option>
-                  <option value="GROUP_INACTIVE">Group Inactive</option>
-                  <option value="DEMAND_SIGNAL">Demand Signal</option>
-                  <option value="SPAM_OR_FALSE_LISTING">
-                    Spam / False Listing
-                  </option>
-                  <option value="OTHER">Other</option>
-                </select>
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold uppercase text-stone-400">
-                  Activity Date *
-                </label>
-                <input
-                  type="date"
-                  className={inputClass}
-                  value={formData.activityDate || ""}
-                  onChange={(e) =>
-                    setFormData({ ...formData, activityDate: e.target.value })
-                  }
-                />
-              </div>
-            </div>
+      </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold uppercase text-stone-400">
-                  Source Type *
-                </label>
-                <select
-                  className={inputClass}
-                  value={formData.sourceType || ""}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      sourceType: e.target.value as WhatsAppSourceType,
-                    })
-                  }
-                >
-                  <option value="">Select Source</option>
-                  <option value="WHATSAPP_COMMUNITY">WhatsApp Community</option>
-                  <option value="WHATSAPP_GROUP">WhatsApp Group</option>
-                  <option value="WHATSAPP_CHANNEL">WhatsApp Channel</option>
-                  <option value="DIRECT_WHATSAPP">Direct WhatsApp</option>
-                  <option value="BROADCAST_LIST">Broadcast List</option>
-                  <option value="OTHER">Other</option>
-                </select>
-              </div>
-              <div className="space-y-2 md:col-span-2 relative">
-                <label className="text-[10px] font-bold uppercase text-stone-400">
-                  WhatsApp Group / Channel *
-                </label>
-                <div className="flex gap-2">
-                  <div className="relative flex-1">
-                    <input
-                      type="text"
-                      className={inputClass}
-                      value={sourceSearch}
-                      onChange={(e) => {
-                        setSourceSearch(e.target.value);
-                        setShowSourceDropdown(true);
-                        setFormData({
-                          ...formData,
-                          sourceName: e.target.value,
-                          sourceId: undefined,
-                        });
-                      }}
-                      onFocus={() => setShowSourceDropdown(true)}
-                      onBlur={() =>
-                        setTimeout(() => setShowSourceDropdown(false), 200)
-                      }
-                      placeholder="Search or type new group..."
-                    />
-                    {showSourceDropdown && sourceSearch && (
-                      <div className="absolute top-full left-0 right-0 mt-1 bg-white border-2 border-brand-charcoal shadow-2xl max-h-60 overflow-y-auto z-50">
-                        {matchingSources.map((s) => (
-                          <div
-                            key={s.id}
-                            className="p-3 border-b border-stone-100 cursor-pointer hover:bg-orange-50 transition-colors"
-                            onMouseDown={() => handleSelectSource(s)}
-                          >
-                            <p className="text-xs font-bold uppercase">
-                              {s.sourceName}
-                            </p>
-                            <p className="text-[10px] text-stone-400 font-bold uppercase truncate">
-                              {[
-                                s.sourceType,
-                                s.communityName,
-                                s.sector,
-                                s.cityTown,
-                              ]
-                                .filter(Boolean)
-                                .join(" • ")}
-                            </p>
-                          </div>
-                        ))}
-                        <div
-                          className="p-3 bg-stone-50 cursor-pointer hover:bg-stone-100 transition-colors border-t border-stone-200"
-                          onMouseDown={() => {
-                            setNewSourceData({
-                              sourceName: sourceSearch,
-                              sourceType:
-                                formData.sourceType || "WHATSAPP_GROUP",
-                              status: "active",
-                              communityName: formData.communityName || "",
-                              sector: formData.sector || "",
-                              category: formData.category || "",
-                              province: formData.province || "",
-                              cityTown: formData.cityTown || "",
-                              district: formData.district || "",
-                              whatsappUrl: formData.whatsappUrl || "",
-                            });
-                            setIsSourceModalOpen(true);
-                          }}
-                        >
-                          <p className="text-xs font-bold uppercase text-brand-orange flex items-center gap-2">
-                            <Plus size={14} /> Add "{sourceSearch}" as New Group
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
+      {showPopupFeed && commerceBI.alerts.length > 0 && (
+        <div className="fixed bottom-6 right-6 z-40 w-[min(380px,calc(100vw-2rem))] space-y-3">
+          {commerceBI.alerts.slice(0, 2).map((alert) => (
+            <div
+              key={alert.id}
+              className="border-2 border-brand-charcoal bg-white p-4 shadow-2xl"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-black uppercase text-brand-charcoal">
+                    SCI Intelligence Feed
+                  </p>
+                  <p className="mt-1 text-sm font-bold text-brand-orange">
+                    {alert.title}
+                  </p>
                 </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold uppercase text-stone-400">
-                  Community Name
-                </label>
-                <input
-                  list="community-names-list"
-                  type="text"
-                  className={inputClass}
-                  value={formData.communityName || ""}
-                  onChange={(e) =>
-                    setFormData({ ...formData, communityName: e.target.value })
-                  }
-                  placeholder="Search or type community..."
-                />
-                <datalist id="community-names-list">
-                  {uniqueCommunities.map((c) => (
-                    <option key={c} value={c} />
-                  ))}
-                </datalist>
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold uppercase text-stone-400">
-                  Sector
-                </label>
-                <input
-                  type="text"
-                  className={inputClass}
-                  value={formData.sector || ""}
-                  onChange={(e) =>
-                    setFormData({ ...formData, sector: e.target.value })
-                  }
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold uppercase text-stone-400">
-                  Category
-                </label>
-                <input
-                  type="text"
-                  className={inputClass}
-                  value={formData.category || ""}
-                  onChange={(e) =>
-                    setFormData({ ...formData, category: e.target.value })
-                  }
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold uppercase text-stone-400">
-                  City / Town
-                </label>
-                <input
-                  type="text"
-                  className={inputClass}
-                  value={formData.cityTown || ""}
-                  onChange={(e) =>
-                    setFormData({ ...formData, cityTown: e.target.value })
-                  }
-                />
-              </div>
-            </div>
-
-            <div className="p-6 bg-stone-50 border border-stone-200 grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-2 md:col-span-2">
-                <label className="text-[10px] font-bold uppercase text-stone-400">
-                  Customer Need / Requested Item
-                </label>
-                <input
-                  type="text"
-                  className={inputClass}
-                  value={formData.customerNeed || ""}
-                  onChange={(e) =>
-                    setFormData({ ...formData, customerNeed: e.target.value })
-                  }
-                  placeholder="e.g. Looking for Toyota Aqua brake pads"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold uppercase text-stone-400">
-                  Vendor Name
-                </label>
-                <input
-                  type="text"
-                  className={inputClass}
-                  value={formData.vendorName || ""}
-                  onChange={(e) =>
-                    setFormData({ ...formData, vendorName: e.target.value })
-                  }
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold uppercase text-stone-400">
-                  Product Name
-                </label>
-                <input
-                  type="text"
-                  className={inputClass}
-                  value={formData.productName || ""}
-                  onChange={(e) =>
-                    setFormData({ ...formData, productName: e.target.value })
-                  }
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold uppercase text-stone-400">
-                  Lead Status
-                </label>
-                <select
-                  className={inputClass}
-                  value={formData.leadStatus || "NOT_APPLICABLE"}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      leadStatus: e.target.value as WhatsAppLeadStatus,
-                    })
-                  }
+                <button
+                  className="text-[10px] font-black uppercase text-stone-400"
+                  onClick={() => setShowPopupFeed(false)}
                 >
-                  <option value="NEW">New</option>
-                  <option value="REFERRED">Referred</option>
-                  <option value="CONTACTED">Contacted</option>
-                  <option value="CONVERTED">Converted</option>
-                  <option value="LOST">Lost</option>
-                  <option value="FOLLOW_UP_REQUIRED">Follow Up Required</option>
-                  <option value="NOT_APPLICABLE">Not Applicable</option>
-                </select>
+                  Dismiss
+                </button>
               </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold uppercase text-stone-400">
-                  Priority
-                </label>
-                <select
-                  className={inputClass}
-                  value={formData.priority || "LOW"}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      priority: e.target.value as WhatsAppPriority,
-                    })
-                  }
-                >
-                  <option value="LOW">Low</option>
-                  <option value="MEDIUM">Medium</option>
-                  <option value="HIGH">High</option>
-                  <option value="CRITICAL">Critical</option>
-                </select>
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold uppercase text-stone-400">
-                  Response Status
-                </label>
-                <select
-                  className={inputClass}
-                  value={formData.responseStatus || "NOT_REQUIRED"}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      responseStatus: e.target.value as WhatsAppResponseStatus,
-                    })
-                  }
-                >
-                  <option value="NOT_REQUIRED">Not Required</option>
-                  <option value="PENDING">Pending</option>
-                  <option value="RESPONDED">Responded</option>
-                  <option value="MISSED">Missed</option>
-                  <option value="ESCALATED">Escalated</option>
-                </select>
-              </div>
+              <p className="mt-2 text-xs font-semibold text-stone-600">
+                {alert.message}
+              </p>
             </div>
+          ))}
+        </div>
+      )}
 
-            <div className="p-6 bg-orange-50 border border-orange-200 grid grid-cols-1 md:grid-cols-2 gap-6">
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  className="w-5 h-5 accent-brand-orange"
-                  checked={!!formData.followUpRequired}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      followUpRequired: e.target.checked,
-                    })
-                  }
+      {activeTab === "customer" && renderCustomerForm()}
+
+      {activeTab === "feed" && (
+        <TablePanel
+          title="Activity Feed"
+          subtitle="Unified view of legacy WhatsApp logs and new customer intelligence records."
+          headers={[
+            "Date",
+            "Type",
+            "Customer / Source",
+            "Vendor",
+            "Product / Need",
+            "Status",
+            "Staff",
+          ]}
+        >
+          {filteredIntelLogs.map((log) => (
+            <tr key={log.id} className="hover:bg-orange-50/30">
+              <td className="px-6 py-4 text-[10px] font-bold text-stone-400">
+                {new Date(log.createdAt).toLocaleString()}
+              </td>
+              <td className="px-6 py-4">
+                <StatusBadge
+                  status={log.interactionType}
+                  variant={isComplaint(log.interactionType) ? "warning" : "neutral"}
                 />
-                <span className="text-sm font-bold uppercase text-brand-charcoal">
-                  Follow-up Required
-                </span>
-              </label>
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold uppercase text-stone-500">
-                  Follow-up Date
-                </label>
-                <input
-                  type="date"
-                  className={`${inputClass} border-orange-200 bg-white`}
-                  value={formData.followUpDate || ""}
-                  onChange={(e) =>
-                    setFormData({ ...formData, followUpDate: e.target.value })
-                  }
-                  disabled={!formData.followUpRequired}
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold uppercase text-stone-400">
-                Notes & Context
-              </label>
-              <textarea
-                className={`${inputClass} min-h-[100px] resize-y`}
-                value={formData.notes || ""}
-                onChange={(e) =>
-                  setFormData({ ...formData, notes: e.target.value })
-                }
-                placeholder="Additional details..."
-              />
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold uppercase text-stone-400">
-                  Assign Follow-up to RPN
-                </label>
-                <div className="flex gap-2">
-                  <select
-                    className={inputClass}
-                    value={formData.assignedToType || "RPN"}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        assignedToType: e.target.value as
-                          | "STAFF"
-                          | "RPN"
-                          | "ADMIN",
-                        assignedRpnId: "",
-                        assignedRpnName: "",
-                        assignedStaffId: "",
-                        assignedStaffName: "",
-                      })
-                    }
-                  >
-                    <option value="RPN">RPN</option>
-                    <option value="STAFF">Backend Staff</option>
-                  </select>
-                  {formData.assignedToType === "STAFF" ? (
-                    <select
-                      className={inputClass}
-                      value={formData.assignedStaffId || ""}
-                      onChange={(e) => {
-                        const s = staffList.find(
-                          (r) => r.id === e.target.value,
-                        );
-                        setFormData({
-                          ...formData,
-                          assignedStaffId: s?.id,
-                          assignedStaffName: s?.displayName || s?.fullName,
-                        });
-                      }}
-                    >
-                      <option value="">Unassigned</option>
-                      {staffList.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.displayName || s.fullName}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <select
-                      className={inputClass}
-                      value={formData.assignedRpnId || ""}
-                      onChange={(e) => {
-                        const rpn = rpns.find((r) => r.id === e.target.value);
-                        setFormData({
-                          ...formData,
-                          assignedRpnId: rpn?.id,
-                          assignedRpnName: rpn?.name,
-                        });
-                      }}
-                    >
-                      <option value="">Unassigned</option>
-                      {rpns.map((rpn) => (
-                        <option key={rpn.id} value={rpn.id}>
-                          {rpn.name}
-                        </option>
-                      ))}
-                    </select>
+              </td>
+              <td className="px-6 py-4">
+                <p className="text-xs font-black uppercase text-brand-charcoal">
+                  {log.customerName || log.customerPhone}
+                </p>
+                <p className="text-[10px] font-bold text-stone-400">{log.source}</p>
+              </td>
+              <td className="px-6 py-4 text-xs font-bold uppercase">
+                {log.vendorName || "-"}
+              </td>
+              <td className="px-6 py-4 text-xs font-semibold text-stone-600">
+                {log.productName || log.customerMessage || "-"}
+              </td>
+              <td className="px-6 py-4">
+                <div className="flex flex-col items-start gap-1">
+                  <StatusBadge
+                    status={log.resolutionStatus}
+                    variant={badgeVariant(log.resolutionStatus)}
+                  />
+                  {log.duplicatePatternDetected && (
+                    <StatusBadge status="Duplicate Pattern" variant="warning" />
                   )}
                 </div>
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold uppercase text-stone-400">
-                  Captured By (System)
-                </label>
-                <input
-                  type="text"
-                  className={`${inputClass} bg-stone-50 text-stone-500 border-dashed cursor-not-allowed`}
-                  disabled
-                  value={
-                    formData.capturedByStaffName ||
-                    session.staffName ||
-                    "Unknown Staff"
-                  }
-                />
-              </div>
-            </div>
+              </td>
+              <td className="px-6 py-4 text-[10px] font-bold uppercase text-stone-500">
+                {log.loggedByStaffName}
+              </td>
+            </tr>
+          ))}
+          {legacyFeed.map((log) => (
+            <tr key={log.id} className="hover:bg-stone-50">
+              <td className="px-6 py-4 text-[10px] font-bold text-stone-400">
+                {log.activityDate}
+              </td>
+              <td className="px-6 py-4">
+                <StatusBadge status={log.activityType} />
+              </td>
+              <td className="px-6 py-4 text-xs font-bold uppercase">
+                {log.sourceName}
+              </td>
+              <td className="px-6 py-4 text-xs font-bold uppercase">
+                {log.vendorName || "-"}
+              </td>
+              <td className="px-6 py-4 text-xs font-semibold text-stone-600">
+                {log.productName || log.customerNeed || "-"}
+              </td>
+              <td className="px-6 py-4">
+                <StatusBadge status={log.leadStatus} />
+              </td>
+              <td className="px-6 py-4 text-[10px] font-bold uppercase text-stone-500">
+                {log.capturedByStaffName || log.loggedBy}
+              </td>
+            </tr>
+          ))}
+        </TablePanel>
+      )}
 
-            <div className="flex gap-4 pt-6 border-t border-stone-100">
-              <SecondaryButton
-                className="flex-1 py-4"
-                onClick={() => setIsFormOpen(false)}
-              >
-                Cancel
-              </SecondaryButton>
-              <PrimaryButton className="flex-1 py-4" onClick={handleSave}>
-                Save Activity Log
-              </PrimaryButton>
-            </div>
+      {activeTab === "risks" && (
+        <TablePanel
+          title="Complaints & Risks"
+          subtitle="Unresolved complaints, fraud alerts, duplicate patterns and escalation controls."
+          headers={[
+            "Customer",
+            "Risk Type",
+            "Vendor",
+            "Product",
+            "Urgency",
+            "Status",
+            "Assigned",
+            "Action",
+          ]}
+        >
+          {filteredIntelLogs
+            .filter(
+              (log) =>
+                isComplaint(log.interactionType) ||
+                log.flaggedRisk ||
+                log.sentiment === "Negative" ||
+                log.duplicatePatternDetected,
+            )
+            .map((log) => (
+              <tr key={log.id} className="hover:bg-red-50/30">
+                <td className="px-6 py-4">
+                  <p className="text-xs font-black uppercase">
+                    {log.customerName || log.customerPhone}
+                  </p>
+                  <p className="text-[10px] font-bold text-stone-400">
+                    {log.customerPhone}
+                  </p>
+                </td>
+                <td className="px-6 py-4">
+                  <StatusBadge
+                    status={log.interactionType}
+                    variant={log.interactionType === "Fraud Alert" ? "error" : "warning"}
+                  />
+                </td>
+                <td className="px-6 py-4 text-xs font-bold uppercase">
+                  {log.vendorName || "-"}
+                </td>
+                <td className="px-6 py-4 text-xs font-semibold">
+                  {log.productName || "-"}
+                </td>
+                <td className="px-6 py-4">
+                  <StatusBadge
+                    status={log.urgencyLevel}
+                    variant={badgeVariant(log.urgencyLevel)}
+                  />
+                </td>
+                <td className="px-6 py-4">
+                  <StatusBadge
+                    status={log.resolutionStatus}
+                    variant={badgeVariant(log.resolutionStatus)}
+                  />
+                </td>
+                <td className="px-6 py-4 text-[10px] font-bold uppercase">
+                  {log.assignedToStaffName || "Unassigned"}
+                </td>
+                <td className="px-6 py-4">
+                  <div className="flex gap-2">
+                    <SecondaryButton size="sm" onClick={() => handleEscalate(log)}>
+                      Escalate
+                    </SecondaryButton>
+                    <PrimaryButton size="sm" onClick={() => handleResolve(log)}>
+                      Resolve
+                    </PrimaryButton>
+                  </div>
+                </td>
+              </tr>
+            ))}
+        </TablePanel>
+      )}
+
+      {activeTab === "market" && canViewAnalytics && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {renderRankList("Most Requested Products", commerceBI.productDemand)}
+          {renderRankList("Most Complained Vendors", commerceBI.vendorComplaints)}
+          {renderRankList("Most Active Staff", commerceBI.staffActivity)}
+          {renderRankList("Sector Activity", commerceBI.sectorActivity)}
+          {renderRankList("Category Sentiment Pressure", commerceBI.categoryActivity)}
+          {renderRankList("Repeat Complaint Keywords", commerceBI.complaintKeywords)}
+        </div>
+      )}
+
+      {activeTab === "alerts" && (
+        <DataPanel
+          title="Live Alerts"
+          subtitle="Market signal detection from customer demand, vendor risk and regional patterns."
+          className="border-t-4 border-t-brand-orange"
+        >
+          <div className="p-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {commerceBI.alerts.map((alert) => (
+              <div key={alert.id} className="border-2 border-stone-200 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[10px] font-black uppercase text-brand-orange">
+                      {alert.category}
+                    </p>
+                    <p className="text-sm font-black uppercase text-brand-charcoal">
+                      {alert.title}
+                    </p>
+                  </div>
+                  <StatusBadge
+                    status={alert.severity}
+                    variant={alert.severity === "critical" ? "error" : "warning"}
+                  />
+                </div>
+                <p className="mt-3 text-xs font-semibold text-stone-600">
+                  {alert.message}
+                </p>
+              </div>
+            ))}
+            {commerceBI.alerts.length === 0 && (
+              <EmptyState
+                icon={Bell}
+                title="No Active BI Alerts"
+                description="New alerts will appear when product demand, complaint volume or regional patterns cross thresholds."
+              />
+            )}
           </div>
         </DataPanel>
       )}
 
-      {isSourceModalOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-brand-charcoal/40 backdrop-blur-sm p-4">
-          <DataPanel
-            title="Add WhatsApp Group / Channel"
-            className="max-w-2xl w-full shadow-2xl border-t-4 border-t-brand-orange bg-white"
-          >
-            <div className="p-6 overflow-y-auto space-y-6 max-h-[80vh]">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase text-stone-400">
-                    Source Name / Group *
-                  </label>
-                  <input
-                    className={inputClass}
-                    value={newSourceData.sourceName || ""}
-                    onChange={(e) =>
-                      setNewSourceData({
-                        ...newSourceData,
-                        sourceName: e.target.value,
-                      })
+      {activeTab === "reputation" && canViewReputation && (
+        <TablePanel
+          title="Vendor Reputation Engine"
+          subtitle="Score blends complaint rate, compliments, delivery issues, unresolved cases and sentiment."
+          headers={[
+            "Vendor",
+            "Score",
+            "Trend",
+            "Risk",
+            "Complaints",
+            "Compliments",
+            "Delivery",
+            "Response Quality",
+          ]}
+        >
+          {Object.entries(commerceBI.vendorReputation)
+            .sort((a, b) => a[1].score - b[1].score)
+            .map(([vendor, score]) => (
+              <tr key={vendor} className="hover:bg-stone-50">
+                <td className="px-6 py-4 text-xs font-black uppercase">
+                  {vendor}
+                </td>
+                <td className="px-6 py-4 font-mono text-xl font-black text-brand-orange">
+                  {score.score}/100
+                </td>
+                <td className="px-6 py-4">
+                  <StatusBadge status={score.trend} />
+                </td>
+                <td className="px-6 py-4">
+                  <StatusBadge
+                    status={score.riskLevel}
+                    variant={
+                      score.riskLevel === "Critical" || score.riskLevel === "High"
+                        ? "error"
+                        : score.riskLevel === "Medium"
+                          ? "warning"
+                          : "success"
                     }
                   />
+                </td>
+                <td className="px-6 py-4 font-mono text-xs">{score.complaints}</td>
+                <td className="px-6 py-4 font-mono text-xs">{score.compliments}</td>
+                <td className="px-6 py-4 font-mono text-xs">{score.deliveryIssues}</td>
+                <td className="px-6 py-4 font-mono text-xs">
+                  {score.responseQuality}/100
+                </td>
+              </tr>
+            ))}
+        </TablePanel>
+      )}
+
+      {activeTab === "regional" && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {renderRankList("Demand by Province", commerceBI.provinceDemand)}
+          {renderRankList("Demand by City / Region", commerceBI.regionDemand)}
+          {renderRankList("Regional Enquiry Ranking", commerceBI.regionalEnquiryRank)}
+          <DataPanel title="Product Demand Heatmap" className="lg:col-span-3">
+            <div className="p-4 overflow-x-auto">
+              {Object.entries(commerceBI.productDemandHeatmap).map(([region, products]) => (
+                <div key={region} className="mb-4 border border-stone-200 p-3">
+                  <p className="mb-3 text-xs font-black uppercase text-brand-charcoal">
+                    {region}
+                  </p>
+                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
+                    {asList(products, 12).map(([product, count]) => (
+                      <div
+                        key={product}
+                        className="bg-orange-50 border border-orange-100 p-3"
+                      >
+                        <p className="truncate text-[10px] font-black uppercase text-brand-charcoal">
+                          {product}
+                        </p>
+                        <p className="font-mono text-lg font-black text-brand-orange">
+                          {count}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase text-stone-400">
-                    Source Type
-                  </label>
-                  <select
-                    className={inputClass}
-                    value={newSourceData.sourceType || "WHATSAPP_GROUP"}
-                    onChange={(e) =>
-                      setNewSourceData({
-                        ...newSourceData,
-                        sourceType: e.target.value as any,
-                      })
-                    }
-                  >
-                    <option value="WHATSAPP_COMMUNITY">
-                      WhatsApp Community
-                    </option>
-                    <option value="WHATSAPP_GROUP">WhatsApp Group</option>
-                    <option value="WHATSAPP_CHANNEL">WhatsApp Channel</option>
-                    <option value="BROADCAST_LIST">Broadcast List</option>
-                    <option value="OTHER">Other</option>
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase text-stone-400">
-                    Community Name
-                  </label>
-                  <input
-                    className={inputClass}
-                    value={newSourceData.communityName || ""}
-                    onChange={(e) =>
-                      setNewSourceData({
-                        ...newSourceData,
-                        communityName: e.target.value,
-                      })
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase text-stone-400">
-                    WhatsApp URL
-                  </label>
-                  <input
-                    className={inputClass}
-                    value={newSourceData.whatsappUrl || ""}
-                    onChange={(e) =>
-                      setNewSourceData({
-                        ...newSourceData,
-                        whatsappUrl: e.target.value,
-                      })
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase text-stone-400">
-                    Sector
-                  </label>
-                  <input
-                    className={inputClass}
-                    value={newSourceData.sector || ""}
-                    onChange={(e) =>
-                      setNewSourceData({
-                        ...newSourceData,
-                        sector: e.target.value,
-                      })
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase text-stone-400">
-                    Category
-                  </label>
-                  <input
-                    className={inputClass}
-                    value={newSourceData.category || ""}
-                    onChange={(e) =>
-                      setNewSourceData({
-                        ...newSourceData,
-                        category: e.target.value,
-                      })
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase text-stone-400">
-                    Province
-                  </label>
-                  <input
-                    className={inputClass}
-                    value={newSourceData.province || ""}
-                    onChange={(e) =>
-                      setNewSourceData({
-                        ...newSourceData,
-                        province: e.target.value,
-                      })
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase text-stone-400">
-                    City / Town
-                  </label>
-                  <input
-                    className={inputClass}
-                    value={newSourceData.cityTown || ""}
-                    onChange={(e) =>
-                      setNewSourceData({
-                        ...newSourceData,
-                        cityTown: e.target.value,
-                      })
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase text-stone-400">
-                    District
-                  </label>
-                  <input
-                    className={inputClass}
-                    value={newSourceData.district || ""}
-                    onChange={(e) =>
-                      setNewSourceData({
-                        ...newSourceData,
-                        district: e.target.value,
-                      })
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase text-stone-400">
-                    Member Count
-                  </label>
-                  <input
-                    type="number"
-                    className={inputClass}
-                    value={newSourceData.memberCount || 0}
-                    onChange={(e) =>
-                      setNewSourceData({
-                        ...newSourceData,
-                        memberCount: parseInt(e.target.value) || 0,
-                      })
-                    }
-                  />
-                </div>
-              </div>
-            </div>
-            <div className="p-6 bg-stone-50 border-t border-stone-100 flex gap-4 shrink-0">
-              <SecondaryButton
-                onClick={() => setIsSourceModalOpen(false)}
-                className="flex-1"
-              >
-                Cancel
-              </SecondaryButton>
-              <PrimaryButton
-                className="flex-1"
-                onClick={() => {
-                  if (!newSourceData.sourceName)
-                    return alert("Source name required");
-                  const sourceToSave: WhatsAppSource = {
-                    ...newSourceData,
-                    id: `WS-${Date.now()}`,
-                    sourceType: newSourceData.sourceType || "WHATSAPP_GROUP",
-                    status: newSourceData.status || "active",
-                    createdAt: new Date().toISOString(),
-                    updatedAt: new Date().toISOString(),
-                  } as WhatsAppSource;
-                  whatsappSourceService.saveSource(sourceToSave);
-                  setSources(whatsappSourceService.getSources());
-                  handleSelectSource(sourceToSave);
-                  setIsSourceModalOpen(false);
-                  alert("WhatsApp source saved.");
-                }}
-              >
-                Save Source & Select
-              </PrimaryButton>
+              ))}
             </div>
           </DataPanel>
         </div>
+      )}
+
+      {activeTab === "product" && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {renderRankList("Most Searched / Requested Products", commerceBI.productDemand)}
+          {renderRankList("Unavailable / Stock Request Products", commerceBI.unavailableProducts)}
+          {renderRankList("Complaint-heavy Products", commerceBI.productComplaints)}
+          <TablePanel
+            title="Fast-moving Demand Trends"
+            subtitle="Product signals weighted by total demand and regional spread."
+            className="lg:col-span-3"
+            headers={["Product", "Demand", "Complaint Load", "Stock Requests", "BI Signal"]}
+          >
+            {asList(commerceBI.productDemand, 20).map(([product, demand]) => {
+              const complaints = commerceBI.productComplaints[product] || 0;
+              const stockRequests = commerceBI.unavailableProducts[product] || 0;
+              const score = demand * 4 + stockRequests * 5 - complaints * 2;
+              return (
+                <tr key={product} className="hover:bg-stone-50">
+                  <td className="px-6 py-4 text-xs font-black uppercase">
+                    {product}
+                  </td>
+                  <td className="px-6 py-4 font-mono text-xs">{demand}</td>
+                  <td className="px-6 py-4 font-mono text-xs">{complaints}</td>
+                  <td className="px-6 py-4 font-mono text-xs">{stockRequests}</td>
+                  <td className="px-6 py-4">
+                    <StatusBadge
+                      status={score >= 20 ? "High Demand" : "Watch"}
+                      variant={score >= 20 ? "warning" : "neutral"}
+                    />
+                  </td>
+                </tr>
+              );
+            })}
+          </TablePanel>
+        </div>
+      )}
+
+      {!canViewAnalytics && activeTab === "market" && (
+        <EmptyState
+          icon={ShieldAlert}
+          title="Analytics Permission Required"
+          description="This staff profile does not have whatsapp.analytics.view access."
+        />
       )}
     </div>
   );

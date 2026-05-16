@@ -9,6 +9,8 @@ import {
   DataPanel,
   PrimaryButton,
   SecondaryButton,
+  BrandedAlertModal,
+  ConfirmDialog,
 } from "../components/CommonUI.tsx";
 import {
   FileCode,
@@ -42,6 +44,7 @@ import {
   CatalogueContactHubSettings,
   SystemSettings,
   WhatsAppActivityLog,
+  WhatsAppIntelligenceLog,
 } from "../types.ts";
 import { generateCatalogueHtml } from "../lib/catalogueTemplate.ts";
 import { cahService } from "../services/cahService.ts";
@@ -57,6 +60,8 @@ import { focusMainContent } from "../utils/uiHelpers.ts";
 import { WhatsAppActivityQuickLog } from "../components/WhatsAppActivityQuickLog.tsx";
 import { staffAuditService } from "../services/staffAuditService.ts";
 import { approvalService } from "../services/approvalService.ts";
+import { notificationService } from "../services/notificationService.ts";
+import { whatsappActivityService } from "../services/whatsappActivityService.ts";
 
 async function assetUrlToDataUri(url: string): Promise<string> {
   const response = await fetch(url);
@@ -89,9 +94,89 @@ interface CatalogueConfig {
   maxImages: number;
 }
 
+interface CatalogueEntitlementSummary {
+  vendorId: string;
+  vendorName: string;
+  planName: string;
+  selectedProducts: number;
+  allowedProducts: number;
+  includedProducts: number;
+  excludedProducts: number;
+  overageQuantity: number;
+  overageUnitPrice: number;
+  overageDue: number;
+  creditUsed: number;
+  remainingCredit: number;
+  overrideUsed: boolean;
+  upgradeRecommendation: string;
+  excludedProductNames: string[];
+}
+
+interface CatalogueOverageChargeRecord {
+  id: string;
+  catalogueId: string;
+  vendorId: string;
+  vendorName: string;
+  quantity: number;
+  amount: number;
+  creditUsed: number;
+  createdAt: string;
+}
+
+const OVERAGE_CHARGE_STORAGE_KEY = "itred_catalogue_overage_charges";
+
+const getVendorCreditBalance = (vendor: Vendor): number => {
+  const candidate =
+    (vendor as any).creditBalance ??
+    (vendor as any).walletBalance ??
+    (vendor as any).prepaidAllowance ??
+    (vendor as any).catalogueCreditBalance ??
+    0;
+  const parsed = Number(candidate);
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+};
+
+const getVendorCreditField = (vendor: Vendor): string => {
+  const keys = [
+    "creditBalance",
+    "walletBalance",
+    "prepaidAllowance",
+    "catalogueCreditBalance",
+  ];
+  return keys.find((key) => Object.prototype.hasOwnProperty.call(vendor, key)) || "creditBalance";
+};
+
+const getOverageUnitPrice = (plan?: PricingPlan): number => {
+  const candidate =
+    (plan as any)?.catalogueProductOveragePrice ??
+    (plan as any)?.overageProductPrice ??
+    (plan as any)?.productOveragePrice ??
+    (plan as any)?.extraProductPrice ??
+    1;
+  const parsed = Number(candidate);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+};
+
+const saveOverageChargeRecord = (record: CatalogueOverageChargeRecord) => {
+  try {
+    const raw = localStorage.getItem(OVERAGE_CHARGE_STORAGE_KEY);
+    const existing = raw ? JSON.parse(raw) : [];
+    const records = Array.isArray(existing) ? existing : [];
+    localStorage.setItem(
+      OVERAGE_CHARGE_STORAGE_KEY,
+      JSON.stringify([...records, record]),
+    );
+  } catch (error) {
+    console.warn("Failed to save catalogue overage charge", error);
+  }
+};
+
 export const SectorCatalogueGenerator: React.FC = () => {
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [intelligenceLogs, setIntelligenceLogs] = useState<
+    WhatsAppIntelligenceLog[]
+  >([]);
   const [cahLinks, setCahLinks] = useState<CAHLink[]>([]);
   const [plans, setPlans] = useState<PricingPlan[]>([]);
   const [history, setHistory] = useState<CatalogueGeneration[]>([]);
@@ -101,6 +186,8 @@ export const SectorCatalogueGenerator: React.FC = () => {
     null,
   );
   const [linksSource, setLinksSource] = useState("Loading...");
+  const [overridePlanLimits, setOverridePlanLimits] = useState(false);
+  const [overrideReason, setOverrideReason] = useState("");
 
   // Filters
   const [filterSector, setFilterSector] = useState("");
@@ -143,11 +230,39 @@ export const SectorCatalogueGenerator: React.FC = () => {
     hostedUrl?: string;
   } | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [confirmConfig, setConfirmConfig] = useState<{
+    isOpen: boolean;
+    message: string;
+    confirmLabel: string;
+    variant: "danger" | "warning" | "info";
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    message: "",
+    confirmLabel: "Confirm",
+    variant: "info",
+    onConfirm: () => {},
+  });
 
   const [isQuickLogOpen, setIsQuickLogOpen] = useState(false);
   const [quickLogData, setQuickLogData] = useState<
     Partial<WhatsAppActivityLog>
   >({});
+
+  const [alertConfig, setAlertConfig] = useState<{
+    isOpen: boolean;
+    title?: string;
+    message: string;
+    type?: "success" | "error" | "warning" | "info";
+  }>({ isOpen: false, title: "seiGEN Commerce", message: "", type: "success" });
+
+  const showBrandedAlert = (config: {
+    title?: string;
+    message: string;
+    type?: "success" | "error" | "warning" | "info";
+  }) => {
+    setAlertConfig({ ...config, isOpen: true });
+  };
 
   useEffect(() => {
     void loadData();
@@ -182,6 +297,7 @@ export const SectorCatalogueGenerator: React.FC = () => {
 
       setVendors(asArray<Vendor>(rawVendors));
       setProducts(asArray<Product>(rawProducts));
+      setIntelligenceLogs(whatsappActivityService.getIntelligenceLogs());
       setCahLinks(asArray<CAHLink>(rawCahLinks));
       setPlans(asArray<PricingPlan>(rawPlans));
       setHistory(asArray<CatalogueGeneration>(rawHistory));
@@ -221,6 +337,10 @@ export const SectorCatalogueGenerator: React.FC = () => {
 
   const safeVendors = useMemo(() => asArray<Vendor>(vendors), [vendors]);
   const safeProducts = useMemo(() => asArray<Product>(products), [products]);
+  const safeIntelligenceLogs = useMemo(
+    () => asArray<WhatsAppIntelligenceLog>(intelligenceLogs),
+    [intelligenceLogs],
+  );
   const safeCahLinks = useMemo(() => asArray<CAHLink>(cahLinks), [cahLinks]);
   const safePlans = useMemo(() => asArray<PricingPlan>(plans), [plans]);
   const safeHistory = useMemo(
@@ -233,7 +353,11 @@ export const SectorCatalogueGenerator: React.FC = () => {
     [safeVendors, config.vendorIds],
   );
 
-  const allSelectedProducts = useMemo(() => {
+  const canOverridePlanLimits = permissionService.hasActionPermission(
+    "catalogue.overridePlanLimit",
+  );
+
+  const rawSelectedProducts = useMemo(() => {
     let filtered = safeProducts.filter((p) =>
       config.vendorIds.includes(p.vendorId),
     );
@@ -248,9 +372,142 @@ export const SectorCatalogueGenerator: React.FC = () => {
       filtered = filtered.filter((p) => p.stockQuantity > 0);
     }
 
-    // Limit to max products
-    return filtered.slice(0, config.maxProducts);
+    return filtered;
   }, [safeProducts, config]);
+
+  const productSignalCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    safeIntelligenceLogs.forEach((log) => {
+      const isDemandSignal =
+        log.interactionType === "Enquiry" ||
+        log.interactionType === "Price Request" ||
+        log.interactionType === "Stock Request" ||
+        log.interactionType === "Product Search";
+      if (!isDemandSignal) return;
+
+      [log.productId, log.productName, `${log.vendorId || ""}:${log.productName || ""}`]
+        .filter(Boolean)
+        .forEach((key) => {
+          const normalized = String(key).toLowerCase().trim();
+          counts.set(normalized, (counts.get(normalized) || 0) + 1);
+        });
+    });
+    return counts;
+  }, [safeIntelligenceLogs]);
+
+  const entitlementResult = useMemo(() => {
+    const includedProducts: Product[] = [];
+    const excludedProducts: (Product & { catalogueExclusionReason: string })[] =
+      [];
+    const summaries: CatalogueEntitlementSummary[] = [];
+    const shouldOverride =
+      canOverridePlanLimits &&
+      overridePlanLimits &&
+      overrideReason.trim().length > 0;
+
+    selectedVendors.forEach((vendor) => {
+      const plan = safePlans.find((p) => p.id === vendor.planId);
+      const vendorProducts = rawSelectedProducts.filter(
+        (p) => p.vendorId === vendor.id,
+      );
+      const allowedProducts = Math.max(
+        0,
+        plan?.maxProducts ?? config.maxProducts,
+      );
+      const overageQuantity = Math.max(
+        0,
+        vendorProducts.length - allowedProducts,
+      );
+      const overageUnitPrice = getOverageUnitPrice(plan);
+      const overageDue = overageQuantity * overageUnitPrice;
+      const creditBalance = getVendorCreditBalance(vendor);
+      const creditCovers = overageQuantity > 0 && creditBalance >= overageDue;
+
+      const rankedProducts = [...vendorProducts].sort((a, b) => {
+        const aFeatured = (a as any).featured ? 1 : 0;
+        const bFeatured = (b as any).featured ? 1 : 0;
+        if (aFeatured !== bFeatured) return bFeatured - aFeatured;
+
+        const aSignals =
+          productSignalCounts.get(String(a.productId || a.id).toLowerCase()) ||
+          productSignalCounts.get(a.name.toLowerCase()) ||
+          productSignalCounts.get(`${a.vendorId}:${a.name}`.toLowerCase()) ||
+          0;
+        const bSignals =
+          productSignalCounts.get(String(b.productId || b.id).toLowerCase()) ||
+          productSignalCounts.get(b.name.toLowerCase()) ||
+          productSignalCounts.get(`${b.vendorId}:${b.name}`.toLowerCase()) ||
+          0;
+        if (aSignals !== bSignals) return bSignals - aSignals;
+
+        const aInStock = a.stockQuantity > 0 ? 1 : 0;
+        const bInStock = b.stockQuantity > 0 ? 1 : 0;
+        if (aInStock !== bInStock) return bInStock - aInStock;
+
+        const aHasImage = a.imageUrl ? 1 : 0;
+        const bHasImage = b.imageUrl ? 1 : 0;
+        if (aHasImage !== bHasImage) return bHasImage - aHasImage;
+
+        return new Date(b.updatedAt || b.createdAt).getTime() -
+          new Date(a.updatedAt || a.createdAt).getTime();
+      });
+
+      const allAllowed = overageQuantity === 0 || creditCovers || shouldOverride;
+      const vendorIncluded = allAllowed
+        ? rankedProducts
+        : rankedProducts.slice(0, allowedProducts);
+      const vendorExcluded = allAllowed
+        ? []
+        : rankedProducts.slice(allowedProducts).map((product) => ({
+            ...product,
+            catalogueExclusionReason: "excluded_due_to_plan_limit",
+          }));
+
+      includedProducts.push(...vendorIncluded);
+      excludedProducts.push(...vendorExcluded);
+
+      summaries.push({
+        vendorId: vendor.id,
+        vendorName: vendor.name,
+        planName: plan?.name || vendor.planId || "Unassigned Plan",
+        selectedProducts: vendorProducts.length,
+        allowedProducts,
+        includedProducts: vendorIncluded.length,
+        excludedProducts: vendorExcluded.length,
+        overageQuantity,
+        overageUnitPrice,
+        overageDue,
+        creditUsed: creditCovers && !shouldOverride ? overageDue : 0,
+        remainingCredit:
+          creditCovers && !shouldOverride ? creditBalance - overageDue : creditBalance,
+        overrideUsed: !!shouldOverride && overageQuantity > 0,
+        upgradeRecommendation:
+          overageQuantity > 0
+            ? `Upgrade ${vendor.name} from ${plan?.name || "current plan"} or preload catalogue credit.`
+            : "No upgrade required.",
+        excludedProductNames: vendorExcluded.map((p) => p.name),
+      });
+    });
+
+    return {
+      includedProducts: includedProducts.slice(0, config.maxProducts),
+      excludedProducts,
+      summaries,
+    };
+  }, [
+    canOverridePlanLimits,
+    config.maxProducts,
+    overridePlanLimits,
+    overrideReason,
+    productSignalCounts,
+    rawSelectedProducts,
+    safePlans,
+    selectedVendors,
+  ]);
+
+  const allSelectedProducts = entitlementResult.includedProducts;
+  const entitlementSummaries = entitlementResult.summaries;
+  const entitlementExcludedProducts = entitlementResult.excludedProducts;
 
   const selectedCahLinks = useMemo(
     () => safeCahLinks.filter((l) => config.cahLinkIds.includes(l.id)),
@@ -319,15 +576,32 @@ export const SectorCatalogueGenerator: React.FC = () => {
       list.push(`AUDIT: ${missingImages} units missing visual assets.`);
     }
 
-    // Plan Enforcement
+    entitlementSummaries
+      .filter((summary) => summary.overageQuantity > 0)
+      .forEach((summary) => {
+        if (summary.overrideUsed) {
+          list.push(
+            `ENTITLEMENT OVERRIDE: ${summary.vendorName} includes ${summary.overageQuantity} over-limit products. Finance/admin will be notified.`,
+          );
+        } else if (summary.creditUsed > 0) {
+          list.push(
+            `ENTITLEMENT CREDIT: ${summary.vendorName} used ${summary.creditUsed.toFixed(2)} credit for ${summary.overageQuantity} over-limit products.`,
+          );
+        } else if (summary.excludedProducts > 0) {
+          list.push(
+            `AUTO-DROP: ${summary.vendorName} excluded ${summary.excludedProducts} products because ${summary.planName} allows ${summary.allowedProducts} and no covering credit was available.`,
+          );
+        }
+      });
+
+    // Non-product plan checks still surface as warnings; they do not block export.
     safeSelectedVendors.forEach((vendor) => {
       const plan = safePlans.find((p) => p.id === vendor.planId);
       if (!plan) return;
 
-      const vendorProducts = safeProducts.filter(
+      const vendorProducts = rawSelectedProducts.filter(
         (p) => p.vendorId === vendor.id,
       );
-      const productsExceeded = vendorProducts.length > plan.maxProducts;
       const imagesExceeded =
         vendorProducts.filter((p) => p.imageUrl).length >
         plan.maxImagesPerCatalogue;
@@ -336,20 +610,16 @@ export const SectorCatalogueGenerator: React.FC = () => {
       const staffExceeded =
         (vendor.staff?.length || 0) > plan.maxStaffPerVendor;
 
-      if (productsExceeded)
-        list.push(
-          `PLAN LIMIT: ${vendor.name} exceeds max products (${vendorProducts.length}/${plan.maxProducts}). Upgrade to ${plan.id === "starter" ? "Growth" : "Pro"} recommended.`,
-        );
       if (imagesExceeded)
         list.push(
-          `PLAN LIMIT: ${vendor.name} exceeds image threshold (${vendorProducts.filter((p) => p.imageUrl).length}/${plan.maxImagesPerCatalogue}).`,
+          `PLAN WARNING: ${vendor.name} exceeds image threshold (${vendorProducts.filter((p) => p.imageUrl).length}/${plan.maxImagesPerCatalogue}).`,
         );
       if (branchesExceeded)
         list.push(
-          `PLAN LIMIT: ${vendor.name} listed branches (${vendor.branches?.length}/${plan.maxBranchesPerVendor}) exceed ${plan.name} allowance.`,
+          `PLAN WARNING: ${vendor.name} listed branches (${vendor.branches?.length}/${plan.maxBranchesPerVendor}) exceed ${plan.name} allowance.`,
         );
       if (staffExceeded)
-        list.push(`PLAN LIMIT: ${vendor.name} team size exceeds plan limits.`);
+        list.push(`PLAN WARNING: ${vendor.name} team size exceeds plan limits.`);
 
       // Frequency Check
       const monthlyDeployments = safeHistory.filter(
@@ -369,9 +639,10 @@ export const SectorCatalogueGenerator: React.FC = () => {
     return list;
   }, [
     allSelectedProducts,
+    entitlementSummaries,
     estimatedSize,
     selectedVendors,
-    safeProducts,
+    rawSelectedProducts,
     safeHistory,
     safePlans,
   ]);
@@ -468,14 +739,22 @@ export const SectorCatalogueGenerator: React.FC = () => {
     const c = config.category?.toLowerCase().trim() || "";
 
     if (!s && !c) {
-      alert("Please enter a Sector or Category first to auto-select links.");
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message:
+          "Please enter a Sector or Category first to auto-select links.",
+        type: "warning",
+      });
       return;
     }
 
     if (sectorMatchedCahLinks.length === 0) {
-      alert(
-        "No active matching WhatsApp/CAH links found for this sector/category.",
-      );
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message:
+          "No active matching WhatsApp/CAH links found for this sector/category.",
+        type: "warning",
+      });
       return;
     }
 
@@ -490,22 +769,129 @@ export const SectorCatalogueGenerator: React.FC = () => {
     }));
   };
 
+  const settleCatalogueEntitlements = async (catalogueId: string) => {
+    const summariesWithCredit = entitlementSummaries.filter(
+      (summary) => summary.creditUsed > 0,
+    );
+    const summariesWithOverride = entitlementSummaries.filter(
+      (summary) => summary.overrideUsed,
+    );
+
+    if (summariesWithCredit.length > 0) {
+      const nextVendors = [...safeVendors];
+      for (const summary of summariesWithCredit) {
+        const vendorIndex = nextVendors.findIndex(
+          (vendor) => vendor.id === summary.vendorId,
+        );
+        if (vendorIndex < 0) continue;
+
+        const vendor = nextVendors[vendorIndex];
+        const creditField = getVendorCreditField(vendor);
+        const beforeCredit = getVendorCreditBalance(vendor);
+        const updatedVendor = {
+          ...vendor,
+          [creditField]: Math.max(0, beforeCredit - summary.creditUsed),
+          updatedAt: new Date().toISOString(),
+        } as Vendor;
+
+        await vendorService.updateVendor(updatedVendor);
+        nextVendors[vendorIndex] = updatedVendor;
+
+        saveOverageChargeRecord({
+          id: `OVG-${Date.now()}-${summary.vendorId}`,
+          catalogueId,
+          vendorId: summary.vendorId,
+          vendorName: summary.vendorName,
+          quantity: summary.overageQuantity,
+          amount: summary.overageDue,
+          creditUsed: summary.creditUsed,
+          createdAt: new Date().toISOString(),
+        });
+
+        void staffAuditService.logAction({
+          eventType: "SUBSCRIPTION_CHANGED",
+          module: "catalogue",
+          action: `Catalogue overage credit deducted for ${summary.vendorName}`,
+          severity: "warning",
+          recordType: "catalogue_overage_charge",
+          recordId: catalogueId,
+          recordName: summary.vendorName,
+          beforeSnapshot: { vendorId: vendor.id, credit: beforeCredit },
+          afterSnapshot: {
+            vendorId: vendor.id,
+            credit: beforeCredit - summary.creditUsed,
+            overageQuantity: summary.overageQuantity,
+            overageDue: summary.overageDue,
+          },
+        });
+      }
+      setVendors(nextVendors);
+    }
+
+    for (const summary of summariesWithOverride) {
+      void staffAuditService.logAction({
+        eventType: "SYSTEM_SETTING_CHANGED",
+        module: "catalogue",
+        action: `Catalogue plan limit override for ${summary.vendorName}: ${overrideReason.trim()}`,
+        severity: "high",
+        recordType: "catalogue_plan_limit_override",
+        recordId: catalogueId,
+        recordName: summary.vendorName,
+        afterSnapshot: {
+          vendorId: summary.vendorId,
+          reason: overrideReason.trim(),
+          overageQuantity: summary.overageQuantity,
+          selectedProducts: summary.selectedProducts,
+        },
+      });
+
+      await notificationService.createNotification({
+        title: "Catalogue Plan Limit Override",
+        message: `${summary.vendorName} was exported with ${summary.overageQuantity} over-limit products. Reason: ${overrideReason.trim()}`,
+        type: "system_alert",
+        priority: "high",
+        targetRole: "Finance",
+        recordType: "catalogue",
+        recordId: catalogueId,
+        dedupeKey: `catalogue_override:${catalogueId}:${summary.vendorId}`,
+      });
+      await notificationService.createNotification({
+        title: "Catalogue Plan Limit Override",
+        message: `${summary.vendorName} was exported with ${summary.overageQuantity} over-limit products. Finance review required.`,
+        type: "system_alert",
+        priority: "high",
+        targetRole: "Admin",
+        recordType: "catalogue",
+        recordId: catalogueId,
+        dedupeKey: `catalogue_override_admin:${catalogueId}:${summary.vendorId}`,
+      });
+    }
+  };
+
   const handleGenerate = async (mode: "new" | "update" | "replace" = "new") => {
     if (config.vendorIds.length === 0 || !config.sector || !config.category) {
-      alert("Please provide Sector, Category and select at least one vendor.");
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message:
+          "Please provide Sector, Category and select at least one vendor.",
+        type: "warning",
+      });
       return;
     }
 
     if (
-      warnings.some((w) => w.includes("PLAN LIMIT") || w.includes("POLICY"))
+      overridePlanLimits &&
+      canOverridePlanLimits &&
+      entitlementSummaries.some((s) => s.overageQuantity > 0) &&
+      !overrideReason.trim()
     ) {
-      if (
-        !confirm(
-          "Deployment plan violations detected. Pro-rata overage or upgrade may be required. Proceed with compilation?",
-        )
-      ) {
-        return;
-      }
+      showBrandedAlert({
+        title: "Plan Override Reason Required",
+        message:
+          "Enter an override reason before exporting over-limit products without credit.",
+        type: "warning",
+      });
+      return;
     }
 
     let finalCahLinks = selectedCahLinks;
@@ -624,6 +1010,7 @@ export const SectorCatalogueGenerator: React.FC = () => {
         includeOutOfStock: config.includeOutOfStock,
         maxProducts: config.maxProducts,
         maxImages: config.maxImages,
+        entitlementSummary: entitlementSummaries,
       };
 
       const catalogueData: CatalogueGeneration = {
@@ -657,6 +1044,8 @@ export const SectorCatalogueGenerator: React.FC = () => {
         await catalogueService.saveCatalogue(catalogueData);
       }
 
+      await settleCatalogueEntitlements(finalId);
+
       // Non-blocking staff audit logging
       try {
         void staffAuditService.logAction({
@@ -682,10 +1071,18 @@ export const SectorCatalogueGenerator: React.FC = () => {
         setEditingCatalogueId(null);
       }
       await refreshHistory();
-      alert("Saved successfully");
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message: "Saved successfully.",
+        type: "success",
+      });
     } catch (err) {
       console.error(err);
-      alert(err instanceof Error ? err.message : "Save failed");
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message: err instanceof Error ? err.message : "Save failed",
+        type: "error",
+      });
     } finally {
       setIsGenerating(false);
     }
@@ -702,7 +1099,11 @@ export const SectorCatalogueGenerator: React.FC = () => {
       try {
         await catalogueService.markAsDeployed(id);
         refreshHistory();
-        alert("Saved successfully");
+        showBrandedAlert({
+          title: "seiGEN Commerce",
+          message: "Saved successfully.",
+          type: "success",
+        });
 
         // Non-blocking staff audit logging
         try {
@@ -719,7 +1120,11 @@ export const SectorCatalogueGenerator: React.FC = () => {
         }
       } catch (err) {
         console.error(err);
-        alert(err instanceof Error ? err.message : "Save failed");
+        showBrandedAlert({
+          title: "seiGEN Commerce",
+          message: err instanceof Error ? err.message : "Save failed",
+          type: "error",
+        });
       }
     } else {
       try {
@@ -734,10 +1139,18 @@ export const SectorCatalogueGenerator: React.FC = () => {
           beforeSnapshot: null,
           afterSnapshot: null,
         });
-        alert("Saved successfully");
+        showBrandedAlert({
+          title: "seiGEN Commerce",
+          message: "Saved successfully.",
+          type: "success",
+        });
       } catch (err) {
         console.error("Failed to submit approval request.");
-        alert(err instanceof Error ? err.message : "Save failed");
+        showBrandedAlert({
+          title: "seiGEN Commerce",
+          message: err instanceof Error ? err.message : "Save failed",
+          type: "error",
+        });
       }
     }
   };
@@ -746,10 +1159,18 @@ export const SectorCatalogueGenerator: React.FC = () => {
     try {
       await catalogueService.redeployCatalogue(id);
       refreshHistory();
-      alert("Saved successfully");
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message: "Saved successfully.",
+        type: "success",
+      });
     } catch (err) {
       console.error(err);
-      alert(err instanceof Error ? err.message : "Save failed");
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message: err instanceof Error ? err.message : "Save failed",
+        type: "error",
+      });
     }
   };
 
@@ -757,27 +1178,37 @@ export const SectorCatalogueGenerator: React.FC = () => {
     try {
       await catalogueService.archiveCatalogue(id);
       refreshHistory();
-      alert("Saved successfully");
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message: "Saved successfully.",
+        type: "success",
+      });
     } catch (err) {
       console.error(err);
-      alert(err instanceof Error ? err.message : "Save failed");
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message: err instanceof Error ? err.message : "Save failed",
+        type: "error",
+      });
     }
   };
 
   const handleDelete = async (id: string) => {
-    if (
-      confirm(
-        "Permanently delete this catalogue record? This cannot be undone.",
-      )
-    ) {
-      try {
-        await catalogueService.deleteCatalogue(id);
-        refreshHistory();
-        alert("Saved successfully");
-      } catch (err) {
-        console.error(err);
-        alert(err instanceof Error ? err.message : "Save failed");
-      }
+    try {
+      await catalogueService.deleteCatalogue(id);
+      refreshHistory();
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message: "Saved successfully.",
+        type: "success",
+      });
+    } catch (err) {
+      console.error(err);
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message: err instanceof Error ? err.message : "Save failed",
+        type: "error",
+      });
     }
   };
 
@@ -809,15 +1240,22 @@ export const SectorCatalogueGenerator: React.FC = () => {
       });
       focusMainContent();
     } else {
-      alert(
-        "HTML content not available for this older record. Please regenerate.",
-      );
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message:
+          "HTML content not available for this older record. Please regenerate.",
+        type: "warning",
+      });
     }
   };
 
   const handleCopyHtml = async (html: string) => {
     await navigator.clipboard.writeText(html);
-    alert("Catalogue HTML copied to clipboard.");
+    showBrandedAlert({
+      title: "seiGEN Commerce",
+      message: "Catalogue HTML copied to clipboard.",
+      type: "success",
+    });
   };
 
   const toggleVendorSelection = (vendorId: string) => {
@@ -910,6 +1348,28 @@ export const SectorCatalogueGenerator: React.FC = () => {
               )}
             </PrimaryButton>
           ))
+        }
+      />
+
+      <BrandedAlertModal
+        {...alertConfig}
+        onClose={() => setAlertConfig({ ...alertConfig, isOpen: false })}
+      />
+
+      <ConfirmDialog
+        isOpen={confirmConfig.isOpen}
+        title="seiGEN Commerce"
+        message={confirmConfig.message}
+        confirmLabel={confirmConfig.confirmLabel}
+        cancelLabel="Cancel"
+        variant={confirmConfig.variant}
+        onConfirm={() => {
+          const action = confirmConfig.onConfirm;
+          setConfirmConfig((prev) => ({ ...prev, isOpen: false }));
+          action();
+        }}
+        onCancel={() =>
+          setConfirmConfig((prev) => ({ ...prev, isOpen: false }))
         }
       />
 
@@ -1296,9 +1756,12 @@ export const SectorCatalogueGenerator: React.FC = () => {
                       if (permissionService.canEdit("createCatalogue"))
                         setLastGenerated(null);
                       else
-                        alert(
-                          "Permission denied to clear generated catalogue.",
-                        );
+                        showBrandedAlert({
+                          title: "seiGEN Commerce",
+                          message:
+                            "Permission denied to clear generated catalogue.",
+                          type: "error",
+                        });
                     }}
                     size="sm"
                     disabled={!permissionService.canEdit("createCatalogue")}
@@ -1569,9 +2032,12 @@ export const SectorCatalogueGenerator: React.FC = () => {
                                 )
                                   handleArchive(cat.id);
                                 else
-                                  alert(
-                                    "Permission denied to archive catalogues.",
-                                  );
+                                  showBrandedAlert({
+                                    title: "seiGEN Commerce",
+                                    message:
+                                      "Permission denied to archive catalogues.",
+                                    type: "error",
+                                  });
                               }}
                               className={`p-1.5 text-stone-400 border border-stone-200 hover:text-brand-charcoal transition-colors bg-white ${!permissionService.canDelete("createCatalogue") ? "opacity-50 cursor-not-allowed" : ""}`}
                               title="Archive"
@@ -1582,12 +2048,22 @@ export const SectorCatalogueGenerator: React.FC = () => {
                               onClick={() => {
                                 if (
                                   permissionService.canDelete("createCatalogue")
-                                )
-                                  handleDelete(cat.id);
-                                else
-                                  alert(
-                                    "Permission denied to delete catalogues.",
-                                  );
+                                ) {
+                                  setConfirmConfig({
+                                    isOpen: true,
+                                    message:
+                                      "Permanently delete this catalogue record? This cannot be undone.",
+                                    confirmLabel: "Delete Catalogue",
+                                    variant: "danger",
+                                    onConfirm: () => void handleDelete(cat.id),
+                                  });
+                                } else
+                                  showBrandedAlert({
+                                    title: "seiGEN Commerce",
+                                    message:
+                                      "Permission denied to delete catalogues.",
+                                    type: "error",
+                                  });
                               }}
                               className={`p-1.5 text-stone-400 border border-stone-200 hover:text-red-500 hover:border-red-200 transition-colors bg-white ${!permissionService.canDelete("createCatalogue") ? "opacity-50 cursor-not-allowed" : ""}`}
                               title="Delete"
@@ -1644,6 +2120,117 @@ export const SectorCatalogueGenerator: React.FC = () => {
                   </p>
                 </div>
               )}
+            </div>
+          </DataPanel>
+
+          <DataPanel title="Deployment Summary">
+            <div className="p-6 space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-3 border border-stone-200 bg-white">
+                  <p className="text-[8px] font-extrabold uppercase text-stone-400">
+                    Included
+                  </p>
+                  <p className="text-lg font-black text-brand-charcoal">
+                    {allSelectedProducts.length}
+                  </p>
+                </div>
+                <div className="p-3 border border-orange-200 bg-orange-50">
+                  <p className="text-[8px] font-extrabold uppercase text-orange-700">
+                    Excluded
+                  </p>
+                  <p className="text-lg font-black text-orange-900">
+                    {entitlementExcludedProducts.length}
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+                {entitlementSummaries.map((summary) => (
+                  <div
+                    key={summary.vendorId}
+                    className="border border-stone-200 bg-white p-3"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-[10px] font-black uppercase text-brand-charcoal">
+                          {summary.vendorName}
+                        </p>
+                        <p className="text-[8px] font-bold uppercase text-stone-400">
+                          {summary.planName}
+                        </p>
+                      </div>
+                      <span
+                        className={`text-[8px] font-black uppercase px-2 py-1 border ${
+                          summary.excludedProducts > 0
+                            ? "border-orange-300 bg-orange-50 text-orange-800"
+                            : summary.creditUsed > 0 || summary.overrideUsed
+                              ? "border-amber-300 bg-amber-50 text-amber-800"
+                              : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                        }`}
+                      >
+                        {summary.excludedProducts > 0
+                          ? "Auto-dropped"
+                          : summary.creditUsed > 0
+                            ? "Credit used"
+                            : summary.overrideUsed
+                              ? "Override"
+                              : "Clear"}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 mt-3 text-[9px] font-bold uppercase text-stone-500">
+                      <span>Selected: {summary.selectedProducts}</span>
+                      <span>Allowed: {summary.allowedProducts}</span>
+                      <span>Included: {summary.includedProducts}</span>
+                      <span>Excluded: {summary.excludedProducts}</span>
+                      <span>Overage Due: {summary.overageDue.toFixed(2)}</span>
+                      <span>Credit Used: {summary.creditUsed.toFixed(2)}</span>
+                      <span className="col-span-2">
+                        Remaining Credit: {summary.remainingCredit.toFixed(2)}
+                      </span>
+                    </div>
+                    {summary.excludedProducts > 0 && (
+                      <p className="mt-3 text-[9px] font-bold leading-relaxed text-orange-900">
+                        {summary.vendorName}: {summary.excludedProducts} products
+                        excluded because {summary.planName} allows{" "}
+                        {summary.allowedProducts} and no credit was available.
+                      </p>
+                    )}
+                    {summary.overageQuantity > 0 && (
+                      <p className="mt-2 text-[8px] font-bold uppercase text-stone-400">
+                        {summary.upgradeRecommendation}
+                      </p>
+                    )}
+                  </div>
+                ))}
+                {entitlementSummaries.length === 0 && (
+                  <p className="text-[10px] font-bold uppercase text-stone-400">
+                    Select vendors to calculate entitlement.
+                  </p>
+                )}
+              </div>
+
+              {canOverridePlanLimits &&
+                entitlementSummaries.some((s) => s.overageQuantity > 0) && (
+                  <div className="border border-stone-300 bg-stone-50 p-3 space-y-3">
+                    <label className="flex items-center gap-2 text-[10px] font-black uppercase text-brand-charcoal">
+                      <input
+                        type="checkbox"
+                        checked={overridePlanLimits}
+                        onChange={(event) =>
+                          setOverridePlanLimits(event.target.checked)
+                        }
+                      />
+                      Override plan limits
+                    </label>
+                    <textarea
+                      value={overrideReason}
+                      onChange={(event) => setOverrideReason(event.target.value)}
+                      placeholder="Required reason for finance/admin audit"
+                      className="w-full border border-stone-200 bg-white p-2 text-[10px] font-bold outline-none focus:border-brand-orange"
+                      rows={3}
+                    />
+                  </div>
+                )}
             </div>
           </DataPanel>
 

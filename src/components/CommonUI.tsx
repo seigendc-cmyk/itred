@@ -282,19 +282,19 @@ export const TablePanel: React.FC<TablePanelProps> = ({
 
 interface ConfirmDialogProps {
   isOpen: boolean;
-  title: string;
+  title?: string;
   message: string;
   confirmLabel?: string;
   cancelLabel?: string;
   onConfirm: () => void;
   onCancel: () => void;
-  variant?: "danger" | "warning" | "info";
+  variant?: "danger" | "warning" | "info" | "success";
   children?: React.ReactNode;
 }
 
 export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   isOpen,
-  title,
+  title = "seiGEN Commerce",
   message,
   confirmLabel = "Confirm",
   cancelLabel = "Cancel",
@@ -305,31 +305,42 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
 }) => {
   if (!isOpen) return null;
 
-  const colors = {
-    danger: "bg-red-700 border-red-800",
-    warning: "bg-brand-orange border-orange-700",
-    info: "bg-brand-charcoal border-stone-800",
-  };
+  const confirmClass =
+    variant === "danger" || variant === "warning"
+      ? "bg-red-700 hover:bg-red-800 border-red-800"
+      : "bg-brand-orange hover:bg-orange-600 border-orange-600";
+  const iconClass =
+    variant === "danger" || variant === "warning"
+      ? "bg-red-50 text-red-700 border-red-100"
+      : "bg-orange-50 text-brand-orange border-orange-100";
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-brand-charcoal/40 backdrop-blur-sm">
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="bg-white max-w-sm w-full border border-stone-200 shadow-2xl overflow-hidden"
+        className="bg-white max-w-sm w-full border-t-4 border-brand-orange shadow-2xl overflow-hidden rounded-none"
       >
-        <div className="p-6">
+        <div className="bg-brand-charcoal px-6 py-4 flex items-center justify-between">
+          <h3 className="text-sm font-black uppercase tracking-tight text-white">
+            {title || "seiGEN Commerce"}
+          </h3>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="text-white/60 hover:text-white transition-colors"
+            aria-label="Close dialog"
+          >
+            <X size={16} />
+          </button>
+        </div>
+        <div className="p-6 bg-white">
           <div className="flex items-start gap-4">
-            <div
-              className={`p-2 shrink-0 ${variant === "danger" ? "bg-red-50 text-red-600" : "bg-orange-50 text-brand-orange"}`}
-            >
+            <div className={`p-2 shrink-0 border ${iconClass}`}>
               <AlertTriangle size={20} />
             </div>
             <div>
-              <h3 className="text-sm font-bold uppercase tracking-tight text-brand-charcoal mb-1">
-                {title}
-              </h3>
-              <p className="text-xs text-stone-500 leading-relaxed">
+              <p className="text-sm text-stone-700 leading-relaxed">
                 {message}
               </p>
               {children && <div className="mt-4">{children}</div>}
@@ -338,14 +349,16 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
         </div>
         <div className="bg-stone-50 p-4 flex justify-end gap-2 border-t border-stone-100">
           <button
+            type="button"
             onClick={onCancel}
-            className="px-4 py-2 text-[10px] uppercase font-bold text-stone-400 hover:text-stone-600"
+            className="px-4 py-2 bg-white border border-stone-200 text-[10px] uppercase font-bold text-stone-600 hover:bg-stone-100 transition-colors"
           >
             {cancelLabel}
           </button>
           <button
+            type="button"
             onClick={onConfirm}
-            className={`px-4 py-2 text-[10px] uppercase font-bold text-white shadow-sm ${colors[variant]}`}
+            className={`px-4 py-2 border text-[10px] uppercase font-bold text-white shadow-sm transition-colors ${confirmClass}`}
           >
             {confirmLabel}
           </button>
@@ -449,3 +462,43 @@ export class ErrorBoundary extends React.Component<
     return this.props.children;
   }
 }
+
+export interface BrandedAlertModalProps {
+  isOpen: boolean;
+  title?: string;
+  message: string;
+  type?: "success" | "error" | "warning" | "info";
+  onClose: () => void;
+}
+
+export const BrandedAlertModal: React.FC<BrandedAlertModalProps> = ({
+  isOpen,
+  title = "seiGEN Commerce",
+  message,
+  type = "success",
+  onClose,
+}) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-brand-charcoal/40 backdrop-blur-sm">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="bg-white max-w-sm w-full border-t-4 border-brand-orange shadow-2xl overflow-hidden rounded-none"
+      >
+        <div className="p-6">
+          <h3 className="text-sm font-bold uppercase tracking-tight text-brand-charcoal mb-2">
+            {title}
+          </h3>
+          <p className="text-sm text-stone-600 leading-relaxed">{message}</p>
+        </div>
+        <div className="bg-stone-50 p-4 flex justify-end border-t border-stone-100">
+          <PrimaryButton onClick={onClose} className="px-6 py-2 text-xs">
+            OK
+          </PrimaryButton>
+        </div>
+      </motion.div>
+    </div>
+  );
+};

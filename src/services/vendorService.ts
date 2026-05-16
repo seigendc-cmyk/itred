@@ -9,8 +9,25 @@ import { getStorageAdapter } from "./storageService.ts";
 import { analyticsService } from "./analyticsService.ts";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { storage } from "../lib/firebase.ts";
+import { notificationService } from "./notificationService.ts";
+import { settingsService } from "./settingsService.ts";
 
 const VENDORS_KEY = "itred_vendors";
+
+const dayMs = 24 * 60 * 60 * 1000;
+const dateKey = (value?: string) => {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString().split("T")[0];
+};
+
+const assignedRpnId = (vendor: Vendor) =>
+  vendor.rpnId ||
+  vendor.assignedRPNId ||
+  vendor.assignedStaffId ||
+  vendor.onboardedByStaffId ||
+  "";
 
 export const vendorService = {
   getVendors: async (): Promise<Vendor[]> => {
@@ -175,5 +192,78 @@ export const vendorService = {
     const storageRef = ref(storage, `vendor-assets/${vendorId}/banner.webp`);
     await uploadBytes(storageRef, file, { contentType: "image/webp" });
     return getDownloadURL(storageRef);
+  },
+
+  evaluateSubscriptionRpnAlerts: async (): Promise<void> => {
+    const [vendors, settings] = await Promise.all([
+      vendorService.getVendors(),
+      settingsService.getSettings(),
+    ]);
+    const rpnSettings = settings.rpnPerformanceSettings;
+    const subscriptionDueWarningDays =
+      rpnSettings?.subscriptionDueWarningDays ?? 3;
+    const subscriptionOverdueEscalationDays =
+      rpnSettings?.subscriptionOverdueEscalationDays ?? 2;
+    const today = new Date();
+    const todayStr = today.toISOString().split("T")[0];
+
+    await Promise.all(
+      vendors
+        .filter((vendor) =>
+          ["active", "due", "overdue", "trial", "paid"].includes(
+            String(vendor.subscriptionStatus || ""),
+          ),
+        )
+        .map(async (vendor) => {
+          const dueDateKey = dateKey(vendor.subscriptionDueDate);
+          if (!dueDateKey) return;
+
+          const rpnId = assignedRpnId(vendor);
+          const dueDate = new Date(dueDateKey);
+          const diffDays = Math.ceil(
+            (dueDate.getTime() - new Date(todayStr).getTime()) / dayMs,
+          );
+          const overdueDays = Math.max(0, -diffDays);
+
+          if (
+            rpnId &&
+            diffDays >= 0 &&
+            diffDays <= subscriptionDueWarningDays
+          ) {
+            await notificationService.createNotification({
+              type: "subscription_due",
+              priority: diffDays === 0 ? "high" : "medium",
+              title: "Vendor Subscription Due Soon",
+              message: `${vendor.name} subscription is due on ${dueDateKey}. Follow up before expiry.`,
+              recordType: "vendor_subscription",
+              recordId: vendor.id,
+              assignedToStaffId: rpnId,
+              assignedToName: vendor.rpnName,
+              targetRole: "Collections Desk",
+              dedupeKey: `subscription_due:${vendor.id}:${dueDateKey}`,
+            });
+          }
+
+          if (overdueDays >= subscriptionOverdueEscalationDays) {
+            const overdueStage =
+              overdueDays >= subscriptionOverdueEscalationDays + 7
+                ? "critical"
+                : "manager";
+            await notificationService.createNotification({
+              type: "subscription_overdue",
+              priority: overdueStage === "critical" ? "critical" : "high",
+              title: "Assigned Vendor Overdue",
+              message: `${vendor.name} is ${overdueDays} days overdue. RPN follow-up required; mark as retention risk.`,
+              recordType: "vendor_subscription",
+              recordId: vendor.id,
+              assignedToStaffId: overdueStage === "critical" ? undefined : rpnId,
+              assignedToName: overdueStage === "critical" ? undefined : vendor.rpnName,
+              targetRole:
+                overdueStage === "critical" ? "Admin" : "RPN Manager",
+              dedupeKey: `subscription_overdue:${vendor.id}:${dueDateKey}:${overdueStage}`,
+            });
+          }
+        }),
+    );
   },
 };

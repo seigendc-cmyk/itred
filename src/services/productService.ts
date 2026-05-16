@@ -3,223 +3,542 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Product, ProductStatus } from "../types.ts";
+import {
+  MasterProduct,
+  Product,
+  ProductStatus,
+  Vendor,
+  VendorProductOffer,
+  VendorProductStockStatus,
+} from "../types.ts";
 import { getStorageAdapter } from "./storageService.ts";
 import { asArray } from "../utils/safeData.ts";
 import { analyticsService } from "./analyticsService.ts";
 
-const PRODUCTS_KEY = "itred_products";
+const LEGACY_PRODUCTS_KEY = "itred_products";
+const MASTER_PRODUCTS_KEY = "itred_master_products";
+const VENDOR_OFFERS_KEY = "itred_vendor_product_offers";
+const MIGRATION_KEY = "itred_product_master_offer_migrated_v1";
+const VENDORS_KEY = "itred_vendors";
+
+const nowIso = () => new Date().toISOString();
+const normalize = (value?: string) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+const slug = (value?: string) => normalize(value).replace(/\s+/g, "-");
+
+const searchableTextFor = (product: Partial<MasterProduct>) =>
+  [
+    product.productName,
+    product.brand,
+    product.category,
+    product.sector,
+    product.description,
+    product.barcode,
+    product.standardSku,
+    ...(product.tags || []),
+    ...(product.keywords || []),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+const stockStatusFromQuantity = (
+  quantity: number,
+  legacyStatus?: ProductStatus,
+): VendorProductStockStatus => {
+  if (legacyStatus === "out_of_stock" || quantity <= 0) return "out_of_stock";
+  if (quantity <= 5) return "low_stock";
+  return "in_stock";
+};
+
+const canonicalMasterKey = (product: Partial<Product>) => {
+  if (product.productCode) return `barcode:${normalize(product.productCode)}`;
+  return [
+    "name",
+    slug(product.name),
+    slug(product.brand),
+    slug(product.category),
+    slug(product.sector),
+  ].join(":");
+};
+
+const makeMasterFromLegacy = (product: Product): MasterProduct => {
+  const now = product.createdAt || nowIso();
+  const productName = product.name || "Unnamed Product";
+  const master: MasterProduct = {
+    id: `MP-${canonicalMasterKey(product).replace(/[^a-z0-9-]/gi, "-").toUpperCase()}`.slice(
+      0,
+      80,
+    ),
+    productName,
+    brand: product.brand || "",
+    category: product.category || "",
+    sector: product.sector || "",
+    description: product.description || "",
+    barcode: product.productCode || "",
+    standardSku: product.sku || "",
+    tags: product.tags || [],
+    keywords: [
+      product.model,
+      product.unitOfMeasure,
+      ...(product.tags || []),
+    ].filter(Boolean) as string[],
+    imageUrl: product.imageUrl,
+    additionalImages: [],
+    unit: product.unitOfMeasure || "Each",
+    searchableText: "",
+    status:
+      product.status === "out_of_stock" ? "active" : product.status || "active",
+    createdAt: now,
+    updatedAt: product.updatedAt || now,
+  };
+  master.searchableText = searchableTextFor(master);
+  return master;
+};
+
+const makeOfferFromLegacy = (product: Product): VendorProductOffer => ({
+  id: product.offerId || `VPO-${product.id}`,
+  vendorId: product.vendorId,
+  productId: product.productId || makeMasterFromLegacy(product).id,
+  branchId: product.branchId,
+  sellingPrice: Number(product.sellingPrice) || 0,
+  stockQuantity: Number(product.stockQuantity) || 0,
+  stockStatus: stockStatusFromQuantity(
+    Number(product.stockQuantity) || 0,
+    product.status,
+  ),
+  vendorSku: product.sku || "",
+  vendorProductImage: product.imageUrl,
+  publishToCatalogue: product.publishToCatalogue !== false,
+  deliveryAvailable: product.deliveryAvailable !== false,
+  featured: false,
+  notes: product.producerNotes || "",
+  active: product.status !== "hidden" && product.status !== "discontinued",
+  createdAt: product.createdAt || nowIso(),
+  updatedAt: product.updatedAt || nowIso(),
+});
+
+const joinProduct = (
+  master: MasterProduct,
+  offer: VendorProductOffer,
+  vendors: Vendor[],
+): Product => {
+  const vendor = vendors.find((v) => v.id === offer.vendorId);
+  const branch = vendor?.branches?.find((b) => b.id === offer.branchId);
+  const imageUrl = offer.vendorProductImage || master.imageUrl || "";
+  const stockQuantity = Number(offer.stockQuantity) || 0;
+  const status: ProductStatus =
+    !offer.active || master.status === "hidden"
+      ? "hidden"
+      : offer.stockStatus === "out_of_stock"
+        ? "out_of_stock"
+        : master.status || "active";
+
+  return {
+    id: offer.id,
+    offerId: offer.id,
+    productId: master.id,
+    vendorId: offer.vendorId,
+    vendorName: vendor?.tradingName || vendor?.name || "",
+    branchId: offer.branchId || "",
+    branchName: branch?.name || "",
+    sector: master.sector || vendor?.sector || "",
+    category: master.category || "",
+    name: master.productName,
+    sku: offer.vendorSku || master.standardSku || "",
+    productCode: master.barcode || "",
+    brand: master.brand || "",
+    model: "",
+    description: master.description || "",
+    tags: [...(master.tags || []), ...(master.keywords || [])],
+    unitOfMeasure: master.unit || "Each",
+    sellingPrice: Number(offer.discountPrice || offer.sellingPrice) || 0,
+    oldPrice: offer.discountPrice ? offer.sellingPrice : undefined,
+    stockQuantity,
+    minStockAlert: 5,
+    locationDisplayText:
+      branch?.suburb ||
+      branch?.address ||
+      vendor?.suburb ||
+      vendor?.cityTown ||
+      "",
+    imageUrl,
+    imageStatus: imageUrl ? "uploaded" : "missing",
+    source: "backend entered",
+    enteredByStaffId: "",
+    lastUpdatedBy: "",
+    status,
+    publishToCatalogue: offer.publishToCatalogue,
+    createdAt: offer.createdAt,
+    updatedAt: offer.updatedAt,
+    deliveryAvailable: offer.deliveryAvailable,
+    producerNotes: offer.notes,
+  };
+};
+
+const loadVendors = async (): Promise<Vendor[]> => {
+  const data = await getStorageAdapter().getItem<Vendor[]>(VENDORS_KEY);
+  return asArray<Vendor>(data);
+};
 
 export const productService = {
-  getProducts: async (): Promise<Product[]> => {
-    try {
-      const data = await getStorageAdapter().getItem<Product[]>(PRODUCTS_KEY);
-      return asArray<Product>(data);
-    } catch (error) {
-      console.warn("Firebase Error: Failed to get products", error);
-      return [];
+  async migrateLegacyProducts(): Promise<void> {
+    const alreadyMigrated =
+      await getStorageAdapter().getItem<boolean>(MIGRATION_KEY);
+    const masters = asArray<MasterProduct>(
+      await getStorageAdapter().getItem<MasterProduct[]>(MASTER_PRODUCTS_KEY),
+    );
+    const offers = asArray<VendorProductOffer>(
+      await getStorageAdapter().getItem<VendorProductOffer[]>(VENDOR_OFFERS_KEY),
+    );
+    const legacyProducts = asArray<Product>(
+      await getStorageAdapter().getItem<Product[]>(LEGACY_PRODUCTS_KEY),
+    );
+
+    if (alreadyMigrated && (masters.length > 0 || legacyProducts.length === 0)) {
+      return;
     }
+
+    const masterByKey = new Map<string, MasterProduct>();
+    masters.forEach((master) => {
+      const key =
+        master.barcode?.trim()
+          ? `barcode:${normalize(master.barcode)}`
+          : [
+              "name",
+              slug(master.productName),
+              slug(master.brand),
+              slug(master.category),
+              slug(master.sector),
+            ].join(":");
+      masterByKey.set(key, master);
+    });
+
+    const nextMasters = [...masters];
+    const nextOffers = [...offers];
+    const offerIds = new Set(nextOffers.map((offer) => offer.id));
+
+    legacyProducts.forEach((legacy) => {
+      if (!legacy.vendorId) return;
+      const key = canonicalMasterKey(legacy);
+      let master = masterByKey.get(key);
+      if (!master) {
+        master = makeMasterFromLegacy(legacy);
+        masterByKey.set(key, master);
+        nextMasters.push(master);
+      }
+      const offer = {
+        ...makeOfferFromLegacy({ ...legacy, productId: master.id }),
+        productId: master.id,
+      };
+      if (!offerIds.has(offer.id)) {
+        offerIds.add(offer.id);
+        nextOffers.push(offer);
+      }
+    });
+
+    await getStorageAdapter().setItem(MASTER_PRODUCTS_KEY, nextMasters);
+    await getStorageAdapter().setItem(VENDOR_OFFERS_KEY, nextOffers);
+    await getStorageAdapter().setItem(MIGRATION_KEY, true);
   },
 
-  saveProducts: async (products: Product[]): Promise<void> => {
-    await getStorageAdapter().setItem(PRODUCTS_KEY, products);
+  async getMasterProducts(): Promise<MasterProduct[]> {
+    await productService.migrateLegacyProducts();
+    const data =
+      await getStorageAdapter().getItem<MasterProduct[]>(MASTER_PRODUCTS_KEY);
+    return asArray<MasterProduct>(data);
   },
 
-  getProductById: async (id: string): Promise<Product | undefined> => {
-    const products = await productService.getProducts();
-    return products.find((p) => p.id === id);
+  async saveMasterProduct(product: MasterProduct): Promise<void> {
+    const products = await productService.getMasterProducts();
+    const cleanProduct: MasterProduct = {
+      ...product,
+      tags: product.tags || [],
+      keywords: product.keywords || [],
+      searchableText: searchableTextFor(product),
+      updatedAt: nowIso(),
+      createdAt: product.createdAt || nowIso(),
+    };
+    const index = products.findIndex((p) => p.id === cleanProduct.id);
+    if (index >= 0) products[index] = cleanProduct;
+    else products.push(cleanProduct);
+    await getStorageAdapter().setItem(MASTER_PRODUCTS_KEY, products);
+    await analyticsService.logEvent({
+      eventType: index >= 0 ? "PRODUCT_UPDATED" : "PRODUCT_CREATED",
+      actorType: "admin",
+      actorName: "Product Library",
+      productId: cleanProduct.id,
+      productName: cleanProduct.productName,
+      details: { layer: "master_product" },
+    });
   },
 
-  saveProduct: async (product: Product): Promise<void> => {
-    const products = await productService.getProducts();
-    const index = products.findIndex((p) => p.id === product.id);
-    const oldProduct = index >= 0 ? products[index] : null;
-
-    if (index >= 0) {
-      products[index] = { ...product, updatedAt: new Date().toISOString() };
-
-      // Check for farm produce specific events
-      if (product.isFarmProduce) {
-        await analyticsService.logEvent({
-          eventType: "FARM_PRODUCE_UPDATED",
-          actorType: "rpn",
-          actorName: "Field RPN",
-          productId: product.id,
-          productName: product.name,
-          vendorId: product.vendorId,
-          details: {
-            cropType: product.cropType,
-            harvestStatus: product.harvestStatus,
-            quantityAvailable: product.quantityAvailable,
-          },
-        });
-
-        // Check for availability changes
-        if (
-          oldProduct &&
-          oldProduct.availabilityDate !== product.availabilityDate
-        ) {
-          await analyticsService.logEvent({
-            eventType: "FARM_PRODUCE_AVAILABILITY_CHANGED",
-            actorType: "rpn",
-            actorName: "Field RPN",
-            productId: product.id,
-            productName: product.name,
-            vendorId: product.vendorId,
-            details: {
-              oldDate: oldProduct.availabilityDate,
-              newDate: product.availabilityDate,
-              cropType: product.cropType,
-            },
-          });
-        }
-      } else {
-        await analyticsService.logEvent({
-          eventType: "PRODUCT_UPDATED",
-          actorType: "rpn",
-          actorName: "Field RPN",
-          productId: product.id,
-          productName: product.name,
-          vendorId: product.vendorId,
-          details: { fields: ["generic_update"] },
-        });
-      }
-
-      if (oldProduct && oldProduct.sellingPrice !== product.sellingPrice) {
-        await analyticsService.logEvent({
-          eventType: "PRODUCT_PRICE_UPDATED",
-          actorType: "rpn",
-          actorName: "Field RPN",
-          productId: product.id,
-          productName: product.name,
-          vendorId: product.vendorId,
-          details: {
-            oldPrice: oldProduct.sellingPrice,
-            newPrice: product.sellingPrice,
-          },
-        });
-      }
-
-      if (
-        oldProduct &&
-        oldProduct.imageUrl !== product.imageUrl &&
-        product.imageUrl
-      ) {
-        await analyticsService.logEvent({
-          eventType: "PRODUCT_IMAGE_UPLOADED",
-          actorType: "rpn",
-          actorName: "Field RPN",
-          productId: product.id,
-          productName: product.name,
-          vendorId: product.vendorId,
-          details: { imageStatus: "uploaded" },
-        });
-      }
-    } else {
-      products.push({
-        ...product,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      });
-
-      if (product.isFarmProduce) {
-        await analyticsService.logEvent({
-          eventType: "FARM_PRODUCE_CREATED",
-          actorType: "rpn",
-          actorName: "Field RPN",
-          productId: product.id,
-          productName: product.name,
-          vendorId: product.vendorId,
-          details: {
-            cropType: product.cropType,
-            harvestStatus: product.harvestStatus,
-            quantityAvailable: product.quantityAvailable,
-          },
-        });
-      } else {
-        await analyticsService.logEvent({
-          eventType: "PRODUCT_CREATED",
-          actorType: "rpn",
-          actorName: "Field RPN",
-          productId: product.id,
-          productName: product.name,
-          vendorId: product.vendorId,
-          details: { name: product.name, sku: product.sku },
-        });
-      }
-
-      if (product.imageUrl) {
-        await analyticsService.logEvent({
-          eventType: "PRODUCT_IMAGE_UPLOADED",
-          actorType: "rpn",
-          actorName: "Field RPN",
-          productId: product.id,
-          productName: product.name,
-          vendorId: product.vendorId,
-          details: { imageStatus: "initial_upload" },
-        });
-      }
-    }
-    await productService.saveProducts(products);
-  },
-
-  deleteProduct: async (id: string): Promise<void> => {
-    const products = (await productService.getProducts()).filter(
+  async deleteMasterProduct(id: string): Promise<void> {
+    const masters = (await productService.getMasterProducts()).filter(
       (p) => p.id !== id,
     );
-    await productService.saveProducts(products);
+    await getStorageAdapter().setItem(MASTER_PRODUCTS_KEY, masters);
   },
 
-  getProductsByVendor: async (vendorId: string): Promise<Product[]> => {
+  async getVendorProductOffers(): Promise<VendorProductOffer[]> {
+    await productService.migrateLegacyProducts();
+    const data =
+      await getStorageAdapter().getItem<VendorProductOffer[]>(VENDOR_OFFERS_KEY);
+    return asArray<VendorProductOffer>(data);
+  },
+
+  async getOffersByVendor(vendorId: string): Promise<VendorProductOffer[]> {
+    const offers = await productService.getVendorProductOffers();
+    return offers.filter((offer) => offer.vendorId === vendorId);
+  },
+
+  async saveVendorProductOffer(offer: VendorProductOffer): Promise<void> {
+    const offers = await productService.getVendorProductOffers();
+    const normalizedOffer: VendorProductOffer = {
+      ...offer,
+      stockStatus:
+        offer.stockStatus ||
+        stockStatusFromQuantity(Number(offer.stockQuantity) || 0),
+      active: offer.active !== false,
+      publishToCatalogue: offer.publishToCatalogue !== false,
+      deliveryAvailable: offer.deliveryAvailable !== false,
+      featured: !!offer.featured,
+      createdAt: offer.createdAt || nowIso(),
+      updatedAt: nowIso(),
+    };
+    const index = offers.findIndex((o) => o.id === normalizedOffer.id);
+    if (index >= 0) offers[index] = normalizedOffer;
+    else offers.push(normalizedOffer);
+    await getStorageAdapter().setItem(VENDOR_OFFERS_KEY, offers);
+    await analyticsService.logEvent({
+      eventType: index >= 0 ? "PRODUCT_UPDATED" : "PRODUCT_CREATED",
+      actorType: "admin",
+      actorName: "Vendor Offer Desk",
+      productId: normalizedOffer.productId,
+      vendorId: normalizedOffer.vendorId,
+      details: { layer: "vendor_product_offer" },
+    });
+  },
+
+  async deleteVendorProductOffer(id: string): Promise<void> {
+    const offers = (await productService.getVendorProductOffers()).filter(
+      (offer) => offer.id !== id,
+    );
+    await getStorageAdapter().setItem(VENDOR_OFFERS_KEY, offers);
+  },
+
+  async getProducts(): Promise<Product[]> {
+    await productService.migrateLegacyProducts();
+    const [masters, offers, vendors] = await Promise.all([
+      productService.getMasterProducts(),
+      productService.getVendorProductOffers(),
+      loadVendors(),
+    ]);
+    const masterById = new Map(masters.map((master) => [master.id, master]));
+    return offers
+      .map((offer) => {
+        const master = masterById.get(offer.productId);
+        return master ? joinProduct(master, offer, vendors) : null;
+      })
+      .filter(Boolean) as Product[];
+  },
+
+  async getProductById(id: string): Promise<Product | undefined> {
+    const products = await productService.getProducts();
+    return products.find((p) => p.id === id || p.productId === id);
+  },
+
+  async saveProduct(product: Product): Promise<void> {
+    const masters = await productService.getMasterProducts();
+    const existingMaster = product.productId
+      ? masters.find((m) => m.id === product.productId)
+      : undefined;
+    const master = existingMaster || makeMasterFromLegacy(product);
+    const mergedMaster: MasterProduct = {
+      ...master,
+      productName: product.name || master.productName,
+      brand: product.brand || master.brand,
+      category: product.category || master.category,
+      sector: product.sector || master.sector,
+      description: product.description || master.description,
+      barcode: product.productCode || master.barcode,
+      standardSku: product.sku || master.standardSku,
+      tags: product.tags || master.tags || [],
+      imageUrl: product.imageUrl || master.imageUrl,
+      unit: product.unitOfMeasure || master.unit,
+      status:
+        product.status === "out_of_stock" ? master.status || "active" : product.status,
+    };
+    await productService.saveMasterProduct(mergedMaster);
+    if (product.vendorId) {
+      await productService.saveVendorProductOffer({
+        ...makeOfferFromLegacy({ ...product, productId: mergedMaster.id }),
+        id: product.offerId || product.id || `VPO-${Date.now()}`,
+        productId: mergedMaster.id,
+      });
+    }
+  },
+
+  async deleteProduct(id: string): Promise<void> {
+    await productService.deleteVendorProductOffer(id);
+  },
+
+  async getProductsByVendor(vendorId: string): Promise<Product[]> {
     const products = await productService.getProducts();
     return products.filter((p) => p.vendorId === vendorId);
   },
 
-  // Bulk Operations
-  bulkUpdateSectorCategory: async (
+  async bulkUpdateSectorCategory(
     productIds: string[],
     sector: string,
     category: string,
-  ): Promise<void> => {
-    const products = await productService.getProducts();
-    productIds.forEach((id) => {
-      const product = products.find((p) => p.id === id);
-      if (product) {
-        product.sector = sector;
-        product.category = category;
-        product.updatedAt = new Date().toISOString();
-      }
-    });
-    await productService.saveProducts(products);
+  ): Promise<void> {
+    const masters = await productService.getMasterProducts();
+    const ids = new Set(productIds);
+    const updated = masters.map((p) =>
+      ids.has(p.id)
+        ? {
+            ...p,
+            sector,
+            category,
+            searchableText: searchableTextFor({ ...p, sector, category }),
+            updatedAt: nowIso(),
+          }
+        : p,
+    );
+    await getStorageAdapter().setItem(MASTER_PRODUCTS_KEY, updated);
   },
 
-  bulkUpdatePublishStatus: async (
+  async bulkUpdatePublishStatus(
     productIds: string[],
     publish: boolean,
-  ): Promise<void> => {
-    const products = await productService.getProducts();
-    productIds.forEach((id) => {
-      const product = products.find((p) => p.id === id);
-      if (product) {
-        product.publishToCatalogue = publish;
-        product.updatedAt = new Date().toISOString();
-      }
-    });
-    await productService.saveProducts(products);
+  ): Promise<void> {
+    const ids = new Set(productIds);
+    const offers = (await productService.getVendorProductOffers()).map((offer) =>
+      ids.has(offer.id) || ids.has(offer.productId)
+        ? { ...offer, publishToCatalogue: publish, updatedAt: nowIso() }
+        : offer,
+    );
+    await getStorageAdapter().setItem(VENDOR_OFFERS_KEY, offers);
   },
 
-  bulkUpdateStatus: async (
+  async bulkUpdateStatus(
     productIds: string[],
     status: ProductStatus,
-  ): Promise<void> => {
-    const products = await productService.getProducts();
-    productIds.forEach((id) => {
-      const product = products.find((p) => p.id === id);
-      if (product) {
-        product.status = status;
-        product.updatedAt = new Date().toISOString();
+  ): Promise<void> {
+    const ids = new Set(productIds);
+    const masters = (await productService.getMasterProducts()).map((p) =>
+      ids.has(p.id) ? { ...p, status, updatedAt: nowIso() } : p,
+    );
+    await getStorageAdapter().setItem(MASTER_PRODUCTS_KEY, masters);
+  },
+
+  async findDuplicateMasterProducts(input: Partial<MasterProduct>) {
+    const masters = await productService.getMasterProducts();
+    const name = normalize(input.productName);
+    const words = new Set(name.split(" ").filter(Boolean));
+    return masters
+      .filter((product) => product.id !== input.id)
+      .map((product) => {
+        const productName = normalize(product.productName);
+        const exactBarcode =
+          input.barcode && product.barcode && normalize(input.barcode) === normalize(product.barcode);
+        const exactName = name && productName === name;
+        const otherWords = new Set(productName.split(" ").filter(Boolean));
+        const overlap = [...words].filter((word) => otherWords.has(word)).length;
+        const score = exactBarcode
+          ? 100
+          : exactName
+            ? 95
+            : words.size > 0
+              ? Math.round((overlap / Math.max(words.size, otherWords.size)) * 100)
+              : 0;
+        return { product, score };
+      })
+      .filter((match) => match.score >= 55)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 6);
+  },
+
+  async calculateProductCommerceAnalytics() {
+    const [products, offers, vendors] = await Promise.all([
+      productService.getMasterProducts(),
+      productService.getVendorProductOffers(),
+      loadVendors(),
+    ]);
+    const productById = new Map(products.map((product) => [product.id, product]));
+    const vendorById = new Map(vendors.map((vendor) => [vendor.id, vendor]));
+    const vendorsPerProduct: Record<string, number> = {};
+    const stockShortages: Record<string, number> = {};
+    const productPopularity: Record<string, number> = {};
+    const priceVarianceByProduct: Record<
+      string,
+      { min: number; max: number; average: number; spread: number }
+    > = {};
+    const priceVarianceByRegion: Record<string, Record<string, number[]>> = {};
+    const vendorCompetitiveness: Record<string, number> = {};
+
+    const pricesByProduct: Record<string, number[]> = {};
+    offers.forEach((offer) => {
+      const product = productById.get(offer.productId);
+      const vendor = vendorById.get(offer.vendorId);
+      if (!product || !vendor || !offer.active) return;
+      const productName = product.productName;
+      vendorsPerProduct[productName] = (vendorsPerProduct[productName] || 0) + 1;
+      productPopularity[productName] = (productPopularity[productName] || 0) + 1;
+      if (offer.stockStatus === "out_of_stock" || offer.stockQuantity <= 0) {
+        stockShortages[productName] = (stockShortages[productName] || 0) + 1;
       }
+      pricesByProduct[productName] = pricesByProduct[productName] || [];
+      pricesByProduct[productName].push(Number(offer.sellingPrice) || 0);
+
+      const region = vendor.cityTown || vendor.province || "Unspecified";
+      priceVarianceByRegion[region] = priceVarianceByRegion[region] || {};
+      priceVarianceByRegion[region][productName] =
+        priceVarianceByRegion[region][productName] || [];
+      priceVarianceByRegion[region][productName].push(Number(offer.sellingPrice) || 0);
     });
-    await productService.saveProducts(products);
+
+    Object.entries(pricesByProduct).forEach(([productName, prices]) => {
+      const valid = prices.filter((price) => price > 0);
+      if (valid.length === 0) return;
+      const min = Math.min(...valid);
+      const max = Math.max(...valid);
+      const average = Math.round((valid.reduce((sum, price) => sum + price, 0) / valid.length) * 100) / 100;
+      priceVarianceByProduct[productName] = {
+        min,
+        max,
+        average,
+        spread: max - min,
+      };
+    });
+
+    offers.forEach((offer) => {
+      const product = productById.get(offer.productId);
+      if (!product || !offer.active) return;
+      const variance = priceVarianceByProduct[product.productName];
+      if (!variance || !variance.average) return;
+      const price = Number(offer.sellingPrice) || 0;
+      const advantage = variance.average - price;
+      vendorCompetitiveness[offer.vendorId] =
+        (vendorCompetitiveness[offer.vendorId] || 0) + advantage;
+    });
+
+    return {
+      sameProductSoldByManyVendors: vendorsPerProduct,
+      regionalDemand: priceVarianceByRegion,
+      vendorPricingComparison: priceVarianceByProduct,
+      stockShortages,
+      productPopularity,
+      fastestMovingProducts: productPopularity,
+      mostSearchedProducts: productPopularity,
+      priceVarianceByRegion,
+      vendorCompetitiveness,
+    };
   },
 };

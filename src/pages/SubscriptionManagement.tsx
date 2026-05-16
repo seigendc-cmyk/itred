@@ -28,6 +28,7 @@ export const SubscriptionManagement: React.FC = () => {
   const loadData = async () => {
     try {
       const rawVendors = await Promise.resolve(vendorService.getVendors());
+      void vendorService.evaluateSubscriptionRpnAlerts();
       const rawPlans = await Promise.resolve(pricingPlanService.getPlans());
       const rawRpns = await Promise.resolve(rpnService.getAll());
       setVendors(asArray<Vendor>(rawVendors));

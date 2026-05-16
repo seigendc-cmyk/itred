@@ -8,6 +8,24 @@ import { getStorageAdapter } from "./storageService.ts";
 import { SystemSettings } from "../types.ts";
 
 const SETTINGS_KEY = "itred_system_settings";
+const DEFAULT_RPN_PERFORMANCE_SETTINGS = {
+  dailyOnboardingThreshold: 4,
+  weeklyOnboardingThreshold: 20,
+  monthlyOnboardingThreshold: 80,
+  churnWarningPercent: 15,
+  churnWarningRate: 15,
+  recurringVendorRetentionTarget: 85,
+  minimumRecurringRevenueTarget: 0,
+  overdueVendorFollowUpDays: 2,
+  inactiveAssignedVendorDays: 14,
+  minimumCollectionRatePercent: 70,
+  graceDaysBeforeWarning: 3,
+  subscriptionDueWarningDays: 3,
+  subscriptionOverdueEscalationDays: 2,
+  enableThresholdAlerts: true,
+  requireApprovalForThresholdChange: false,
+  updatedAt: new Date().toISOString(),
+};
 
 export const settingsService = {
   getSettings: async (): Promise<SystemSettings> => {
@@ -18,12 +36,17 @@ export const settingsService = {
         enableSessionTimeout: true,
         sessionTimeoutMinutes: 30,
         ...(data || {}),
+        rpnPerformanceSettings: {
+          ...DEFAULT_RPN_PERFORMANCE_SETTINGS,
+          ...((data || {}).rpnPerformanceSettings || {}),
+        },
       };
     } catch (e) {
       console.warn("Failed to get system settings", e);
       return {
         enableSessionTimeout: true,
         sessionTimeoutMinutes: 30,
+        rpnPerformanceSettings: DEFAULT_RPN_PERFORMANCE_SETTINGS,
       };
     }
   },

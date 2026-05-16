@@ -41,7 +41,12 @@ export const permissionService = {
     if (!sessionStr) return false;
     try {
       const session = JSON.parse(sessionStr);
-      return session.role === "Admin" || session.role === "SysAdmin";
+      return (
+        session.role === "Admin" ||
+        session.role === "SysAdmin" ||
+        session.role === "Super Admin" ||
+        session.role === "SuperAdmin"
+      );
     } catch (e) {
       return false;
     }
@@ -146,9 +151,88 @@ export const permissionService = {
     return permissionService.hasActionPermission("notifications.resolve");
   },
 
+  canViewNotifications: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return (
+      permissionService.hasActionPermission("notifications.view") ||
+      permissionService.hasActionPermission("notifications.viewOwn") ||
+      permissionService.hasMenuAccess("notifications")
+    );
+  },
+
+  canViewAllNotifications: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return (
+      permissionService.hasActionPermission("notifications.viewAll") ||
+      permissionService.hasActionPermission("notifications.viewTeam")
+    );
+  },
+
+  canMarkNotificationRead: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return (
+      permissionService.hasActionPermission("notifications.markRead") ||
+      permissionService.hasActionPermission("notifications.viewOwn") ||
+      permissionService.hasMenuAccess("notifications")
+    );
+  },
+
+  canArchiveNotification: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return permissionService.hasActionPermission("notifications.archive");
+  },
+
+  canManageIntelAlerts: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return permissionService.hasActionPermission("whatsapp.alerts.manage");
+  },
+
+  canViewVendorReputation: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return (
+      permissionService.hasActionPermission("whatsapp.vendorReputation.view") ||
+      permissionService.canView("whatsappActivity")
+    );
+  },
+
   canAssignTask: (): boolean => {
     if (permissionService.isSysAdmin()) return true;
     return permissionService.hasActionPermission("staffTasks.assign");
+  },
+
+  canViewStaffTasks: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return (
+      permissionService.hasActionPermission("staffTasks.view") ||
+      permissionService.hasActionPermission("staffTasks.viewOwn") ||
+      permissionService.hasMenuAccess("staffTasks")
+    );
+  },
+
+  canCreateStaffTask: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return (
+      permissionService.hasActionPermission("staffTasks.create") ||
+      permissionService.hasActionPermission("staffTasks.assign")
+    );
+  },
+
+  canUpdateStaffTaskStatus: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return (
+      permissionService.hasActionPermission("staffTasks.updateStatus") ||
+      permissionService.hasActionPermission("staffTasks.complete")
+    );
+  },
+
+  canReviewStaffTask: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return permissionService.hasActionPermission("staffTasks.review");
+  },
+
+  canCancelStaffTask: (): boolean => {
+    if (permissionService.isSysAdmin()) return true;
+    return permissionService.hasActionPermission("staffTasks.cancel");
   },
 
   canSetRpnThresholds: (): boolean => {

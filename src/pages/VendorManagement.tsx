@@ -41,6 +41,7 @@ import {
   SearchInput,
   ConfirmDialog,
   DataPanel,
+  BrandedAlertModal,
 } from "../components/CommonUI.tsx";
 import { vendorService } from "../services/vendorService.ts";
 import { rpnService } from "../services/rpnService.ts";
@@ -63,6 +64,8 @@ import {
   Branch,
   PricingPlan,
   Product,
+  MasterProduct,
+  VendorProductOffer,
   CatalogueGeneration,
   Staff,
 } from "../types.ts";
@@ -123,6 +126,231 @@ const VENDOR_STATUSES: VendorStatus[] = [
   "cancelled",
   "pending_review",
 ];
+const WORLD_COUNTRIES = [
+  "Afghanistan",
+  "Albania",
+  "Algeria",
+  "Andorra",
+  "Angola",
+  "Antigua and Barbuda",
+  "Argentina",
+  "Armenia",
+  "Australia",
+  "Austria",
+  "Azerbaijan",
+  "Bahamas",
+  "Bahrain",
+  "Bangladesh",
+  "Barbados",
+  "Belarus",
+  "Belgium",
+  "Belize",
+  "Benin",
+  "Bhutan",
+  "Bolivia",
+  "Bosnia and Herzegovina",
+  "Botswana",
+  "Brazil",
+  "Brunei",
+  "Bulgaria",
+  "Burkina Faso",
+  "Burundi",
+  "Cabo Verde",
+  "Cambodia",
+  "Cameroon",
+  "Canada",
+  "Central African Republic",
+  "Chad",
+  "Chile",
+  "China",
+  "Colombia",
+  "Comoros",
+  "Congo",
+  "Costa Rica",
+  "Cote d'Ivoire",
+  "Croatia",
+  "Cuba",
+  "Cyprus",
+  "Czechia",
+  "Democratic Republic of the Congo",
+  "Denmark",
+  "Djibouti",
+  "Dominica",
+  "Dominican Republic",
+  "Ecuador",
+  "Egypt",
+  "El Salvador",
+  "Equatorial Guinea",
+  "Eritrea",
+  "Estonia",
+  "Eswatini",
+  "Ethiopia",
+  "Fiji",
+  "Finland",
+  "France",
+  "Gabon",
+  "Gambia",
+  "Georgia",
+  "Germany",
+  "Ghana",
+  "Greece",
+  "Grenada",
+  "Guatemala",
+  "Guinea",
+  "Guinea-Bissau",
+  "Guyana",
+  "Haiti",
+  "Honduras",
+  "Hungary",
+  "Iceland",
+  "India",
+  "Indonesia",
+  "Iran",
+  "Iraq",
+  "Ireland",
+  "Israel",
+  "Italy",
+  "Jamaica",
+  "Japan",
+  "Jordan",
+  "Kazakhstan",
+  "Kenya",
+  "Kiribati",
+  "Kuwait",
+  "Kyrgyzstan",
+  "Laos",
+  "Latvia",
+  "Lebanon",
+  "Lesotho",
+  "Liberia",
+  "Libya",
+  "Liechtenstein",
+  "Lithuania",
+  "Luxembourg",
+  "Madagascar",
+  "Malawi",
+  "Malaysia",
+  "Maldives",
+  "Mali",
+  "Malta",
+  "Marshall Islands",
+  "Mauritania",
+  "Mauritius",
+  "Mexico",
+  "Micronesia",
+  "Moldova",
+  "Monaco",
+  "Mongolia",
+  "Montenegro",
+  "Morocco",
+  "Mozambique",
+  "Myanmar",
+  "Namibia",
+  "Nauru",
+  "Nepal",
+  "Netherlands",
+  "New Zealand",
+  "Nicaragua",
+  "Niger",
+  "Nigeria",
+  "North Korea",
+  "North Macedonia",
+  "Norway",
+  "Oman",
+  "Pakistan",
+  "Palau",
+  "Palestine",
+  "Panama",
+  "Papua New Guinea",
+  "Paraguay",
+  "Peru",
+  "Philippines",
+  "Poland",
+  "Portugal",
+  "Qatar",
+  "Romania",
+  "Russia",
+  "Rwanda",
+  "Saint Kitts and Nevis",
+  "Saint Lucia",
+  "Saint Vincent and the Grenadines",
+  "Samoa",
+  "San Marino",
+  "Sao Tome and Principe",
+  "Saudi Arabia",
+  "Senegal",
+  "Serbia",
+  "Seychelles",
+  "Sierra Leone",
+  "Singapore",
+  "Slovakia",
+  "Slovenia",
+  "Solomon Islands",
+  "Somalia",
+  "South Africa",
+  "South Korea",
+  "South Sudan",
+  "Spain",
+  "Sri Lanka",
+  "Sudan",
+  "Suriname",
+  "Sweden",
+  "Switzerland",
+  "Syria",
+  "Taiwan",
+  "Tajikistan",
+  "Tanzania",
+  "Thailand",
+  "Timor-Leste",
+  "Togo",
+  "Tonga",
+  "Trinidad and Tobago",
+  "Tunisia",
+  "Turkey",
+  "Turkmenistan",
+  "Tuvalu",
+  "Uganda",
+  "Ukraine",
+  "United Arab Emirates",
+  "United Kingdom",
+  "United States",
+  "Uruguay",
+  "Uzbekistan",
+  "Vanuatu",
+  "Vatican City",
+  "Venezuela",
+  "Vietnam",
+  "Yemen",
+  "Zambia",
+  "Zimbabwe",
+];
+const DEFAULT_COUNTRY = "Zimbabwe";
+
+const SearchableCountrySelect: React.FC<{
+  value?: string;
+  onChange: (value: string) => void;
+  className?: string;
+}> = ({ value, onChange, className }) => {
+  const listId = React.useId();
+  return (
+    <>
+      <input
+        list={listId}
+        value={value || DEFAULT_COUNTRY}
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={(e) => {
+          if (!e.target.value.trim()) onChange(DEFAULT_COUNTRY);
+        }}
+        className={className}
+      />
+      <datalist id={listId}>
+        {WORLD_COUNTRIES.map((country) => (
+          <option key={country} value={country} />
+        ))}
+      </datalist>
+    </>
+  );
+};
 const SUB_STATUSES: SubscriptionStatus[] = [
   "trial",
   "active",
@@ -141,6 +369,18 @@ export const VendorManagement: React.FC = () => {
   const [rpns, setRpns] = useState<RPN[]>([]);
   const [staffList, setStaffList] = useState<Staff[]>([]);
   const [plans, setPlans] = useState<PricingPlan[]>([]);
+  const [masterProducts, setMasterProducts] = useState<MasterProduct[]>([]);
+  const [vendorOffers, setVendorOffers] = useState<VendorProductOffer[]>([]);
+  const [productPickerSearch, setProductPickerSearch] = useState("");
+  const [offerDraft, setOfferDraft] = useState<Partial<VendorProductOffer>>({
+    sellingPrice: 0,
+    stockQuantity: 0,
+    stockStatus: "in_stock",
+    publishToCatalogue: true,
+    deliveryAvailable: true,
+    featured: false,
+    active: true,
+  });
 
   // Lists stats (counts)
   const [productCounts, setProductCounts] = useState<Record<string, number>>(
@@ -178,6 +418,21 @@ export const VendorManagement: React.FC = () => {
   const [formError, setFormError] = useState("");
   const [formSuccess, setFormSuccess] = useState("");
 
+  const [alertConfig, setAlertConfig] = useState<{
+    isOpen: boolean;
+    title?: string;
+    message: string;
+    type?: "success" | "error" | "warning" | "info";
+  }>({ isOpen: false, title: "seiGEN Commerce", message: "", type: "success" });
+
+  const showBrandedAlert = (config: {
+    title?: string;
+    message: string;
+    type?: "success" | "error" | "warning" | "info";
+  }) => {
+    setAlertConfig({ ...config, isOpen: true });
+  };
+
   useEffect(() => {
     vendorService.migrateVendors();
     loadData();
@@ -190,6 +445,12 @@ export const VendorManagement: React.FC = () => {
     const r = asArray<RPN>(await Promise.resolve(rpnService.getAll()));
     const p = asArray<Product>(
       await Promise.resolve(productService.getProducts()),
+    );
+    const mp = asArray<MasterProduct>(
+      await Promise.resolve(productService.getMasterProducts()),
+    );
+    const offers = asArray<VendorProductOffer>(
+      await Promise.resolve(productService.getVendorProductOffers()),
     );
     const c = asArray<CatalogueGeneration>(
       await Promise.resolve(catalogueService.getHistory()),
@@ -205,11 +466,14 @@ export const VendorManagement: React.FC = () => {
     setRpns(r);
     setPlans(pl);
     setStaffList(st);
+    setMasterProducts(mp);
+    setVendorOffers(offers);
 
     // Calculate counts
     const pCounts: Record<string, number> = {};
-    p.forEach((prod) => {
-      pCounts[prod.vendorId] = (pCounts[prod.vendorId] || 0) + 1;
+    offers.forEach((offer) => {
+      if (!offer.active) return;
+      pCounts[offer.vendorId] = (pCounts[offer.vendorId] || 0) + 1;
     });
     setProductCounts(pCounts);
 
@@ -270,7 +534,11 @@ export const VendorManagement: React.FC = () => {
         loadData();
         setIsDeleteDialogOpen(false);
         setVendorToDelete(null);
-        alert("Deleted successfully");
+        showBrandedAlert({
+          title: "seiGEN Commerce",
+          message: "Deleted successfully.",
+          type: "success",
+        });
 
         // Non-blocking staff audit logging
         try {
@@ -287,7 +555,11 @@ export const VendorManagement: React.FC = () => {
         }
       } catch (error: any) {
         console.error(error);
-        alert(error.message || "Delete failed");
+        showBrandedAlert({
+          title: "seiGEN Commerce",
+          message: error.message || "Delete failed",
+          type: "error",
+        });
       }
     }
   };
@@ -322,7 +594,7 @@ export const VendorManagement: React.FC = () => {
       createdBy: "STAFF-ADM",
       displayName: "", // Initialize displayName
       updatedBy: "STAFF-ADM",
-      country: "Mozambique",
+      country: DEFAULT_COUNTRY,
     });
     setSelectedVendor(null);
     setView("form");
@@ -372,6 +644,7 @@ export const VendorManagement: React.FC = () => {
       const vendorToSave = {
         ...selectedVendor, // Preserve existing fields if not in formData
         ...formData,
+        country: formData.country || DEFAULT_COUNTRY,
         updatedAt: now,
         updatedBy: session.staffId,
       } as Vendor;
@@ -405,7 +678,11 @@ export const VendorManagement: React.FC = () => {
           recordName: vendorToSave.name,
         });
 
-        alert("Vendor submitted for approval.");
+        showBrandedAlert({
+          title: "seiGEN Commerce",
+          message: "Vendor submitted for approval.",
+          type: "info",
+        });
       } else {
         analyticsService.logEvent({
           eventType: isNew ? "VENDOR_CREATED" : "VENDOR_UPDATED",
@@ -468,12 +745,20 @@ export const VendorManagement: React.FC = () => {
 
       await loadData();
       if (!needsApproval) {
-        alert("Saved successfully");
+        showBrandedAlert({
+          title: "seiGEN Commerce",
+          message: "Vendor saved successfully.",
+          type: "success",
+        });
       }
       setView("list");
     } catch (error) {
       console.error("Save vendor error:", error);
-      alert(error instanceof Error ? error.message : "Save failed");
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message: error instanceof Error ? error.message : "Save failed",
+        type: "error",
+      });
     } finally {
       setIsSaving(false);
     }
@@ -485,11 +770,14 @@ export const VendorManagement: React.FC = () => {
       name: "New Branch Location",
       phone: "",
       whatsapp: "", // Default to empty string
+      country: formData.country || DEFAULT_COUNTRY,
       province: formData.province || "",
       cityTown: formData.cityTown || "",
       district: "",
       suburb: "",
+      streetAddress: "",
       address: "",
+      landmark: "",
       managerName: "",
       openingHours: "08:00 - 17:00",
       isDefault: formData.branches?.length === 0,
@@ -519,11 +807,19 @@ export const VendorManagement: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith("image/")) {
-      alert("Only image files are allowed.");
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message: "Only image files are allowed.",
+        type: "warning",
+      });
       return;
     }
     if (file.size > 8 * 1024 * 1024) {
-      alert("File exceeds 8MB limit.");
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message: "File exceeds 8MB limit.",
+        type: "warning",
+      });
       return;
     }
 
@@ -570,11 +866,19 @@ export const VendorManagement: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith("image/")) {
-      alert("Only image files are allowed.");
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message: "Only image files are allowed.",
+        type: "warning",
+      });
       return;
     }
     if (file.size > 8 * 1024 * 1024) {
-      alert("File exceeds 8MB limit.");
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message: "File exceeds 8MB limit.",
+        type: "warning",
+      });
       return;
     }
 
@@ -668,6 +972,119 @@ export const VendorManagement: React.FC = () => {
     }
   };
 
+  const currentVendorOffers = useMemo(() => {
+    const vendorId = formData.id || selectedVendor?.id || "";
+    return vendorOffers.filter((offer) => offer.vendorId === vendorId);
+  }, [vendorOffers, formData.id, selectedVendor?.id]);
+
+  const productById = useMemo(
+    () => new Map(masterProducts.map((product) => [product.id, product])),
+    [masterProducts],
+  );
+
+  const productPickerResults = useMemo(() => {
+    const terms = productPickerSearch.toLowerCase().split(" ").filter(Boolean);
+    const linked = new Set(currentVendorOffers.map((offer) => offer.productId));
+    return masterProducts
+      .filter((product) => !linked.has(product.id))
+      .filter((product) => {
+        if (terms.length === 0) return true;
+        const text = [
+          product.productName,
+          product.brand,
+          product.category,
+          product.sector,
+          product.barcode,
+          product.standardSku,
+          product.description,
+          ...(product.tags || []),
+          ...(product.keywords || []),
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        return terms.every((term) => text.includes(term));
+      })
+      .slice(0, 8);
+  }, [masterProducts, productPickerSearch, currentVendorOffers]);
+
+  const resetOfferDraft = () =>
+    setOfferDraft({
+      sellingPrice: 0,
+      stockQuantity: 0,
+      stockStatus: "in_stock",
+      publishToCatalogue: true,
+      deliveryAvailable: true,
+      featured: false,
+      active: true,
+    });
+
+  const handleCreateOffer = async (product: MasterProduct) => {
+    const vendorId = formData.id || selectedVendor?.id;
+    if (!vendorId) {
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message: "Save the vendor profile before linking products.",
+        type: "warning",
+      });
+      return;
+    }
+    const firstBranch = (formData.branches || [])[0];
+    const offer: VendorProductOffer = {
+      id: `VPO-${vendorId}-${product.id}-${Date.now()}`,
+      vendorId,
+      productId: product.id,
+      branchId: offerDraft.branchId || firstBranch?.id || "",
+      sellingPrice: Number(offerDraft.sellingPrice) || 0,
+      buyingPrice: offerDraft.buyingPrice,
+      discountPrice: offerDraft.discountPrice,
+      minOrderQty: offerDraft.minOrderQty,
+      maxOrderQty: offerDraft.maxOrderQty,
+      stockQuantity: Number(offerDraft.stockQuantity) || 0,
+      stockStatus:
+        offerDraft.stockStatus ||
+        ((Number(offerDraft.stockQuantity) || 0) > 0
+          ? "in_stock"
+          : "out_of_stock"),
+      vendorSku: offerDraft.vendorSku || "",
+      vendorProductImage: offerDraft.vendorProductImage || "",
+      publishToCatalogue: offerDraft.publishToCatalogue !== false,
+      deliveryAvailable: offerDraft.deliveryAvailable !== false,
+      featured: !!offerDraft.featured,
+      notes: offerDraft.notes || "",
+      active: offerDraft.active !== false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await productService.saveVendorProductOffer(offer);
+    void staffAuditService.logAction({
+      eventType: "RECORD_CREATED",
+      module: "product",
+      severity: "info",
+      action: `Linked ${product.productName} to vendor ${vendorId}`,
+      recordType: "vendor_product_offer",
+      recordId: offer.id,
+      afterSnapshot: offer,
+    });
+    resetOfferDraft();
+    setProductPickerSearch("");
+    await loadData();
+  };
+
+  const handleUpdateOffer = async (
+    offer: VendorProductOffer,
+    patch: Partial<VendorProductOffer>,
+  ) => {
+    const updated = { ...offer, ...patch, updatedAt: new Date().toISOString() };
+    await productService.saveVendorProductOffer(updated);
+    await loadData();
+  };
+
+  const handleDeleteOffer = async (offerId: string) => {
+    await productService.deleteVendorProductOffer(offerId);
+    await loadData();
+  };
+
   if (view === "form") {
     const currentStaff = staffService.getStaffById(
       formData.assignedStaffId || "STAFF-ADM",
@@ -684,6 +1101,11 @@ export const VendorManagement: React.FC = () => {
       "";
     return (
       <div className="space-y-8 pb-32">
+        <BrandedAlertModal
+          {...alertConfig}
+          onClose={() => setAlertConfig({ ...alertConfig, isOpen: false })}
+        />
+
         <div className="flex items-center justify-between bg-stone-50 p-6 border border-stone-200">
           <button
             onClick={() => setView("list")}
@@ -1159,10 +1581,10 @@ export const VendorManagement: React.FC = () => {
                   <label className="text-[10px] uppercase font-bold text-stone-400 font-sans">
                     Country
                   </label>
-                  <input
-                    value={formData.country || ""}
-                    onChange={(e) =>
-                      setFormData({ ...formData, country: e.target.value })
+                  <SearchableCountrySelect
+                    value={formData.country || DEFAULT_COUNTRY}
+                    onChange={(country) =>
+                      setFormData({ ...formData, country })
                     }
                     className="w-full border-2 border-stone-200 p-2 text-xs font-bold uppercase focus:border-brand-orange outline-none bg-stone-50"
                   />
@@ -1311,7 +1733,19 @@ export const VendorManagement: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] uppercase font-bold text-stone-400 font-mono italic">
+                          Country
+                        </label>
+                        <SearchableCountrySelect
+                          value={branch.country || formData.country || DEFAULT_COUNTRY}
+                          onChange={(country) =>
+                            handleBranchUpdate(branch.id, { country })
+                          }
+                          className="w-full border border-stone-300 p-1.5 text-xs font-bold uppercase outline-none font-mono"
+                        />
+                      </div>
                       <div className="space-y-1.5">
                         <label className="text-[9px] uppercase font-bold text-stone-400 font-mono italic">
                           Province
@@ -1430,16 +1864,31 @@ export const VendorManagement: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                       <div className="md:col-span-2 space-y-1.5">
                         <label className="text-[9px] uppercase font-bold text-stone-400">
                           Physical Address
                         </label>
                         <input
-                          value={branch.address}
+                          value={branch.streetAddress || branch.address}
                           onChange={(e) =>
                             handleBranchUpdate(branch.id, {
                               address: e.target.value,
+                              streetAddress: e.target.value,
+                            })
+                          }
+                          className="w-full border border-stone-300 p-1.5 text-xs font-bold uppercase outline-none"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] uppercase font-bold text-stone-400">
+                          Landmark
+                        </label>
+                        <input
+                          value={branch.landmark || ""}
+                          onChange={(e) =>
+                            handleBranchUpdate(branch.id, {
+                              landmark: e.target.value,
                             })
                           }
                           className="w-full border border-stone-300 p-1.5 text-xs font-bold uppercase outline-none"
@@ -1706,6 +2155,224 @@ export const VendorManagement: React.FC = () => {
               </div>
             </DataPanel>
 
+            <DataPanel
+              title="Vendor Products"
+              subtitle="Attach master products and manage vendor-specific price, stock, branch and catalogue visibility."
+              className="border-t-4 border-t-brand-orange"
+            >
+              <div className="p-6 space-y-5">
+                <div className="grid grid-cols-1 gap-3">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 w-3.5 h-3.5" />
+                    <input
+                      value={productPickerSearch}
+                      onChange={(e) => setProductPickerSearch(e.target.value)}
+                      placeholder="Search master products by name, barcode, brand, category..."
+                      className="w-full border-2 border-stone-200 pl-9 pr-3 py-3 text-xs font-bold uppercase outline-none focus:border-brand-orange"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <input
+                      type="number"
+                      value={offerDraft.sellingPrice || 0}
+                      onChange={(e) =>
+                        setOfferDraft({
+                          ...offerDraft,
+                          sellingPrice: Number(e.target.value) || 0,
+                        })
+                      }
+                      className="w-full border-2 border-stone-200 p-3 text-xs font-bold uppercase outline-none"
+                      placeholder="Selling price"
+                    />
+                    <input
+                      type="number"
+                      value={offerDraft.stockQuantity || 0}
+                      onChange={(e) =>
+                        setOfferDraft({
+                          ...offerDraft,
+                          stockQuantity: Number(e.target.value) || 0,
+                          stockStatus:
+                            Number(e.target.value) > 0
+                              ? "in_stock"
+                              : "out_of_stock",
+                        })
+                      }
+                      className="w-full border-2 border-stone-200 p-3 text-xs font-bold uppercase outline-none"
+                      placeholder="Stock"
+                    />
+                    <select
+                      value={offerDraft.branchId || ""}
+                      onChange={(e) =>
+                        setOfferDraft({ ...offerDraft, branchId: e.target.value })
+                      }
+                      className="w-full border-2 border-stone-200 p-3 text-xs font-bold uppercase outline-none"
+                    >
+                      <option value="">Default branch</option>
+                      {(formData.branches || []).map((branch) => (
+                        <option key={branch.id} value={branch.id}>
+                          {branch.name}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      value={offerDraft.vendorSku || ""}
+                      onChange={(e) =>
+                        setOfferDraft({ ...offerDraft, vendorSku: e.target.value })
+                      }
+                      className="w-full border-2 border-stone-200 p-3 text-xs font-bold uppercase outline-none"
+                      placeholder="Vendor SKU"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="flex items-center gap-2 border border-stone-200 p-3 text-[10px] font-black uppercase">
+                      <input
+                        type="checkbox"
+                        checked={offerDraft.publishToCatalogue !== false}
+                        onChange={(e) =>
+                          setOfferDraft({
+                            ...offerDraft,
+                            publishToCatalogue: e.target.checked,
+                          })
+                        }
+                        className="accent-brand-orange"
+                      />
+                      Publish
+                    </label>
+                    <label className="flex items-center gap-2 border border-stone-200 p-3 text-[10px] font-black uppercase">
+                      <input
+                        type="checkbox"
+                        checked={offerDraft.deliveryAvailable !== false}
+                        onChange={(e) =>
+                          setOfferDraft({
+                            ...offerDraft,
+                            deliveryAvailable: e.target.checked,
+                          })
+                        }
+                        className="accent-brand-orange"
+                      />
+                      Delivery
+                    </label>
+                  </div>
+                </div>
+
+                <div className="space-y-2 max-h-56 overflow-y-auto">
+                  {productPickerResults.map((product) => (
+                    <div
+                      key={product.id}
+                      className="border border-stone-200 p-3 flex items-center justify-between gap-3"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-xs font-black uppercase text-brand-charcoal truncate">
+                          {product.productName}
+                        </p>
+                        <p className="text-[9px] font-bold uppercase text-stone-400 truncate">
+                          {product.brand || "No brand"} / {product.category} /{" "}
+                          {product.barcode || product.standardSku || "No code"}
+                        </p>
+                      </div>
+                      <PrimaryButton size="sm" onClick={() => handleCreateOffer(product)}>
+                        <PlusCircle size={12} className="mr-1" /> Link
+                      </PrimaryButton>
+                    </div>
+                  ))}
+                  {productPickerSearch && productPickerResults.length === 0 && (
+                    <p className="text-[10px] font-bold uppercase text-stone-400 text-center p-4">
+                      No matching master products. Create it in Product Library first.
+                    </p>
+                  )}
+                </div>
+
+                <div className="border-t border-stone-200 pt-4 space-y-3">
+                  <p className="text-[10px] font-black uppercase text-stone-400">
+                    Linked Vendor Offers
+                  </p>
+                  {currentVendorOffers.map((offer) => {
+                    const product = productById.get(offer.productId);
+                    const branch = (formData.branches || []).find(
+                      (b) => b.id === offer.branchId,
+                    );
+                    return (
+                      <div key={offer.id} className="border border-stone-200 p-3 space-y-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-xs font-black uppercase text-brand-charcoal truncate">
+                              {product?.productName || offer.productId}
+                            </p>
+                            <p className="text-[9px] font-bold uppercase text-stone-400">
+                              {branch?.name || "No branch"} / {offer.stockStatus}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => handleDeleteOffer(offer.id)}
+                            className="p-2 border border-stone-200 text-stone-400 hover:text-red-600 hover:border-red-200"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <input
+                            type="number"
+                            value={offer.sellingPrice}
+                            onChange={(e) =>
+                              handleUpdateOffer(offer, {
+                                sellingPrice: Number(e.target.value) || 0,
+                              })
+                            }
+                            className="border border-stone-200 p-2 text-[10px] font-bold"
+                          />
+                          <input
+                            type="number"
+                            value={offer.stockQuantity}
+                            onChange={(e) =>
+                              handleUpdateOffer(offer, {
+                                stockQuantity: Number(e.target.value) || 0,
+                                stockStatus:
+                                  Number(e.target.value) > 0
+                                    ? "in_stock"
+                                    : "out_of_stock",
+                              })
+                            }
+                            className="border border-stone-200 p-2 text-[10px] font-bold"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <label className="flex items-center gap-2 text-[9px] font-black uppercase">
+                            <input
+                              type="checkbox"
+                              checked={offer.publishToCatalogue}
+                              onChange={(e) =>
+                                handleUpdateOffer(offer, {
+                                  publishToCatalogue: e.target.checked,
+                                })
+                              }
+                              className="accent-brand-orange"
+                            />
+                            Catalogue
+                          </label>
+                          <label className="flex items-center gap-2 text-[9px] font-black uppercase">
+                            <input
+                              type="checkbox"
+                              checked={offer.active}
+                              onChange={(e) =>
+                                handleUpdateOffer(offer, { active: e.target.checked })
+                              }
+                              className="accent-brand-orange"
+                            />
+                            Active
+                          </label>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {currentVendorOffers.length === 0 && (
+                    <p className="text-[10px] font-bold uppercase text-stone-400 text-center p-4 border border-dashed border-stone-200">
+                      No vendor product offers linked yet.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </DataPanel>
+
             <DataPanel title="System Information">
               <div className="p-6 space-y-2 font-mono">
                 <div className="flex justify-between text-[9px] uppercase font-bold">
@@ -1738,6 +2405,11 @@ export const VendorManagement: React.FC = () => {
 
   return (
     <div className="space-y-8 pb-20">
+      <BrandedAlertModal
+        {...alertConfig}
+        onClose={() => setAlertConfig({ ...alertConfig, isOpen: false })}
+      />
+
       {/* Console Controls */}
       <div className="bg-stone-50 border border-stone-200 p-6">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-6">

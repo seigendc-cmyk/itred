@@ -15,6 +15,7 @@ import {
   StatCard,
 } from "../components/CommonUI.tsx";
 import { approvalService } from "../services/approvalService.ts";
+import { notificationService } from "../services/notificationService.ts";
 import { permissionService } from "../services/permissionService.ts";
 import { ApprovalRequest, ApprovalRequestStatus } from "../types.ts";
 import {
@@ -36,6 +37,7 @@ export const ApprovalQueue: React.FC = () => {
     request: ApprovalRequest;
   } | null>(null);
   const [managerComment, setManagerComment] = useState("");
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const loadRequests = async () => {
     const allReqs = await approvalService.getAll();
@@ -94,16 +96,17 @@ export const ApprovalQueue: React.FC = () => {
     if (!activeModal) return;
 
     try {
+      setActionError(null);
       if (activeModal.type === "approve") {
         if (activeModal.request.requestType === "staff_delete") {
           if (
             !permissionService.hasActionPermission("staff.approveDelete" as any)
           ) {
-            alert("You do not have permission to approve staff deletions.");
+            setActionError("You do not have permission to approve staff deletions.");
             return;
           }
           if (staffService.isLastActiveSysAdmin(activeModal.request.recordId)) {
-            alert("Cannot approve deletion of the last active SysAdmin.");
+            setActionError("Cannot approve deletion of the last active SysAdmin.");
             return;
           }
         }
@@ -130,13 +133,13 @@ export const ApprovalQueue: React.FC = () => {
         );
       }
 
-      alert("Saved successfully");
+      notificationService.toast("Approval queue updated");
       setActiveModal(null);
       setManagerComment("");
       loadRequests();
     } catch (err) {
       console.error(err);
-      alert(err instanceof Error ? err.message : "Save failed");
+      setActionError(err instanceof Error ? err.message : "Save failed");
     }
   };
 
@@ -146,6 +149,12 @@ export const ApprovalQueue: React.FC = () => {
         title="Approval Queue"
         subtitle="Managerial governance layer for high-risk systemic actions."
       />
+
+      {actionError && (
+        <div className="border-l-4 border-red-600 bg-red-50 p-4 text-sm font-bold text-red-700 flex items-center gap-3">
+          <AlertTriangle size={18} /> {actionError}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <StatCard label="Pending" value={stats.pending} icon={Layers} />
@@ -255,7 +264,10 @@ export const ApprovalQueue: React.FC = () => {
                     <div className="flex justify-end gap-2">
                       <button
                         onClick={() =>
-                          setActiveModal({ type: "view", request: req })
+                          {
+                            setActionError(null);
+                            setActiveModal({ type: "view", request: req });
+                          }
                         }
                         className="p-1.5 px-3 bg-stone-100 hover:bg-stone-200 text-[10px] font-bold uppercase text-stone-600"
                       >
@@ -265,7 +277,10 @@ export const ApprovalQueue: React.FC = () => {
                         <>
                           <button
                             onClick={() =>
-                              setActiveModal({ type: "approve", request: req })
+                              {
+                                setActionError(null);
+                                setActiveModal({ type: "approve", request: req });
+                              }
                             }
                             disabled={!permissionService.canApproveWork()}
                             className="p-1.5 px-3 bg-emerald-50 hover:bg-emerald-100 text-[10px] font-bold uppercase text-emerald-700 disabled:opacity-50"
@@ -279,7 +294,10 @@ export const ApprovalQueue: React.FC = () => {
                           </button>
                           <button
                             onClick={() =>
-                              setActiveModal({ type: "return", request: req })
+                              {
+                                setActionError(null);
+                                setActiveModal({ type: "return", request: req });
+                              }
                             }
                             disabled={
                               !permissionService.canReturnWorkForCorrection()
@@ -295,7 +313,10 @@ export const ApprovalQueue: React.FC = () => {
                           </button>
                           <button
                             onClick={() =>
-                              setActiveModal({ type: "reject", request: req })
+                              {
+                                setActionError(null);
+                                setActiveModal({ type: "reject", request: req });
+                              }
                             }
                             disabled={!permissionService.canRejectWork()}
                             className="p-1.5 px-3 bg-red-50 hover:bg-red-100 text-[10px] font-bold uppercase text-red-700 disabled:opacity-50"
@@ -351,6 +372,7 @@ export const ApprovalQueue: React.FC = () => {
                 onClick={() => {
                   setActiveModal(null);
                   setManagerComment("");
+                  setActionError(null);
                 }}
                 className="p-2 text-stone-400 hover:text-brand-charcoal"
               >
@@ -416,6 +438,11 @@ export const ApprovalQueue: React.FC = () => {
 
               {activeModal.type !== "view" && (
                 <div className="p-4 bg-stone-50 border border-stone-200 space-y-2">
+                  {actionError && (
+                    <div className="border-l-4 border-red-600 bg-red-50 p-3 text-xs font-bold text-red-700 flex items-center gap-2">
+                      <AlertTriangle size={14} /> {actionError}
+                    </div>
+                  )}
                   <label className="text-[10px] font-bold uppercase text-stone-500">
                     {activeModal.type === "return"
                       ? "Correction Notes (Required) *"

@@ -37,6 +37,8 @@ import { ContactHubSettings } from "./pages/ContactHubSettings.tsx";
 import WelcomePage from "./pages/WelcomePage.tsx";
 import { HowToPage } from "./pages/HowToPage.tsx";
 import { ApprovalQueue } from "./pages/ApprovalQueue.tsx";
+import { StaffTasks } from "./pages/StaffTasks.tsx";
+import { Notifications } from "./pages/Notifications.tsx";
 import { AppRoute, MenuKey, DeskType } from "./types.ts";
 import { ErrorBoundary, PrimaryButton } from "./components/CommonUI.tsx";
 import { permissionService } from "./services/permissionService.ts";
@@ -129,6 +131,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     [AppRoute.SYSTEM_SETTINGS]: "System Settings",
     [AppRoute.CONTACT_HUB_SETTINGS]: "Catalogue Contact Hub",
     [AppRoute.HOW_TO]: "How To",
+    [AppRoute.NOTIFICATIONS]: "Notifications",
+    [AppRoute.STAFF_TASKS]: "Staff Tasks",
     [AppRoute.RPN_PERFORMANCE]: "RPN Performance",
   };
 
@@ -411,7 +415,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           path="/notifications"
           element={
             checkAccess("notifications") ? (
-              <AdminDashboard onNavigate={handleNavigate} />
+              <Notifications />
             ) : (
               <RestrictedAccess />
             )
@@ -421,7 +425,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           path="/staff-tasks"
           element={
             checkAccess("staff-tasks") ? (
-              <AdminDashboard onNavigate={handleNavigate} />
+              <StaffTasks />
             ) : (
               <RestrictedAccess />
             )

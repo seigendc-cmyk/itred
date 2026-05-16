@@ -1,1068 +1,1279 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
-  ClipboardCheck,
-  Plus,
-  Filter,
-  Search,
-  LayoutGrid,
-  List,
-  Calendar,
+  AlertTriangle,
+  BarChart3,
+  Bell,
   CheckCircle2,
-  AlertCircle,
-  Clock,
-  ArrowRight,
-  User,
-  Store,
+  ClipboardCheck,
+  FileText,
   MapPin,
   Package,
-  TrendingDown,
-  Info,
-  X,
-  AlertTriangle,
+  PhoneCall,
+  Search,
+  ShieldAlert,
+  Store,
+  TrendingUp,
+  UserCheck,
 } from "lucide-react";
 import { inventorySpotCheckService } from "../services/inventorySpotCheckService.ts";
 import { vendorService } from "../services/vendorService.ts";
-import { rpnService } from "../services/rpnService.ts";
-import { pricingPlanService } from "../services/pricingPlanService.ts";
-import { analyticsService } from "../services/analyticsService.ts";
 import { productService } from "../services/productService.ts";
+import { whatsappActivityService } from "../services/whatsappActivityService.ts";
+import { notificationService } from "../services/notificationService.ts";
+import { staffAuditService } from "../services/staffAuditService.ts";
+import { analyticsService } from "../services/analyticsService.ts";
+import { staffService } from "../services/staffService.ts";
 import { permissionService } from "../services/permissionService.ts";
 import {
+  ActivityLog,
   InventorySpotCheck,
-  Vendor,
-  RPN,
-  PricingPlan,
-  SpotCheckType,
-  SpotCheckResult,
-  SpotCheckStatus,
   Product,
+  SpotCheckSource,
+  SpotCheckVarianceType,
+  Staff,
+  Vendor,
+  VendorProductOffer,
+  WhatsAppIntelligenceLog,
 } from "../types.ts";
 import {
   DataPanel,
-  TablePanel,
-  StatusBadge,
-  PrimaryButton,
-  SecondaryButton,
   EmptyState,
-  ConfirmDialog,
+  PrimaryButton,
+  SearchInput,
+  SecondaryButton,
   StatCard,
+  StatusBadge,
+  TablePanel,
 } from "../components/CommonUI.tsx";
 
-const normalizeArray = <T,>(value: unknown): T[] => {
-  if (Array.isArray(value)) {
-    return value.filter(Boolean) as T[];
-  }
+type SpotCheckTab =
+  | "dashboard"
+  | "queue"
+  | "create"
+  | "count"
+  | "variance"
+  | "advisory"
+  | "history";
 
-  if (!value || typeof value !== "object") {
-    return [];
-  }
-
-  const obj = value as Record<string, unknown>;
-
-  if (Array.isArray(obj.data)) {
-    return obj.data.filter(Boolean) as T[];
-  }
-
-  if (Array.isArray(obj.items)) {
-    return obj.items.filter(Boolean) as T[];
-  }
-
-  if (Array.isArray(obj.docs)) {
-    return obj.docs.filter(Boolean) as T[];
-  }
-
-  if (Array.isArray(obj.results)) {
-    return obj.results.filter(Boolean) as T[];
-  }
-
-  if (Array.isArray(obj.vendors)) {
-    return obj.vendors.filter(Boolean) as T[];
-  }
-
-  if (Array.isArray(obj.products)) {
-    return obj.products.filter(Boolean) as T[];
-  }
-
-  if (Array.isArray(obj.checks)) {
-    return obj.checks.filter(Boolean) as T[];
-  }
-
-  if (Array.isArray(obj.spotChecks)) {
-    return obj.spotChecks.filter(Boolean) as T[];
-  }
-
-  return [];
+type AuditRecommendation = {
+  id: string;
+  vendorId: string;
+  vendorName: string;
+  productId: string;
+  productName: string;
+  offerId?: string;
+  branchId?: string;
+  branchName?: string;
+  startingQty: number;
+  listedQtyBeforeAudit: number;
+  whatsappHits: number;
+  callHits: number;
+  searchHits: number;
+  complaintCount: number;
+  leadPressureScore: number;
+  recommendedAction: string;
+  source: SpotCheckSource;
 };
 
-const safeText = (value: unknown, fallback = ""): string => {
-  if (value === null || value === undefined) return fallback;
-  return String(value);
-};
+const tabs: Array<{ id: SpotCheckTab; label: string; icon: React.ElementType }> =
+  [
+    { id: "dashboard", label: "BI Spot Check Dashboard", icon: BarChart3 },
+    { id: "queue", label: "Demand-Led Audit Queue", icon: Bell },
+    { id: "create", label: "Create Spot Check", icon: ClipboardCheck },
+    { id: "count", label: "Physical Count Entry", icon: UserCheck },
+    { id: "variance", label: "Variance & Sales Estimate", icon: TrendingUp },
+    { id: "advisory", label: "Vendor Advisory", icon: FileText },
+    { id: "history", label: "Audit History", icon: Package },
+  ];
 
-const safeDateText = (value: unknown): string => {
-  if (!value) return "No date";
-  const parsed = new Date(String(value));
-  if (Number.isNaN(parsed.getTime())) return "Invalid date";
-  return parsed.toLocaleDateString();
-};
-
-const toNumber = (value: unknown, fallback = 0): number => {
+const today = () => new Date().toISOString().split("T")[0];
+const inputClass =
+  "w-full border-2 border-stone-200 bg-white p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange";
+const toNumber = (value: unknown, fallback = 0) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 };
+const clamp = (value: number, min = 0, max = 100) =>
+  Math.max(min, Math.min(max, value));
+const isDemandType = (type?: string) =>
+  ["Enquiry", "Price Request", "Stock Request", "Product Search"].includes(
+    String(type),
+  );
+const isComplaintType = (type?: string) =>
+  ["Complaint", "Delivery Complaint", "Warranty Issue", "Fraud Alert"].includes(
+    String(type),
+  );
+const riskLevel = (score: number) => {
+  if (score >= 90) return "Critical";
+  if (score >= 51) return "High";
+  if (score >= 21) return "Medium";
+  return "Low";
+};
+const riskVariant = (score: number) => {
+  if (score >= 90) return "error" as const;
+  if (score >= 51) return "warning" as const;
+  if (score >= 21) return "info" as const;
+  return "neutral" as const;
+};
+const calculateLeadPressure = (
+  whatsappHits = 0,
+  callHits = 0,
+  searchHits = 0,
+  complaintCount = 0,
+) => whatsappHits * 4 + callHits * 5 + searchHits * 2 + complaintCount * 6;
+
+const classifyVariance = (
+  listedQty: number,
+  physicalQty: number,
+  leadPressureScore: number,
+): SpotCheckVarianceType => {
+  const variance = listedQty - physicalQty;
+  if (variance === 0) return "matched";
+  if (physicalQty > listedQty) return "understated_stock";
+  if (variance > Math.max(5, listedQty * 0.5)) return "overstated_stock";
+  if (leadPressureScore > 50) return "possible_sales";
+  return "stock_mismatch";
+};
+
+const generateVendorAdvice = (check: InventorySpotCheck) => {
+  const product = check.productName || "this product";
+  const demand =
+    (check.whatsappHits || 0) + (check.callHits || 0) + (check.searchHits || 0);
+  const movement = check.estimatedSalesQty || 0;
+  const accuracy =
+    check.varianceType === "matched"
+      ? "Stock matched the catalogue record."
+      : `Stock accuracy needs attention: listed ${check.listedQtyBeforeAudit || 0}, counted ${check.physicalCountQty || 0}.`;
+  const restock =
+    (check.physicalCountQty || 0) <= 5 || check.leadPressureScore! > 50
+      ? "We recommend restocking before the next catalogue update."
+      : "Current stock can remain listed, with normal monitoring.";
+
+  return `Your product ${product} received ${demand} customer demand signals, including ${check.whatsappHits || 0} WhatsApp hits. Starting quantity was ${check.startingQty || 0}. Physical count is ${check.physicalCountQty || 0}. Estimated sales movement is ${movement} units. ${accuracy} ${restock} Catalogue stock should be updated to ${check.adjustedQtyAfterAudit ?? check.physicalCountQty ?? 0}.`;
+};
+
+const createBlankCheck = (): Partial<InventorySpotCheck> => ({
+  source: "manual",
+  status: "scheduled",
+  checkDate: today(),
+  startingQty: 0,
+  listedQtyBeforeAudit: 0,
+  physicalCountQty: 0,
+  restockedQty: 0,
+  adjustedQtyAfterAudit: 0,
+  whatsappHits: 0,
+  callHits: 0,
+  searchHits: 0,
+  complaintCount: 0,
+  productsCheckedCount: 1,
+  productsCorrectCount: 0,
+  productsVarianceCount: 0,
+  productsMissingImagesCount: 0,
+  productsNeedingPriceUpdateCount: 0,
+  result: "follow-up required",
+  type: "BI-recommended",
+});
 
 export const InventorySpotChecks: React.FC = () => {
+  const [activeTab, setActiveTab] = useState<SpotCheckTab>("dashboard");
   const [checks, setChecks] = useState<InventorySpotCheck[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [rpns, setRpns] = useState<RPN[]>([]);
-  const [plans, setPlans] = useState<PricingPlan[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
-
-  // UI State
+  const [offers, setOffers] = useState<VendorProductOffer[]>([]);
+  const [intelLogs, setIntelLogs] = useState<WhatsAppIntelligenceLog[]>([]);
+  const [events, setEvents] = useState<ActivityLog[]>([]);
+  const [staffList, setStaffList] = useState<Staff[]>([]);
   const [search, setSearch] = useState("");
-  const [view, setView] = useState<"list" | "grid">("list");
-  const [rpnFilter, setRpnFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
-  const [resultFilter, setResultFilter] = useState("");
+  const [selectedCheckId, setSelectedCheckId] = useState("");
+  const [formData, setFormData] =
+    useState<Partial<InventorySpotCheck>>(createBlankCheck());
+  const [showPopupFeed, setShowPopupFeed] = useState(true);
 
-  // Modals
-  const [showScheduleModal, setShowScheduleModal] = useState(false);
-  const [selectedCheck, setSelectedCheck] = useState<InventorySpotCheck | null>(
-    null,
-  );
-  const [formData, setFormData] = useState<Partial<InventorySpotCheck>>({
-    type: "random",
-    status: "scheduled",
-    checkDate: new Date().toISOString().split("T")[0],
-    productsCheckedCount: 0,
-    productsCorrectCount: 0,
-    productsVarianceCount: 0,
-    productsMissingImagesCount: 0,
-    productsNeedingPriceUpdateCount: 0,
-    result: "passed",
-  });
-
-  useEffect(() => {
-    loadData();
-  }, []);
+  const canCreate =
+    permissionService.hasActionPermission("inventory.spotChecks.create") ||
+    permissionService.canCreate("inventorySpotChecks");
+  const canComplete =
+    permissionService.hasActionPermission("inventory.spotChecks.complete") ||
+    permissionService.canEdit("inventorySpotChecks");
+  const canUpdateStock =
+    permissionService.hasActionPermission("inventory.spotChecks.updateStock") ||
+    permissionService.hasActionPermission("inventory.updateStockAfterAudit");
+  const canViewAnalytics =
+    permissionService.hasActionPermission("inventory.spotChecks.viewAnalytics") ||
+    permissionService.canView("inventorySpotChecks");
 
   const loadData = async () => {
-    try {
-      const [nextChecks, nextVendors, nextRpns, nextPlans, nextProducts] =
-        await Promise.all([
-          Promise.resolve(inventorySpotCheckService.getSpotChecks()),
-          Promise.resolve(vendorService.getVendors()),
-          Promise.resolve(rpnService.getAll()),
-          Promise.resolve(pricingPlanService.getPlans()),
-          Promise.resolve(productService.getProducts()),
-        ]);
-
-      setChecks(normalizeArray<InventorySpotCheck>(nextChecks));
-      setVendors(normalizeArray<Vendor>(nextVendors));
-      setRpns(normalizeArray<RPN>(nextRpns));
-      setPlans(normalizeArray<PricingPlan>(nextPlans));
-      setProducts(normalizeArray<Product>(nextProducts));
-    } catch (error) {
-      console.error("Failed to load inventory spot check data", error);
-      setChecks([]);
-      setVendors([]);
-      setRpns([]);
-      setPlans([]);
-      setProducts([]);
-    }
+    const [
+      nextVendors,
+      nextProducts,
+      nextOffers,
+      nextEvents,
+    ] = await Promise.all([
+      vendorService.getVendors(),
+      productService.getProducts(),
+      productService.getVendorProductOffers(),
+      analyticsService.getEvents(),
+    ]);
+    setChecks(inventorySpotCheckService.getSpotChecks());
+    setVendors(Array.isArray(nextVendors) ? nextVendors : []);
+    setProducts(Array.isArray(nextProducts) ? nextProducts : []);
+    setOffers(Array.isArray(nextOffers) ? nextOffers : []);
+    setEvents(Array.isArray(nextEvents) ? nextEvents : []);
+    setIntelLogs(whatsappActivityService.getIntelligenceLogs());
+    setStaffList(staffService.getAllStaff());
   };
 
-  const safeChecks = useMemo(
-    () => normalizeArray<InventorySpotCheck>(checks),
-    [checks],
-  );
-  const safeVendors = useMemo(() => normalizeArray<Vendor>(vendors), [vendors]);
-  const safeRpns = useMemo(() => normalizeArray<RPN>(rpns), [rpns]);
-  const safePlans = useMemo(() => normalizeArray<PricingPlan>(plans), [plans]);
-  const safeProducts = useMemo(
-    () => normalizeArray<Product>(products),
+  useEffect(() => {
+    void loadData();
+  }, []);
+
+  const productById = useMemo(
+    () =>
+      new Map(
+        products.flatMap((product) => [
+          [product.id, product],
+          [product.productId || product.id, product],
+          [product.offerId || product.id, product],
+        ]),
+      ),
     [products],
   );
+  const vendorById = useMemo(
+    () => new Map(vendors.map((vendor) => [vendor.id, vendor])),
+    [vendors],
+  );
 
-  const filtered = useMemo(() => {
-    const searchValue = search.toLowerCase().trim();
-
-    return safeChecks
-      .filter((c) => {
-        const vendor = safeVendors.find((v) => v.id === c.vendorId);
-        const vendorName = safeText(
-          c.vendorNameSnapshot || vendor?.name,
-        ).toLowerCase();
-        const vendorCode = safeText(
-          c.vendorSystemCode || vendor?.systemCode,
-        ).toLowerCase();
-        const checkId = safeText(c.id).toLowerCase();
-        const matchesSearch =
-          !searchValue ||
-          vendorName.includes(searchValue) ||
-          vendorCode.includes(searchValue) ||
-          checkId.includes(searchValue);
-        const matchesRPN = !rpnFilter || c.assignedRPNId === rpnFilter;
-        const matchesStatus = !statusFilter || c.status === statusFilter;
-        const matchesResult = !resultFilter || c.result === resultFilter;
-
-        return matchesSearch && matchesRPN && matchesStatus && matchesResult;
-      })
-      .sort((a, b) =>
-        safeText(b.checkDate).localeCompare(safeText(a.checkDate)),
-      );
-  }, [safeChecks, safeVendors, search, rpnFilter, statusFilter, resultFilter]);
-
-  const biRecommendations = useMemo(() => {
-    const recs: {
-      vendorId: string;
-      reason: string;
-      severity: "low" | "medium" | "high";
-    }[] = [];
-
-    safeVendors.forEach((v) => {
-      const vendorProducts = safeProducts.filter((p) => p.vendorId === v.id);
-      if (vendorProducts.length === 0) return;
-
-      const outOfStock = vendorProducts.filter(
-        (p) => p.status === "out_of_stock",
+  const demandRecommendations = useMemo<AuditRecommendation[]>(() => {
+    const rows = products.map((product) => {
+      const vendor = vendorById.get(product.vendorId);
+      const terms = [
+        product.productId,
+        product.id,
+        product.offerId,
+        product.name,
+        product.productCode,
+        product.sku,
+      ]
+        .filter(Boolean)
+        .map((value) => String(value).toLowerCase());
+      const matchesProduct = (log: WhatsAppIntelligenceLog) => {
+        const blob = [
+          log.productId,
+          log.productName,
+          log.customerMessage,
+          log.internalNotes,
+          ...(log.tags || []),
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        const vendorMatch =
+          !log.vendorId ||
+          log.vendorId === product.vendorId ||
+          !log.vendorName ||
+          log.vendorName === product.vendorName;
+        return vendorMatch && terms.some((term) => term && blob.includes(term));
+      };
+      const productLogs = intelLogs.filter(matchesProduct);
+      const whatsappHits = productLogs.filter(
+        (log) => log.source === "WhatsApp" && isDemandType(log.interactionType),
       ).length;
-      const missingImages = vendorProducts.filter((p) => !p.imageUrl).length;
-      const oosRatio = outOfStock / vendorProducts.length;
-
-      if (oosRatio > 0.4) {
-        recs.push({
-          vendorId: v.id,
-          reason: "High Out-of-Stock Ratio (>40%)",
-          severity: "high",
-        });
-      }
-      if (missingImages / vendorProducts.length > 0.5) {
-        recs.push({
-          vendorId: v.id,
-          reason: "Incomplete Visual Assets (>50% missing)",
-          severity: "medium",
-        });
-      }
-
-      // Check if stale (not updated in 30 days)
-      const thirtyDaysAgo = new Date();
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-      const allStale = vendorProducts.every(
-        (p) => new Date(safeText(p.updatedAt)) < thirtyDaysAgo,
+      const callHits = productLogs.filter(
+        (log) => log.source === "Call" && isDemandType(log.interactionType),
+      ).length;
+      const searchHits =
+        productLogs.filter((log) => log.interactionType === "Product Search")
+          .length +
+        events.filter((event) => {
+          const details = JSON.stringify(event.details || {}).toLowerCase();
+          return (
+            String(event.eventType).toLowerCase().includes("search") &&
+            terms.some((term) => term && details.includes(term))
+          );
+        }).length;
+      const complaintCount = productLogs.filter(
+        (log) =>
+          isComplaintType(log.interactionType) &&
+          /stock|unavailable|sold out|not available|shortage/i.test(
+            `${log.customerMessage || ""} ${log.internalNotes || ""} ${(log.tags || []).join(" ")}`,
+          ),
+      ).length;
+      const leadPressureScore = calculateLeadPressure(
+        whatsappHits,
+        callHits,
+        searchHits,
+        complaintCount,
       );
-      if (allStale) {
-        recs.push({
-          vendorId: v.id,
-          reason: "Stale Inventory Metadata (>30 days)",
-          severity: "low",
-        });
-      }
+      const listedQtyBeforeAudit = product.stockQuantity || 0;
+      let recommendedAction = "Call vendor for stock confirmation";
+      if (complaintCount > 0 && listedQtyBeforeAudit > 0)
+        recommendedAction = "Flag vendor stock mismatch";
+      else if (leadPressureScore >= 90)
+        recommendedAction = "Perform physical count";
+      else if (leadPressureScore >= 51 && listedQtyBeforeAudit <= 10)
+        recommendedAction = "Recommend restock";
+      else if (listedQtyBeforeAudit <= 3 && leadPressureScore > 20)
+        recommendedAction = "Update catalogue stock";
 
-      // Check if subscription overdue
-      if (v.subscriptionStatus === "overdue") {
-        recs.push({
-          vendorId: v.id,
-          reason: "Overdue Subscription Compliance check",
-          severity: "medium",
-        });
-      }
+      return {
+        id: `${product.vendorId}:${product.productId || product.id}`,
+        vendorId: product.vendorId,
+        vendorName: product.vendorName || vendor?.name || "Unknown Vendor",
+        productId: product.productId || product.id,
+        productName: product.name,
+        offerId: product.offerId || product.id,
+        branchId: product.branchId,
+        branchName: product.branchName || product.locationDisplayText,
+        startingQty: listedQtyBeforeAudit,
+        listedQtyBeforeAudit,
+        whatsappHits,
+        callHits,
+        searchHits,
+        complaintCount,
+        leadPressureScore,
+        recommendedAction,
+        source:
+          complaintCount > 0
+            ? "customer_complaints"
+            : whatsappHits > 0
+              ? "whatsapp_hits"
+              : "bi_recommendation",
+      } as AuditRecommendation;
     });
 
-    return recs;
-  }, [safeVendors, safeProducts]);
+    return rows
+      .filter(
+        (row) =>
+          row.leadPressureScore > 20 ||
+          row.complaintCount > 0 ||
+          (row.listedQtyBeforeAudit <= 5 && row.whatsappHits + row.callHits > 0),
+      )
+      .sort((a, b) => b.leadPressureScore - a.leadPressureScore);
+  }, [products, vendorById, intelLogs, events]);
+
+  useEffect(() => {
+    demandRecommendations.slice(0, 8).forEach((rec) => {
+      if (rec.leadPressureScore < 51 && rec.complaintCount === 0) return;
+      void notificationService.createNotification({
+        type: "system_alert",
+        priority: rec.leadPressureScore >= 90 ? "critical" : "high",
+        title: "Stock Audit Recommended",
+        message: `${rec.productName} has ${rec.whatsappHits} WhatsApp hits and ${rec.listedQtyBeforeAudit} listed units.`,
+        recordType: "inventory_spot_check",
+        recordId: rec.id,
+        dedupeKey: `stock-audit:${rec.vendorId}:${rec.productId}:demand:${today()}`,
+      });
+    });
+  }, [demandRecommendations]);
+
+  useEffect(() => {
+    checks.forEach((check) => {
+      if (
+        check.status !== "scheduled" &&
+        check.status !== "in_progress" &&
+        check.status !== "recommended"
+      ) {
+        return;
+      }
+      if (!check.checkDate || check.checkDate >= today()) return;
+      void notificationService.createNotification({
+        type: "task_due",
+        priority: "high",
+        title: "Overdue Stock Audit",
+        message: `${check.productName || "Inventory audit"} for ${check.vendorName || check.vendorNameSnapshot} is overdue.`,
+        recordType: "inventory_spot_check",
+        recordId: check.id,
+        assignedToStaffId: check.assignedToStaffId,
+        assignedToName: check.assignedToStaffName,
+        dedupeKey: `stock-audit:${check.vendorId}:${check.productId || check.id}:overdue:${today()}`,
+      });
+    });
+  }, [checks]);
+
+  const selectedCheck = useMemo(
+    () => checks.find((check) => check.id === selectedCheckId) || null,
+    [checks, selectedCheckId],
+  );
+
+  const filteredChecks = useMemo(() => {
+    const terms = search.toLowerCase().split(" ").filter(Boolean);
+    return checks
+      .filter((check) => {
+        const blob = [
+          check.id,
+          check.vendorName,
+          check.vendorNameSnapshot,
+          check.productName,
+          check.branchName,
+          check.status,
+          check.varianceType,
+          check.actionRequired,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        return terms.every((term) => blob.includes(term));
+      })
+      .sort(
+        (a, b) =>
+          new Date(b.updatedAt || b.createdAt).getTime() -
+          new Date(a.updatedAt || a.createdAt).getTime(),
+      );
+  }, [checks, search]);
 
   const stats = useMemo(() => {
-    const now = new Date();
-    const currentMonth = now.getMonth();
-    const currentYear = now.getFullYear();
-
-    const monthlyCompleted = safeChecks.filter((c) => {
-      const d = new Date(c.checkDate);
-      return (
-        d.getMonth() === currentMonth &&
-        d.getFullYear() === currentYear &&
-        c.status === "completed"
-      );
-    }).length;
-
+    const completed = checks.filter((check) => check.status === "completed");
     return {
-      total: safeChecks.length,
-      scheduled: safeChecks.filter((c) => c.status === "scheduled").length,
-      completedMonth: monthlyCompleted,
-      failed: safeChecks.filter((c) => c.result === "major issues").length,
-      recommendations: biRecommendations.length,
+      total: checks.length,
+      queue: demandRecommendations.length,
+      highPressure: demandRecommendations.filter(
+        (rec) => rec.leadPressureScore >= 51,
+      ).length,
+      unresolved: checks.filter(
+        (check) =>
+          check.status !== "completed" &&
+          check.status !== "cancelled" &&
+          check.status !== "escalated",
+      ).length,
+      estimatedSales: completed.reduce(
+        (sum, check) => sum + (check.estimatedSalesQty || 0),
+        0,
+      ),
+      accurateVendors: completed.filter((check) => check.varianceType === "matched")
+        .length,
+      mismatches: completed.filter(
+        (check) =>
+          check.varianceType === "stock_mismatch" ||
+          check.varianceType === "overstated_stock",
+      ).length,
     };
-  }, [safeChecks, biRecommendations]);
+  }, [checks, demandRecommendations]);
 
-  const handleSave = async () => {
-    if (!formData.vendorId) return;
-
-    const vendor = safeVendors.find((v) => v.id === formData.vendorId);
-    if (!vendor) return;
-
-    const plan = safePlans.find((p) => p.id === vendor.planId);
-
-    // Check entitlement if creating new scheduled item
-    if (!selectedCheck && formData.status === "completed") {
-      const monthChecks = inventorySpotCheckService.getSpotChecksByMonth(
-        vendor.id,
-        new Date().getMonth(),
-        new Date().getFullYear(),
-      );
-      const limit = plan?.inventorySpotChecksPerMonth || 0;
-
-      if (monthChecks.length >= limit && limit > 0) {
-        if (
-          !confirm(
-            `Vendor has already used ${monthChecks.length}/${limit} monthly spot checks. Proceed anyway?`,
-          )
-        ) {
-          return;
-        }
-      }
-    }
-
-    const check: InventorySpotCheck = {
-      id:
-        selectedCheck?.id ||
-        `SC-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
-      vendorId: vendor.id,
+  const populateFromProduct = (productId: string) => {
+    const product = productById.get(productId);
+    const vendor = product ? vendorById.get(product.vendorId) : undefined;
+    if (!product || !vendor) return;
+    setFormData((prev) => ({
+      ...prev,
+      vendorId: product.vendorId,
+      vendorName: product.vendorName || vendor.name,
+      vendorNameSnapshot: product.vendorName || vendor.name,
       vendorSystemCode: vendor.systemCode,
-      vendorNameSnapshot: vendor.name,
-      assignedRPNId: vendor.assignedRPNId,
-      backendStaffName: formData.backendStaffName || "System Admin",
-      branchName: formData.branchName || "N/A",
-      sector: vendor.sector,
-      checkDate: formData.checkDate || new Date().toISOString().split("T")[0],
-      type: formData.type || "random",
-      productsCheckedCount: formData.productsCheckedCount || 0,
-      productsCorrectCount: formData.productsCorrectCount || 0,
-      productsVarianceCount: formData.productsVarianceCount || 0,
-      productsMissingImagesCount: formData.productsMissingImagesCount || 0,
-      productsNeedingPriceUpdateCount:
-        formData.productsNeedingPriceUpdateCount || 0,
-      notes: formData.notes || "",
-      result: formData.result || "passed",
-      nextCheckDate: formData.nextCheckDate,
-      status: formData.status || "scheduled",
-      createdBy: selectedCheck?.createdBy || "Admin",
-      updatedBy: "Admin",
-      createdAt: selectedCheck?.createdAt || new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    try {
-      await inventorySpotCheckService.saveSpotCheck(check);
-
-      analyticsService.logEvent({
-        eventType:
-          check.status === "completed"
-            ? "SPOT_CHECK_COMPLETED"
-            : check.status === "escalated"
-              ? "SPOT_CHECK_ESCALATED"
-              : "SPOT_CHECK_SCHEDULED",
-        actorType: "admin",
-        actorName: "System Admin",
-        vendorId: vendor.id,
-        vendorName: vendor.name,
-        spotCheckId: check.id,
-        details: { type: check.type, result: check.result },
-      });
-
-      setShowScheduleModal(false);
-      setSelectedCheck(null);
-      loadData();
-      alert("Saved successfully");
-    } catch (error: any) {
-      console.error(error);
-      alert(error.message || "Save failed");
-    }
+      productId: product.productId || product.id,
+      productName: product.name,
+      branchId: product.branchId,
+      branchName: product.branchName,
+      sector: product.sector,
+      startingQty: product.stockQuantity || 0,
+      listedQtyBeforeAudit: product.stockQuantity || 0,
+      adjustedQtyAfterAudit: product.stockQuantity || 0,
+    }));
   };
 
-  return (
-    <div className="space-y-8 animate-in fade-in duration-700">
-      {/* Header & Stats */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-        <div>
-          <h1 className="text-3xl font-black uppercase tracking-tighter text-brand-charcoal">
-            Inventory Integrity
-          </h1>
-          <p className="text-stone-400 font-bold uppercase text-[10px] tracking-widest mt-1">
-            Audit & Veracity Verification Engine
-          </p>
-        </div>
-        {permissionService.canCreate("inventorySpotChecks") && (
-          <div className="flex gap-2">
-            {" "}
-            {/* Check permission for scheduling spot checks */}
-            <PrimaryButton
-              onClick={() => {
-                setFormData({
-                  type: "random",
-                  status: "scheduled",
-                  checkDate: new Date().toISOString().split("T")[0],
-                  productsCheckedCount: 0,
-                  productsCorrectCount: 0,
-                  productsVarianceCount: 0,
-                  productsMissingImagesCount: 0,
-                  productsNeedingPriceUpdateCount: 0,
-                  result: "passed",
-                });
-                setSelectedCheck(null);
-                setShowScheduleModal(true);
-              }}
-            >
-              <Plus size={16} className="mr-2" /> Schedule Check
-            </PrimaryButton>
-          </div>
+  const loadRecommendation = (rec: AuditRecommendation) => {
+    setFormData({
+      ...createBlankCheck(),
+      id: `SC-${Date.now()}`,
+      vendorId: rec.vendorId,
+      vendorName: rec.vendorName,
+      vendorNameSnapshot: rec.vendorName,
+      vendorSystemCode: vendorById.get(rec.vendorId)?.systemCode || "",
+      productId: rec.productId,
+      productName: rec.productName,
+      branchId: rec.branchId,
+      branchName: rec.branchName,
+      sector: productById.get(rec.offerId || rec.productId)?.sector || "",
+      source: rec.source,
+      status: "scheduled",
+      startingQty: rec.startingQty,
+      listedQtyBeforeAudit: rec.listedQtyBeforeAudit,
+      adjustedQtyAfterAudit: rec.listedQtyBeforeAudit,
+      whatsappHits: rec.whatsappHits,
+      callHits: rec.callHits,
+      searchHits: rec.searchHits,
+      complaintCount: rec.complaintCount,
+      leadPressureScore: rec.leadPressureScore,
+      actionRequired: rec.recommendedAction,
+      officeNotes: `Demand-led audit recommendation: ${rec.recommendedAction}`,
+    });
+    setSelectedCheckId("");
+    setActiveTab("create");
+  };
+
+  const buildCompletedCheck = (
+    patch: Partial<InventorySpotCheck>,
+    status: InventorySpotCheck["status"],
+  ): InventorySpotCheck => {
+    const now = new Date().toISOString();
+    const vendor = vendorById.get(String(patch.vendorId || ""));
+    const product = productById.get(String(patch.productId || ""));
+    const startingQty = toNumber(patch.startingQty);
+    const restockedQty = toNumber(patch.restockedQty);
+    const physicalCountQty = toNumber(patch.physicalCountQty);
+    const listedQtyBeforeAudit = toNumber(patch.listedQtyBeforeAudit);
+    const estimatedSalesQty = Math.max(
+      0,
+      startingQty + restockedQty - physicalCountQty,
+    );
+    const varianceQty = listedQtyBeforeAudit - physicalCountQty;
+    const leadPressureScore =
+      patch.leadPressureScore ??
+      calculateLeadPressure(
+        patch.whatsappHits || 0,
+        patch.callHits || 0,
+        patch.searchHits || 0,
+        patch.complaintCount || 0,
+      );
+    const varianceType = classifyVariance(
+      listedQtyBeforeAudit,
+      physicalCountQty,
+      leadPressureScore,
+    );
+    const stockAccuracyScore = clamp(
+      100 - (Math.abs(varianceQty) / Math.max(listedQtyBeforeAudit, 1)) * 100,
+    );
+    const vendorReliabilityImpact =
+      varianceType === "matched"
+        ? 5
+        : varianceType === "possible_sales"
+          ? 0
+          : varianceType === "understated_stock"
+            ? -3
+            : -12;
+
+    const check: InventorySpotCheck = {
+      id: patch.id || `SC-${Date.now()}`,
+      vendorId: String(patch.vendorId || product?.vendorId || ""),
+      vendorName: patch.vendorName || product?.vendorName || vendor?.name || "",
+      vendorSystemCode: patch.vendorSystemCode || vendor?.systemCode || "",
+      vendorNameSnapshot:
+        patch.vendorNameSnapshot || patch.vendorName || product?.vendorName || vendor?.name || "",
+      productId: String(patch.productId || product?.productId || product?.id || ""),
+      productName: patch.productName || product?.name || "",
+      branchId: patch.branchId || product?.branchId,
+      branchName: patch.branchName || product?.branchName,
+      source: (patch.source as SpotCheckSource) || "manual",
+      assignedRPNId: vendor?.assignedRPNId,
+      backendStaffName: patch.backendStaffName || "SCI Office",
+      sector: patch.sector || product?.sector || vendor?.sector || "",
+      checkDate: patch.checkDate || today(),
+      type: patch.type || "BI-recommended",
+      startingQty,
+      listedQtyBeforeAudit,
+      physicalCountQty,
+      restockedQty,
+      adjustedQtyAfterAudit:
+        patch.adjustedQtyAfterAudit ?? physicalCountQty,
+      estimatedSalesQty,
+      varianceQty,
+      varianceType,
+      whatsappHits: patch.whatsappHits || 0,
+      callHits: patch.callHits || 0,
+      searchHits: patch.searchHits || 0,
+      complaintCount: patch.complaintCount || 0,
+      leadPressureScore,
+      stockAccuracyScore,
+      vendorReliabilityImpact,
+      status,
+      actionRequired:
+        patch.actionRequired ||
+        (varianceType === "matched"
+          ? "No stock action required"
+          : varianceType === "possible_sales"
+            ? "Recommend restock"
+            : "Flag vendor stock mismatch"),
+      officeNotes: patch.officeNotes || "",
+      assignedToStaffId: patch.assignedToStaffId || "",
+      assignedToStaffName: patch.assignedToStaffName || "",
+      productsCheckedCount: 1,
+      productsCorrectCount: varianceType === "matched" ? 1 : 0,
+      productsVarianceCount: varianceType === "matched" ? 0 : 1,
+      productsMissingImagesCount: product?.imageUrl ? 0 : 1,
+      productsNeedingPriceUpdateCount: 0,
+      notes: patch.officeNotes || patch.notes || "",
+      result:
+        varianceType === "matched"
+          ? "passed"
+          : varianceType === "possible_sales"
+            ? "follow-up required"
+            : "major issues",
+      createdBy: patch.createdBy || "SCI Office",
+      updatedBy: "SCI Office",
+      createdAt: patch.createdAt || now,
+      completedAt: status === "completed" ? now : patch.completedAt,
+      updatedAt: now,
+    };
+    check.vendorAdvice = generateVendorAdvice(check);
+    return check;
+  };
+
+  const saveScheduledCheck = async () => {
+    if (!canCreate) return alert("No permission to create spot checks.");
+    if (!formData.vendorId || !formData.productId)
+      return alert("Select vendor and product first.");
+    const check = buildCompletedCheck(formData, "scheduled");
+    check.physicalCountQty = formData.physicalCountQty || 0;
+    check.varianceQty = undefined;
+    check.varianceType = undefined;
+    check.estimatedSalesQty = undefined;
+    check.stockAccuracyScore = undefined;
+    inventorySpotCheckService.saveSpotCheck(check);
+    void staffAuditService.logAction({
+      eventType: "SPOT_CHECK_SCHEDULED" as any,
+      module: "product",
+      severity: check.leadPressureScore! >= 51 ? "high" : "info",
+      action: `Created demand-led spot check for ${check.productName}`,
+      recordType: "inventory_spot_check",
+      recordId: check.id,
+      afterSnapshot: check,
+    });
+    await loadData();
+    setSelectedCheckId(check.id);
+    setActiveTab("count");
+  };
+
+  const submitPhysicalCount = async () => {
+    if (!canComplete) return alert("No permission to complete spot checks.");
+    const base = selectedCheck || formData;
+    const check = buildCompletedCheck({ ...base, ...formData }, "completed");
+    inventorySpotCheckService.saveSpotCheck(check);
+    void staffAuditService.logAction({
+      eventType: "SPOT_CHECK_COMPLETED" as any,
+      module: "product",
+      severity:
+        check.varianceType === "matched"
+          ? "info"
+          : check.varianceType === "possible_sales"
+            ? "warning"
+            : "high",
+      action: `Physical count submitted for ${check.productName}`,
+      recordType: "inventory_spot_check",
+      recordId: check.id,
+      afterSnapshot: check,
+    });
+    void staffAuditService.logAction({
+      eventType: "RECORD_CREATED",
+      module: "product",
+      severity: "info",
+      action: `Vendor advisory generated for ${check.productName}`,
+      recordType: "vendor_advisory",
+      recordId: check.id,
+      afterSnapshot: { vendorAdvice: check.vendorAdvice },
+    });
+    if (check.varianceType !== "matched") {
+      void notificationService.createNotification({
+        type: "system_alert",
+        priority:
+          check.varianceType === "possible_sales" ? "high" : "critical",
+        title:
+          check.varianceType === "possible_sales"
+            ? "Possible Sales Movement"
+            : "Stock Mismatch",
+        message:
+          check.varianceType === "possible_sales"
+            ? `${check.vendorName} product ${check.productName} appears to have moved ${check.estimatedSalesQty} units.`
+            : `Listed stock ${check.listedQtyBeforeAudit}, physical count ${check.physicalCountQty}, low sales signal.`,
+        recordType: "inventory_spot_check",
+        recordId: check.id,
+        dedupeKey: `stock-audit:${check.vendorId}:${check.productId}:${check.varianceType}:${today()}`,
+      });
+    }
+    await loadData();
+    setSelectedCheckId(check.id);
+    setFormData(check);
+    setActiveTab("variance");
+  };
+
+  const updateCatalogueStock = async (check: InventorySpotCheck) => {
+    if (!canUpdateStock) return;
+    const product = products.find(
+      (p) =>
+        p.vendorId === check.vendorId &&
+        (p.productId === check.productId ||
+          p.id === check.productId ||
+          p.name === check.productName),
+    );
+    if (!product) return alert("Could not find linked product offer.");
+    const nextQty = toNumber(check.adjustedQtyAfterAudit ?? check.physicalCountQty);
+    const offer = offers.find((item) => item.id === product.offerId || item.id === product.id);
+    if (offer) {
+      await productService.saveVendorProductOffer({
+        ...offer,
+        stockQuantity: nextQty,
+        stockStatus: nextQty > 0 ? "in_stock" : "out_of_stock",
+        updatedAt: new Date().toISOString(),
+      });
+    } else {
+      await productService.saveProduct({
+        ...product,
+        stockQuantity: nextQty,
+        status: nextQty > 0 ? "active" : "out_of_stock",
+      });
+    }
+    void staffAuditService.logAction({
+      eventType: "STOCK_CHANGED",
+      module: "product",
+      severity: "high",
+      action: `Catalogue stock updated after audit for ${check.productName}`,
+      recordType: "inventory_spot_check",
+      recordId: check.id,
+      afterSnapshot: { adjustedQtyAfterAudit: nextQty },
+    });
+    await loadData();
+  };
+
+  const selectedOrRecentCompleted =
+    selectedCheck ||
+    checks.find((check) => check.status === "completed") ||
+    null;
+
+  const renderCreateForm = (mode: "create" | "count") => (
+    <DataPanel
+      title={mode === "create" ? "Create Spot Check" : "Physical Count Entry"}
+      subtitle="Compare starting quantity, listed stock, restocks and physical count."
+      className="border-t-4 border-t-brand-orange"
+    >
+      <div className="p-5 space-y-5">
+        {mode === "count" && (
+          <select
+            className={inputClass}
+            value={selectedCheckId}
+            onChange={(event) => {
+              const check = checks.find((item) => item.id === event.target.value);
+              setSelectedCheckId(event.target.value);
+              setFormData(check || createBlankCheck());
+            }}
+          >
+            <option value="">Select scheduled check...</option>
+            {checks
+              .filter((check) => check.status !== "completed")
+              .map((check) => (
+                <option key={check.id} value={check.id}>
+                  {check.productName} / {check.vendorName || check.vendorNameSnapshot}
+                </option>
+              ))}
+          </select>
         )}
-      </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-        <StatCard
-          label="Checks Logged"
-          value={stats.total}
-          icon={ClipboardCheck}
-        />
-        <StatCard
-          label="Active Schedule"
-          value={stats.scheduled}
-          icon={Clock}
-        />
-        <StatCard
-          label="Completed (Mo)"
-          value={stats.completedMonth}
-          icon={CheckCircle2}
-        />
-        <StatCard
-          label="Fails / Issues"
-          value={stats.failed}
-          icon={AlertCircle}
-          variant="error"
-        />
-        <StatCard
-          label="BI Alerts"
-          value={stats.recommendations}
-          icon={TrendingDown}
-          variant="warning"
-        />
-      </div>
-
-      {/* BI Recommendations Section */}
-      {biRecommendations.length > 0 && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2">
-            <DataPanel
-              title="BI Distribution Intelligence"
-              subtitle="System detected anomalies requiring human verification"
-              className="border-l-4 border-l-brand-orange"
-            >
-              <div className="overflow-x-auto">
-                <table className="w-full text-left">
-                  <thead className="border-b border-stone-100 bg-stone-50/50">
-                    <tr>
-                      <th className="px-6 py-3 text-[10px] font-black uppercase text-stone-400">
-                        Target Vendor
-                      </th>
-                      <th className="px-6 py-3 text-[10px] font-black uppercase text-stone-400">
-                        Analysis Result
-                      </th>
-                      <th className="px-6 py-3 text-[10px] font-black uppercase text-stone-400">
-                        Severity
-                      </th>
-                      <th className="px-6 py-3 text-right"></th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-stone-50">
-                    {biRecommendations.slice(0, 5).map((rec, i) => {
-                      const vendor = safeVendors.find(
-                        (v) => v.id === rec.vendorId,
-                      );
-                      return (
-                        <tr
-                          key={i}
-                          className="hover:bg-orange-50/20 transition-colors"
-                        >
-                          <td className="px-6 py-4">
-                            <div className="flex flex-col">
-                              <span className="text-[10px] font-mono font-bold text-stone-400">
-                                {vendor?.systemCode}
-                              </span>
-                              <span className="text-xs font-bold uppercase text-brand-charcoal">
-                                {vendor?.name}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 text-xs font-medium text-stone-600">
-                            {rec.reason}
-                          </td>
-                          <td className="px-6 py-4">
-                            <span
-                              className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded-full ${
-                                rec.severity === "high"
-                                  ? "bg-red-100 text-red-700"
-                                  : rec.severity === "medium"
-                                    ? "bg-orange-100 text-orange-700"
-                                    : "bg-blue-100 text-blue-700"
-                              }`}
-                            >
-                              {rec.severity} priority
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 text-right">
-                            <button
-                              onClick={() => {
-                                if (
-                                  permissionService.canCreate(
-                                    "inventorySpotChecks",
-                                  )
-                                ) {
-                                  setFormData({
-                                    vendorId: vendor?.id,
-                                    type: "BI-recommended",
-                                    status: "scheduled",
-                                    notes: `Automated recommendation: ${rec.reason}`,
-                                  });
-                                  setShowScheduleModal(true);
-                                } else {
-                                  alert(
-                                    "Permission denied to schedule spot checks.",
-                                  );
-                                }
-                              }}
-                              className={`text-[9px] font-bold text-brand-orange hover:underline uppercase ${!permissionService.canCreate("inventorySpotChecks") ? "opacity-50 cursor-not-allowed" : ""}`}
-                            >
-                              Schedule Check
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </DataPanel>
-          </div>
-          <div className="space-y-6">
-            <DataPanel title="Plan Entitlements">
-              <div className="p-6 space-y-4">
-                <div className="flex justify-between items-center pb-4 border-b border-stone-100">
-                  <div>
-                    <p className="text-[10px] font-black uppercase text-stone-300">
-                      Entitlement Mode
-                    </p>
-                    <p className="text-sm font-bold text-stone-800">
-                      Growth Plan
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-[10px] font-black uppercase text-stone-300">
-                      Quota
-                    </p>
-                    <p className="text-sm font-bold text-brand-orange">
-                      1 / Month
-                    </p>
-                  </div>
-                </div>
-                <div className="flex justify-between items-center">
-                  <div>
-                    <p className="text-[10px] font-black uppercase text-stone-300">
-                      Entitlement Mode
-                    </p>
-                    <p className="text-sm font-bold text-stone-800">Pro tier</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-[10px] font-black uppercase text-stone-300">
-                      Quota
-                    </p>
-                    <p className="text-sm font-bold text-brand-orange">
-                      4 / Month
-                    </p>
-                  </div>
-                </div>
-                <div className="mt-4 p-3 bg-stone-100 text-[10px] text-stone-500 font-bold leading-relaxed uppercase">
-                  Spot checks are essential for maintaining catalogue trust.
-                  Starter plans do not include verified inventory checks.
-                </div>
-              </div>
-            </DataPanel>
-          </div>
-        </div>
-      )}
-
-      {/* Main Filter & Table */}
-      <div className="bg-white border border-stone-200">
-        <div className="p-6 border-b border-stone-100 flex flex-col md:flex-row gap-4 items-center justify-between">
-          <div className="relative w-full md:w-96">
-            <Search
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-300"
-              size={16}
-            />
-            <input
-              type="text"
-              placeholder="Search by Vendor, System Code, or Check ID..."
-              className="w-full pl-10 pr-4 py-2 bg-stone-50 border border-stone-100 outline-none text-xs focus:border-brand-orange transition-all"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
-          <div className="flex gap-2 w-full md:w-auto">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <label className="space-y-2">
+            <span className="text-[10px] font-black uppercase text-stone-400">
+              Vendor
+            </span>
             <select
-              className="flex-1 md:flex-none px-3 py-2 bg-stone-50 border border-stone-100 text-[10px] font-bold uppercase outline-none focus:border-brand-orange"
-              value={rpnFilter}
-              onChange={(e) => setRpnFilter(e.target.value)}
+              className={inputClass}
+              value={formData.vendorId || ""}
+              onChange={(event) =>
+                setFormData({
+                  ...formData,
+                  vendorId: event.target.value,
+                  vendorName: vendorById.get(event.target.value)?.name,
+                  vendorNameSnapshot: vendorById.get(event.target.value)?.name,
+                  vendorSystemCode: vendorById.get(event.target.value)?.systemCode,
+                })
+              }
             >
-              <option value="">All RPNs</option>
-              {safeRpns.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.name}
+              <option value="">Select vendor...</option>
+              {vendors.map((vendor) => (
+                <option key={vendor.id} value={vendor.id}>
+                  {vendor.name}
                 </option>
               ))}
             </select>
+          </label>
+          <label className="space-y-2 md:col-span-2">
+            <span className="text-[10px] font-black uppercase text-stone-400">
+              Product
+            </span>
             <select
-              className="flex-1 md:flex-none px-3 py-2 bg-stone-50 border border-stone-100 text-[10px] font-bold uppercase outline-none focus:border-brand-orange"
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
+              className={inputClass}
+              value={
+                products.find(
+                  (p) =>
+                    p.vendorId === formData.vendorId &&
+                    (p.productId === formData.productId || p.id === formData.productId),
+                )?.id || ""
+              }
+              onChange={(event) => populateFromProduct(event.target.value)}
             >
-              <option value="">All Statuses</option>
-              <option value="scheduled">Scheduled</option>
-              <option value="completed">Completed</option>
-              <option value="escalated">Escalated</option>
-              <option value="cancelled">Cancelled</option>
+              <option value="">Select product offer...</option>
+              {products
+                .filter(
+                  (product) =>
+                    !formData.vendorId || product.vendorId === formData.vendorId,
+                )
+                .map((product) => (
+                  <option key={product.id} value={product.id}>
+                    {product.name} / {product.vendorName} / {product.stockQuantity} units
+                  </option>
+                ))}
             </select>
+          </label>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[
+            ["startingQty", "Starting Vendor Qty"],
+            ["listedQtyBeforeAudit", "Listed Qty Before Audit"],
+            ["physicalCountQty", "Physical Count Qty"],
+            ["restockedQty", "Restocked Qty"],
+          ].map(([field, label]) => (
+            <label className="space-y-2" key={field}>
+              <span className="text-[10px] font-black uppercase text-stone-400">
+                {label}
+              </span>
+              <input
+                type="number"
+                className={inputClass}
+                value={(formData as any)[field] || 0}
+                onChange={(event) =>
+                  setFormData({
+                    ...formData,
+                    [field]: toNumber(event.target.value),
+                    adjustedQtyAfterAudit:
+                      field === "physicalCountQty"
+                        ? toNumber(event.target.value)
+                        : formData.adjustedQtyAfterAudit,
+                  })
+                }
+              />
+            </label>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[
+            ["whatsappHits", "WhatsApp Hits"],
+            ["callHits", "Call Hits"],
+            ["searchHits", "Search Hits"],
+            ["complaintCount", "Complaints"],
+          ].map(([field, label]) => (
+            <label className="space-y-2" key={field}>
+              <span className="text-[10px] font-black uppercase text-stone-400">
+                {label}
+              </span>
+              <input
+                type="number"
+                className={inputClass}
+                value={(formData as any)[field] || 0}
+                onChange={(event) =>
+                  setFormData({
+                    ...formData,
+                    [field]: toNumber(event.target.value),
+                  })
+                }
+              />
+            </label>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <label className="space-y-2">
+            <span className="text-[10px] font-black uppercase text-stone-400">
+              Assigned Staff
+            </span>
+            <select
+              className={inputClass}
+              value={formData.assignedToStaffId || ""}
+              onChange={(event) => {
+                const staff = staffList.find((item) => item.id === event.target.value);
+                setFormData({
+                  ...formData,
+                  assignedToStaffId: staff?.id,
+                  assignedToStaffName: staff?.displayName || staff?.fullName,
+                });
+              }}
+            >
+              <option value="">Unassigned</option>
+              {staffList.map((staff) => (
+                <option key={staff.id} value={staff.id}>
+                  {staff.displayName || staff.fullName}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="space-y-2">
+            <span className="text-[10px] font-black uppercase text-stone-400">
+              Action Required
+            </span>
+            <input
+              className={inputClass}
+              value={formData.actionRequired || ""}
+              onChange={(event) =>
+                setFormData({ ...formData, actionRequired: event.target.value })
+              }
+            />
+          </label>
+        </div>
+
+        <label className="space-y-2 block">
+          <span className="text-[10px] font-black uppercase text-stone-400">
+            Office Notes
+          </span>
+          <textarea
+            className={`${inputClass} min-h-[90px] normal-case`}
+            value={formData.officeNotes || ""}
+            onChange={(event) =>
+              setFormData({ ...formData, officeNotes: event.target.value })
+            }
+          />
+        </label>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 bg-stone-50 border border-stone-200 p-4">
+          <div>
+            <p className="text-[10px] font-black uppercase text-stone-400">
+              Formula
+            </p>
+            <p className="text-xs font-bold text-brand-charcoal">
+              estimatedSalesQty = startingQty + restockedQty - physicalCountQty
+            </p>
+          </div>
+          <div>
+            <p className="text-[10px] font-black uppercase text-stone-400">
+              Variance
+            </p>
+            <p className="text-xs font-bold text-brand-charcoal">
+              varianceQty = listedQtyBeforeAudit - physicalCountQty
+            </p>
+          </div>
+          <div>
+            <p className="text-[10px] font-black uppercase text-stone-400">
+              Lead Pressure
+            </p>
+            <p className="text-xs font-bold text-brand-charcoal">
+              WA*4 + Call*5 + Search*2 + Complaint*6
+            </p>
           </div>
         </div>
 
+        <div className="flex flex-col sm:flex-row gap-3">
+          <SecondaryButton
+            className="sm:w-44"
+            onClick={() => setFormData(createBlankCheck())}
+          >
+            Clear
+          </SecondaryButton>
+          {mode === "create" ? (
+            <PrimaryButton className="flex-1" onClick={saveScheduledCheck}>
+              Schedule Audit
+            </PrimaryButton>
+          ) : (
+            <PrimaryButton className="flex-1" onClick={submitPhysicalCount}>
+              Submit Physical Count
+            </PrimaryButton>
+          )}
+        </div>
+      </div>
+    </DataPanel>
+  );
+
+  return (
+    <div className="space-y-6 pb-20">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-black uppercase tracking-tight text-brand-charcoal">
+            Inventory Spot Checks
+          </h1>
+          <p className="text-[10px] font-bold uppercase text-stone-400">
+            WhatsApp-led stock audit, sales movement and vendor advisory layer.
+          </p>
+        </div>
+        <PrimaryButton onClick={() => setActiveTab("create")}>
+          <ClipboardCheck size={14} className="mr-2" /> Create Spot Check
+        </PrimaryButton>
+      </div>
+
+      <div className="sticky top-0 z-20 bg-white border-b-4 border-brand-charcoal overflow-x-auto">
+        <div className="flex">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`min-h-[54px] whitespace-nowrap flex items-center gap-2 px-4 text-[10px] font-black uppercase ${
+                activeTab === tab.id
+                  ? "bg-brand-orange text-white"
+                  : "text-stone-500 hover:bg-stone-50"
+              }`}
+            >
+              <tab.icon size={14} /> {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-4">
+        <StatCard label="Spot Checks" value={stats.total} icon={ClipboardCheck} />
+        <StatCard label="Audit Queue" value={stats.queue} icon={Bell} variant="warning" />
+        <StatCard label="High Pressure" value={stats.highPressure} icon={TrendingUp} variant={stats.highPressure ? "error" : "neutral"} />
+        <StatCard label="Unresolved" value={stats.unresolved} icon={AlertTriangle} variant={stats.unresolved ? "warning" : "neutral"} />
+        <StatCard label="Est. Sales" value={stats.estimatedSales} icon={Package} />
+        <StatCard label="Accurate Vendors" value={stats.accurateVendors} icon={CheckCircle2} variant="success" />
+        <StatCard label="Mismatches" value={stats.mismatches} icon={ShieldAlert} variant={stats.mismatches ? "error" : "neutral"} />
+      </div>
+
+      {showPopupFeed && demandRecommendations[0]?.leadPressureScore >= 51 && (
+        <div className="fixed bottom-6 right-6 z-40 w-[min(390px,calc(100vw-2rem))] border-2 border-brand-charcoal bg-white p-4 shadow-2xl">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-black uppercase text-brand-charcoal">
+                SCI Stock Intelligence Feed
+              </p>
+              <p className="mt-1 text-sm font-bold text-brand-orange">
+                Stock Audit Recommended
+              </p>
+            </div>
+            <button
+              className="text-[10px] font-black uppercase text-stone-400"
+              onClick={() => setShowPopupFeed(false)}
+            >
+              Dismiss
+            </button>
+          </div>
+          <p className="mt-2 text-xs font-semibold text-stone-600">
+            {demandRecommendations[0].productName} has{" "}
+            {demandRecommendations[0].whatsappHits} WhatsApp hits and only{" "}
+            {demandRecommendations[0].listedQtyBeforeAudit} listed units.
+          </p>
+        </div>
+      )}
+
+      {activeTab === "dashboard" && canViewAnalytics && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <DataPanel title="SCI Office BI Summary" className="lg:col-span-2 border-t-4 border-t-brand-orange">
+            <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+              {[
+                ["High demand products needing stock audit", stats.highPressure],
+                ["Vendors with accurate stock", stats.accurateVendors],
+                ["Vendors with repeated mismatches", stats.mismatches],
+                ["Unresolved spot checks", stats.unresolved],
+                ["Estimated sales from demand-led audits", stats.estimatedSales],
+                ["Branches needing verification", new Set(demandRecommendations.map((r) => r.branchName).filter(Boolean)).size],
+              ].map(([label, value]) => (
+                <div key={String(label)} className="border border-stone-200 p-4">
+                  <p className="text-[10px] font-black uppercase text-stone-400">
+                    {label}
+                  </p>
+                  <p className="mt-2 text-2xl font-black text-brand-charcoal font-mono">
+                    {value}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </DataPanel>
+          <DataPanel title="Top Lead Pressure">
+            <div className="p-4 space-y-3">
+              {demandRecommendations.slice(0, 6).map((rec) => (
+                <button
+                  key={rec.id}
+                  onClick={() => loadRecommendation(rec)}
+                  className="w-full text-left border border-stone-200 p-3 hover:border-brand-orange"
+                >
+                  <p className="text-xs font-black uppercase text-brand-charcoal truncate">
+                    {rec.productName}
+                  </p>
+                  <p className="text-[10px] font-bold uppercase text-stone-400 truncate">
+                    {rec.vendorName}
+                  </p>
+                  <StatusBadge
+                    status={`${riskLevel(rec.leadPressureScore)} ${rec.leadPressureScore}`}
+                    variant={riskVariant(rec.leadPressureScore)}
+                  />
+                </button>
+              ))}
+            </div>
+          </DataPanel>
+        </div>
+      )}
+
+      {activeTab === "queue" && (
         <TablePanel
-          title="Integrity Audit Trail"
+          title="Demand-Led Audit Queue"
+          subtitle="Generated from WhatsApp, calls, product searches, stock complaints and listed stock."
           headers={[
-            "Identity Snapshot",
-            "Audit Metadata",
-            "Integrity Result",
-            "Status",
-            "Operations",
+            "Vendor",
+            "Product / Branch",
+            "Listed Qty",
+            "WA",
+            "Calls",
+            "Search",
+            "Complaints",
+            "Pressure",
+            "Action",
           ]}
         >
-          {filtered.map((check) => {
-            const vendor = safeVendors.find((v) => v.id === check.vendorId);
-            return (
-              <tr
-                key={check.id}
-                className="group hover:bg-stone-50/50 transition-colors"
-              >
-                <td className="px-6 py-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 border border-stone-200 bg-white flex items-center justify-center font-bold text-stone-300">
-                      {vendor?.logoUrl ? (
-                        <img
-                          src={vendor.logoUrl}
-                          className="w-full h-full object-cover grayscale"
-                          alt=""
-                        />
-                      ) : (
-                        "V"
-                      )}
-                    </div>
-                    <div>
-                      <p className="text-[9px] font-mono font-black text-stone-500 bg-stone-100 px-1 border border-stone-200 w-fit mb-1">
-                        {check.vendorSystemCode}
-                      </p>
-                      <p className="text-xs font-bold uppercase text-brand-charcoal">
-                        {check.vendorNameSnapshot}
-                      </p>
-                    </div>
-                  </div>
-                </td>
-                <td className="px-6 py-4">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-1.5 text-[9px] font-bold text-stone-400">
-                      <Calendar size={10} /> {safeDateText(check.checkDate)}
-                    </div>
-                    <div className="flex items-center gap-1.5 text-[9px] font-bold text-stone-400">
-                      <User size={10} /> {check.backendStaffName}
-                    </div>
-                    <div className="text-[8px] font-mono text-stone-300 uppercase italic">
-                      Check ID: {check.id}
-                    </div>
-                  </div>
-                </td>
-                <td className="px-6 py-4">
-                  {check.status === "completed" ? (
-                    <div className="space-y-2">
-                      <div className="flex gap-2">
-                        <div className="flex flex-col items-center px-2 py-1 bg-emerald-50 rounded border border-emerald-100">
-                          <span className="text-[8px] font-black text-emerald-600 uppercase">
-                            Correct
-                          </span>
-                          <span className="text-xs font-bold text-emerald-700">
-                            {check.productsCorrectCount}
-                          </span>
-                        </div>
-                        <div className="flex flex-col items-center px-2 py-1 bg-red-50 rounded border border-red-100">
-                          <span className="text-[8px] font-black text-red-600 uppercase">
-                            Variance
-                          </span>
-                          <span className="text-xs font-bold text-red-700">
-                            {check.productsVarianceCount}
-                          </span>
-                        </div>
-                      </div>
-                      <StatusBadge
-                        status={check.result}
-                        variant={
-                          check.result === "passed"
-                            ? "success"
-                            : check.result === "major issues"
-                              ? "error"
-                              : "warning"
-                        }
-                      />
-                    </div>
-                  ) : (
-                    <span className="text-[10px] font-bold text-stone-300 italic uppercase">
-                      Awaiting integrity audit...
-                    </span>
-                  )}
-                </td>
-                <td className="px-6 py-4">
-                  <StatusBadge
-                    status={check.status}
-                    variant={
-                      check.status === "completed" ? "success" : "warning"
-                    }
-                  />
-                </td>
-                <td className="px-6 py-4 text-right">
-                  <div className="flex justify-end gap-2">
-                    {check.status === "scheduled" && (
-                      <button
-                        onClick={() => {
-                          if (
-                            permissionService.canEdit("inventorySpotChecks")
-                          ) {
-                            setSelectedCheck(check);
-                            setFormData({ ...check, status: "completed" });
-                            setShowScheduleModal(true);
-                          } else {
-                            alert(
-                              "Permission denied to enter spot check results.",
-                            );
-                          }
-                        }}
-                        className={`text-[9px] font-bold text-brand-orange hover:underline uppercase ${!permissionService.canEdit("inventorySpotChecks") ? "opacity-50 cursor-not-allowed" : ""}`}
-                      >
-                        Enter Results
-                      </button>
-                    )}
-                    <button
-                      className={`p-1 px-2 border border-stone-200 text-[9px] font-bold uppercase text-stone-400 hover:text-stone-900 transition-all rounded ${!permissionService.canEdit("inventorySpotChecks") ? "opacity-50 cursor-not-allowed" : ""}`}
-                      onClick={() => {
-                        if (permissionService.canEdit("inventorySpotChecks")) {
-                          setSelectedCheck(check);
-                          setFormData(check);
-                          setShowScheduleModal(true);
-                        } else {
-                          alert("Permission denied to edit spot checks.");
-                        }
-                      }}
-                    >
-                      Edit
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            );
-          })}
-          {filtered.length === 0 && (
+          {demandRecommendations.map((rec) => (
+            <tr key={rec.id} className="hover:bg-orange-50/30">
+              <td className="px-6 py-4 text-xs font-black uppercase">{rec.vendorName}</td>
+              <td className="px-6 py-4">
+                <p className="text-xs font-black uppercase">{rec.productName}</p>
+                <p className="text-[10px] font-bold uppercase text-stone-400 flex items-center gap-1">
+                  <MapPin size={10} /> {rec.branchName || "No branch"}
+                </p>
+              </td>
+              <td className="px-6 py-4 font-mono text-xs">{rec.listedQtyBeforeAudit}</td>
+              <td className="px-6 py-4 font-mono text-xs">{rec.whatsappHits}</td>
+              <td className="px-6 py-4 font-mono text-xs">{rec.callHits}</td>
+              <td className="px-6 py-4 font-mono text-xs">{rec.searchHits}</td>
+              <td className="px-6 py-4 font-mono text-xs text-red-600">{rec.complaintCount}</td>
+              <td className="px-6 py-4">
+                <StatusBadge status={`${riskLevel(rec.leadPressureScore)} ${rec.leadPressureScore}`} variant={riskVariant(rec.leadPressureScore)} />
+              </td>
+              <td className="px-6 py-4">
+                <div className="flex flex-col gap-2 items-start">
+                  <span className="text-[10px] font-bold uppercase text-stone-500">
+                    {rec.recommendedAction}
+                  </span>
+                  <PrimaryButton size="sm" onClick={() => loadRecommendation(rec)}>
+                    Create Audit
+                  </PrimaryButton>
+                </div>
+              </td>
+            </tr>
+          ))}
+          {demandRecommendations.length === 0 && (
             <tr>
-              <td colSpan={5} className="py-20">
+              <td colSpan={9} className="p-10">
                 <EmptyState
-                  title="No Integrity Records"
-                  description="No inventory spot checks found and synchronized for current buffer."
+                  icon={CheckCircle2}
+                  title="No Demand-led Audit Pressure"
+                  description="No products currently cross the lead pressure or complaint thresholds."
                 />
               </td>
             </tr>
           )}
         </TablePanel>
-      </div>
+      )}
 
-      {/* Schedule / Entry Modal */}
-      {showScheduleModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-brand-charcoal/40 backdrop-blur-sm p-2 md:p-4">
-          <div className="bg-white w-[96vw] md:w-[80vw] max-w-[1200px] md:min-h-[70vh] max-h-[92vh] flex flex-col shadow-2xl animate-in zoom-in-95 duration-200 border-t-4 border-t-brand-orange rounded-none">
-            {/* Header */}
-            <div className="p-4 md:p-6 border-b border-stone-100 flex justify-between items-center bg-stone-50 shrink-0">
-              <div>
-                <h2 className="text-sm md:text-base font-bold uppercase tracking-tight text-brand-charcoal">
-                  {selectedCheck
-                    ? "Manage Integrity Record"
-                    : "Schedule Integrity Audit"}
-                </h2>
-                <p className="text-[10px] text-stone-400 font-bold uppercase mt-1">
-                  {selectedCheck
-                    ? "Updating existing audit node"
-                    : "Create a new scheduled audit record"}
-                </p>
-              </div>
-              <button
-                onClick={() => setShowScheduleModal(false)}
-                className="p-2 hover:bg-stone-200 text-stone-400 transition-colors"
-              >
-                <X size={20} />
-              </button>
-            </div>
+      {activeTab === "create" && renderCreateForm("create")}
+      {activeTab === "count" && renderCreateForm("count")}
 
-            {/* Body */}
-            <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-10 custom-scrollbar">
-              {/* Section A: Audit Header */}
-              <div className="space-y-6">
-                <h3 className="text-xs font-bold uppercase tracking-widest text-brand-orange border-b border-orange-100 pb-2 flex items-center gap-2">
-                  <Info size={14} /> Audit Header
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                  <div className="space-y-1.5 lg:col-span-2">
-                    <label className="text-[10px] font-bold uppercase text-stone-400">
-                      Target Vendor Node
-                    </label>
-                    <select
-                      className="w-full bg-stone-50 border-2 border-stone-100 p-3 md:p-4 text-xs font-bold uppercase outline-none focus:border-brand-orange"
-                      value={formData.vendorId || ""}
-                      onChange={(e) =>
-                        setFormData({ ...formData, vendorId: e.target.value })
-                      }
-                      disabled={!!selectedCheck}
-                    >
-                      <option value="">Select Vendor</option>
-                      {safeVendors.map((v) => (
-                        <option key={v.id} value={v.id}>
-                          {v.name} ({v.systemCode})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold uppercase text-stone-400">
-                      Audit Date
-                    </label>
-                    <input
-                      type="date"
-                      className="w-full bg-stone-50 border-2 border-stone-100 p-3 md:p-4 text-xs font-bold outline-none focus:border-brand-orange"
-                      value={formData.checkDate}
-                      onChange={(e) =>
-                        setFormData({ ...formData, checkDate: e.target.value })
-                      }
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold uppercase text-stone-400">
-                      Check Type
-                    </label>
-                    <select
-                      className="w-full bg-stone-50 border-2 border-stone-100 p-3 md:p-4 text-xs font-bold uppercase outline-none focus:border-brand-orange"
-                      value={formData.type}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          type: e.target.value as SpotCheckType,
-                        })
-                      }
-                    >
-                      <option value="random">Random</option>
-                      <option value="scheduled">Scheduled</option>
-                      <option value="complaint-based">Complaint</option>
-                      <option value="renewal-based">Renewal</option>
-                      <option value="BI-recommended">BI Forecast</option>
-                    </select>
-                  </div>
-                  <div className="space-y-1.5 lg:col-start-4">
-                    <label className="text-[10px] font-bold uppercase text-stone-400">
-                      Status Node
-                    </label>
-                    <select
-                      className="w-full bg-stone-50 border-2 border-stone-100 p-3 md:p-4 text-xs font-bold uppercase outline-none focus:border-brand-orange"
-                      value={formData.status}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          status: e.target.value as SpotCheckStatus,
-                        })
-                      }
-                    >
-                      <option value="scheduled">Scheduled</option>
-                      <option value="completed">Completed</option>
-                      <option value="escalated">Escalated</option>
-                      <option value="cancelled">Cancelled</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              {/* Section B: Precision Metrics */}
-              <div className="space-y-6">
-                <h3 className="text-xs font-bold uppercase tracking-widest text-brand-orange border-b border-orange-100 pb-2 flex items-center gap-2">
-                  <ClipboardCheck size={14} /> Precision Metrics
-                </h3>
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold uppercase text-stone-400">
-                      SKUs Screened
-                    </label>
-                    <input
-                      type="number"
-                      className="w-full bg-white border-2 border-stone-100 p-3 md:p-4 text-xs font-bold outline-none focus:border-brand-orange"
-                      value={formData.productsCheckedCount}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          productsCheckedCount: toNumber(e.target.value),
-                        })
-                      }
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold uppercase text-stone-400">
-                      Quantity Accuracy
-                    </label>
-                    <input
-                      type="number"
-                      className="w-full bg-white border-2 border-stone-100 p-3 md:p-4 text-xs font-bold outline-none focus:border-brand-orange"
-                      value={formData.productsCorrectCount}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          productsCorrectCount: toNumber(e.target.value),
-                        })
-                      }
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold uppercase text-stone-400">
-                      Image Gaps
-                    </label>
-                    <input
-                      type="number"
-                      className="w-full bg-white border-2 border-stone-100 p-3 md:p-4 text-xs font-bold outline-none focus:border-brand-orange"
-                      value={formData.productsMissingImagesCount}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          productsMissingImagesCount: toNumber(e.target.value),
-                        })
-                      }
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold uppercase text-stone-400">
-                      Pricing Gaps
-                    </label>
-                    <input
-                      type="number"
-                      className="w-full bg-white border-2 border-stone-100 p-3 md:p-4 text-xs font-bold outline-none focus:border-brand-orange"
-                      value={formData.productsNeedingPriceUpdateCount}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          productsNeedingPriceUpdateCount: toNumber(
-                            e.target.value,
-                          ),
-                        })
-                      }
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Section C: Observations */}
-              <div className="space-y-6">
-                <h3 className="text-xs font-bold uppercase tracking-widest text-brand-orange border-b border-orange-100 pb-2 flex items-center gap-2">
-                  <AlertCircle size={14} /> Observations
-                </h3>
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                  <div className="lg:col-span-2 space-y-1.5">
-                    <label className="text-[10px] font-bold uppercase text-stone-400">
-                      Audit Observations
-                    </label>
-                    <textarea
-                      className="w-full bg-stone-50 border-2 border-stone-100 p-4 text-xs font-medium outline-none h-24 focus:border-brand-orange resize-none"
-                      placeholder="Detail physical vs digital variances..."
-                      value={formData.notes || ""}
-                      onChange={(e) =>
-                        setFormData({ ...formData, notes: e.target.value })
-                      }
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold uppercase text-stone-400">
-                      Final Verdict
-                    </label>
-                    <select
-                      className="w-full bg-white border-2 border-stone-100 p-4 text-xs font-bold uppercase outline-none focus:border-brand-orange h-[6rem] lg:h-24"
-                      value={formData.result}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          result: e.target.value as SpotCheckResult,
-                        })
-                      }
-                    >
-                      <option value="passed">Integrity Passed</option>
-                      <option value="minor issues">Minor Discrepancies</option>
-                      <option value="major issues">Major Failure</option>
-                      <option value="follow-up required">
-                        Pending Follow-up
-                      </option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              {/* Section D: Follow-up Result */}
-              <div
-                className={`p-4 md:p-6 border-2 flex items-center gap-4 ${formData.result === "passed" ? "bg-emerald-50 border-emerald-100" : "bg-orange-50 border-orange-100"}`}
-              >
-                {formData.result === "passed" ? (
-                  <>
-                    <CheckCircle2
-                      size={24}
-                      className="text-emerald-500 shrink-0"
-                    />
-                    <span className="text-xs font-bold uppercase text-emerald-700 tracking-wider">
-                      Integrity Passed. No follow-up tasks will be triggered.
+      {activeTab === "variance" && (
+        <TablePanel
+          title="Variance & Sales Estimate"
+          subtitle="estimatedSalesQty = startingQty + restockedQty - physicalCountQty."
+          headers={["Product", "Vendor", "Start", "Restocked", "Physical", "Est. Sales", "Variance", "Type", "Stock Update"]}
+        >
+          {filteredChecks
+            .filter((check) => check.status === "completed")
+            .map((check) => (
+              <tr key={check.id} className="hover:bg-stone-50">
+                <td className="px-6 py-4 text-xs font-black uppercase">{check.productName}</td>
+                <td className="px-6 py-4 text-xs font-bold uppercase">{check.vendorName || check.vendorNameSnapshot}</td>
+                <td className="px-6 py-4 font-mono text-xs">{check.startingQty}</td>
+                <td className="px-6 py-4 font-mono text-xs">{check.restockedQty}</td>
+                <td className="px-6 py-4 font-mono text-xs">{check.physicalCountQty}</td>
+                <td className="px-6 py-4 font-mono text-xs text-brand-orange font-black">{check.estimatedSalesQty}</td>
+                <td className="px-6 py-4 font-mono text-xs">{check.varianceQty}</td>
+                <td className="px-6 py-4">
+                  <StatusBadge
+                    status={check.varianceType || "pending"}
+                    variant={check.varianceType === "matched" ? "success" : check.varianceType === "possible_sales" ? "warning" : "error"}
+                  />
+                </td>
+                <td className="px-6 py-4">
+                  {canUpdateStock ? (
+                    <PrimaryButton size="sm" onClick={() => updateCatalogueStock(check)}>
+                      Update Catalogue Stock
+                    </PrimaryButton>
+                  ) : (
+                    <span className="text-[10px] font-black uppercase text-stone-400">
+                      No permission to update catalogue stock.
                     </span>
-                  </>
-                ) : (
-                  <>
-                    <AlertTriangle
-                      size={24}
-                      className="text-brand-orange shrink-0"
-                    />
-                    <span className="text-xs font-bold uppercase text-orange-800 tracking-wider">
-                      Discrepancies detected. Follow-up tasks will be triggered
-                      automatically.
-                    </span>
-                  </>
-                )}
-              </div>
-            </div>
+                  )}
+                </td>
+              </tr>
+            ))}
+        </TablePanel>
+      )}
 
-            {/* Footer */}
-            <div className="p-4 md:p-6 border-t border-stone-100 bg-stone-50 flex justify-end gap-3 shrink-0">
-              <SecondaryButton
-                onClick={() => setShowScheduleModal(false)}
-                className="px-6 md:px-8 py-3 text-xs"
-              >
-                Cancel
-              </SecondaryButton>
-              <PrimaryButton
-                onClick={handleSave}
-                className="px-6 md:px-8 py-3 text-xs"
-              >
-                Persist Record
-              </PrimaryButton>
-            </div>
-          </div>
+      {activeTab === "advisory" && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          {filteredChecks
+            .filter((check) => check.status === "completed")
+            .map((check) => (
+              <DataPanel key={check.id} title="Vendor Advisory Card" className="border-t-4 border-t-brand-orange">
+                <div className="p-5 space-y-4">
+                  <div className="flex items-start gap-3">
+                    <Store className="text-brand-orange shrink-0" size={20} />
+                    <div>
+                      <p className="text-xs font-black uppercase text-brand-charcoal">
+                        {check.vendorName || check.vendorNameSnapshot}
+                      </p>
+                      <p className="text-[10px] font-bold uppercase text-stone-400">
+                        {check.productName}
+                      </p>
+                    </div>
+                  </div>
+                  <p className="text-sm font-semibold text-stone-700 leading-relaxed">
+                    {check.vendorAdvice || generateVendorAdvice(check)}
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <StatusBadge status={`Demand ${riskLevel(check.leadPressureScore || 0)}`} variant={riskVariant(check.leadPressureScore || 0)} />
+                    <StatusBadge status={`Accuracy ${Math.round(check.stockAccuracyScore || 0)}%`} variant={(check.stockAccuracyScore || 0) >= 90 ? "success" : "warning"} />
+                  </div>
+                </div>
+              </DataPanel>
+            ))}
         </div>
+      )}
+
+      {activeTab === "history" && (
+        <DataPanel title="Audit History" subtitle="All scheduled, completed and escalated stock audit records.">
+          <div className="p-4">
+            <SearchInput
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search vendor, product, status, variance..."
+            />
+          </div>
+          <div className="p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {filteredChecks.map((check) => (
+              <button
+                key={check.id}
+                onClick={() => {
+                  setSelectedCheckId(check.id);
+                  setFormData(check);
+                  setActiveTab(check.status === "completed" ? "variance" : "count");
+                }}
+                className="text-left border-2 border-stone-200 bg-white p-4 hover:border-brand-orange"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-black uppercase text-brand-charcoal">
+                      {check.productName || "Legacy vendor audit"}
+                    </p>
+                    <p className="text-[10px] font-bold uppercase text-stone-400">
+                      {check.vendorName || check.vendorNameSnapshot}
+                    </p>
+                  </div>
+                  <StatusBadge status={check.status} variant={check.status === "completed" ? "success" : "warning"} />
+                </div>
+                <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+                  <div className="bg-stone-50 p-2">
+                    <p className="text-[8px] font-black uppercase text-stone-400">Listed</p>
+                    <p className="font-mono text-xs font-black">{check.listedQtyBeforeAudit ?? "-"}</p>
+                  </div>
+                  <div className="bg-stone-50 p-2">
+                    <p className="text-[8px] font-black uppercase text-stone-400">Count</p>
+                    <p className="font-mono text-xs font-black">{check.physicalCountQty ?? "-"}</p>
+                  </div>
+                  <div className="bg-stone-50 p-2">
+                    <p className="text-[8px] font-black uppercase text-stone-400">Lead</p>
+                    <p className="font-mono text-xs font-black">{check.leadPressureScore ?? 0}</p>
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </DataPanel>
+      )}
+
+      {activeTab === "dashboard" && !canViewAnalytics && (
+        <EmptyState
+          icon={ShieldAlert}
+          title="Analytics Permission Required"
+          description="This staff profile does not have inventory.spotChecks.viewAnalytics access."
+        />
       )}
     </div>
   );

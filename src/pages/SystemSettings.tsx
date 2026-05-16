@@ -10,6 +10,7 @@ import {
   PrimaryButton,
   SecondaryButton,
   FormField,
+  BrandedAlertModal,
 } from "../components/CommonUI.tsx";
 import { settingsService } from "../services/settingsService.ts";
 import { SystemSettings as SystemSettingsType } from "../types.ts";
@@ -23,8 +24,15 @@ const defaultRpnSettings = {
   weeklyOnboardingThreshold: 20,
   monthlyOnboardingThreshold: 80,
   churnWarningPercent: 15,
+  churnWarningRate: 15,
+  recurringVendorRetentionTarget: 85,
+  minimumRecurringRevenueTarget: 0,
+  overdueVendorFollowUpDays: 2,
+  inactiveAssignedVendorDays: 14,
   minimumCollectionRatePercent: 70,
   graceDaysBeforeWarning: 3,
+  subscriptionDueWarningDays: 3,
+  subscriptionOverdueEscalationDays: 2,
   enableThresholdAlerts: true,
   requireApprovalForThresholdChange: false,
   updatedAt: new Date().toISOString(),
@@ -34,6 +42,21 @@ export const SystemSettings: React.FC = () => {
   const [settings, setSettings] = useState<SystemSettingsType>({});
   const [isSaving, setIsSaving] = useState(false);
   const [logoStatus, setLogoStatus] = useState("");
+
+  const [alertConfig, setAlertConfig] = useState<{
+    isOpen: boolean;
+    title?: string;
+    message: string;
+    type?: "success" | "error" | "warning" | "info";
+  }>({ isOpen: false, title: "seiGEN Commerce", message: "", type: "success" });
+
+  const showBrandedAlert = (config: {
+    title?: string;
+    message: string;
+    type?: "success" | "error" | "warning" | "info";
+  }) => {
+    setAlertConfig({ ...config, isOpen: true });
+  };
 
   useEffect(() => {
     loadSettings();
@@ -48,7 +71,11 @@ export const SystemSettings: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith("image/")) {
-      alert("Only image files are allowed.");
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message: "Only image files are allowed.",
+        type: "warning",
+      });
       return;
     }
 
@@ -80,7 +107,11 @@ export const SystemSettings: React.FC = () => {
       }
 
       await settingsService.saveSettings(settingsToSave);
-      alert("Settings saved successfully.");
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message: "Settings saved successfully.",
+        type: "success",
+      });
 
       // Non-blocking staff audit logging
       try {
@@ -97,7 +128,11 @@ export const SystemSettings: React.FC = () => {
       }
     } catch (e) {
       console.error(e);
-      alert("Failed to save settings.");
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message: "Failed to save settings.",
+        type: "error",
+      });
     } finally {
       setIsSaving(false);
     }
@@ -105,6 +140,11 @@ export const SystemSettings: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      <BrandedAlertModal
+        {...alertConfig}
+        onClose={() => setAlertConfig({ ...alertConfig, isOpen: false })}
+      />
+
       <PageHeader
         title="System Settings"
         subtitle="Configure system-wide settings and preferences"
@@ -301,6 +341,93 @@ export const SystemSettings: React.FC = () => {
                     rpnPerformanceSettings: {
                       ...(prev.rpnPerformanceSettings || defaultRpnSettings),
                       graceDaysBeforeWarning: Number(e.target.value),
+                    },
+                  }))
+                }
+                disabled={!permissionService.canSetRpnThresholds()}
+              />
+            </FormField>
+
+            <FormField label="Subscription Due Warning Days">
+              <input
+                type="number"
+                className="border-2 border-stone-200 p-2 text-sm outline-none focus:border-brand-orange w-full disabled:bg-stone-100 disabled:text-stone-400"
+                value={
+                  settings.rpnPerformanceSettings?.subscriptionDueWarningDays ??
+                  defaultRpnSettings.subscriptionDueWarningDays
+                }
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    rpnPerformanceSettings: {
+                      ...(prev.rpnPerformanceSettings || defaultRpnSettings),
+                      subscriptionDueWarningDays: Number(e.target.value),
+                    },
+                  }))
+                }
+                disabled={!permissionService.canSetRpnThresholds()}
+              />
+            </FormField>
+
+            <FormField label="Subscription Overdue Escalation Days">
+              <input
+                type="number"
+                className="border-2 border-stone-200 p-2 text-sm outline-none focus:border-brand-orange w-full disabled:bg-stone-100 disabled:text-stone-400"
+                value={
+                  settings.rpnPerformanceSettings
+                    ?.subscriptionOverdueEscalationDays ??
+                  defaultRpnSettings.subscriptionOverdueEscalationDays
+                }
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    rpnPerformanceSettings: {
+                      ...(prev.rpnPerformanceSettings || defaultRpnSettings),
+                      subscriptionOverdueEscalationDays: Number(e.target.value),
+                    },
+                  }))
+                }
+                disabled={!permissionService.canSetRpnThresholds()}
+              />
+            </FormField>
+
+            <FormField label="Recurring Vendor Retention Target %">
+              <input
+                type="number"
+                className="border-2 border-stone-200 p-2 text-sm outline-none focus:border-brand-orange w-full disabled:bg-stone-100 disabled:text-stone-400"
+                value={
+                  settings.rpnPerformanceSettings
+                    ?.recurringVendorRetentionTarget ??
+                  defaultRpnSettings.recurringVendorRetentionTarget
+                }
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    rpnPerformanceSettings: {
+                      ...(prev.rpnPerformanceSettings || defaultRpnSettings),
+                      recurringVendorRetentionTarget: Number(e.target.value),
+                    },
+                  }))
+                }
+                disabled={!permissionService.canSetRpnThresholds()}
+              />
+            </FormField>
+
+            <FormField label="Minimum Recurring Revenue Target">
+              <input
+                type="number"
+                className="border-2 border-stone-200 p-2 text-sm outline-none focus:border-brand-orange w-full disabled:bg-stone-100 disabled:text-stone-400"
+                value={
+                  settings.rpnPerformanceSettings
+                    ?.minimumRecurringRevenueTarget ??
+                  defaultRpnSettings.minimumRecurringRevenueTarget
+                }
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    rpnPerformanceSettings: {
+                      ...(prev.rpnPerformanceSettings || defaultRpnSettings),
+                      minimumRecurringRevenueTarget: Number(e.target.value),
                     },
                   }))
                 }

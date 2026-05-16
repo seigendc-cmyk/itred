@@ -77,6 +77,8 @@ export const approvalService = {
       priority: request.riskLevel === "critical" ? "critical" : "high",
       recordType: "approval_request",
       recordId: newReq.id,
+      createdByStaffId: request.submittedByStaffId,
+      createdByName: request.submittedByName,
       targetRole: "Admin", // Can be enhanced later depending on requestType
     });
 
@@ -163,6 +165,9 @@ export const approvalService = {
         recordType: "approval_request",
         recordId: req.id,
         assignedToStaffId: req.submittedByStaffId,
+        assignedToName: req.submittedByName,
+        createdByStaffId: managerId,
+        createdByName: managerName,
       });
 
       void staffAuditService.logAction({
@@ -202,6 +207,9 @@ export const approvalService = {
         recordType: "approval_request",
         recordId: req.id,
         assignedToStaffId: req.submittedByStaffId,
+        assignedToName: req.submittedByName,
+        createdByStaffId: managerId,
+        createdByName: managerName,
       });
 
       void staffAuditService.logAction({
@@ -236,11 +244,14 @@ export const approvalService = {
       await notificationService.createNotification({
         title: "Correction Required",
         message: `Your ${req.requestType} request was returned. See task board for details.`,
-        type: "task_due",
+        type: "approval_request",
         priority: "high",
         recordType: "approval_request",
         recordId: req.id,
         assignedToStaffId: req.submittedByStaffId,
+        assignedToName: req.submittedByName,
+        createdByStaffId: managerId,
+        createdByName: managerName,
       });
 
       await taskService.createTask({
@@ -248,10 +259,16 @@ export const approvalService = {
         description: correctionNotes,
         taskType: "catalogue_review",
         assignedToStaffId: req.submittedByStaffId,
+        assignedToName: req.submittedByName,
         assignedByStaffId: managerId,
+        assignedByName: managerName,
+        module: "Approval Queue",
         relatedRecordType: req.recordType,
         relatedRecordId: req.recordId,
         priority: "high",
+        dueDate: new Date().toISOString().split("T")[0],
+        notes: "",
+        reviewNotes: "",
       });
 
       void staffAuditService.logAction({

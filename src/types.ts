@@ -111,9 +111,26 @@ export type ActionPermissionKey =
   | "catalogue.approveDeploy"
   | "catalogue.download"
   | "catalogue.archive"
+  | "catalogue.overridePlanLimit"
+  | "whatsapp.view"
+  | "whatsapp.logs.view"
+  | "whatsapp.logs.create"
+  | "whatsapp.logs.edit"
+  | "whatsapp.logs.delete"
+  | "whatsapp.analytics.view"
+  | "whatsapp.alerts.manage"
+  | "whatsapp.followups.manage"
+  | "whatsapp.vendorReputation.view"
   | "whatsapp.view"
   | "whatsapp.logActivity"
   | "whatsapp.verifyConversion"
+  | "inventory.spotChecks.view"
+  | "inventory.spotChecks.create"
+  | "inventory.spotChecks.complete"
+  | "inventory.spotChecks.assign"
+  | "inventory.spotChecks.updateStock"
+  | "inventory.spotChecks.escalate"
+  | "inventory.spotChecks.viewAnalytics"
   | "cah.view"
   | "cah.createLink"
   | "cah.submitApproval"
@@ -121,13 +138,22 @@ export type ActionPermissionKey =
   | "pricing.view"
   | "pricing.submitApproval"
   | "pricing.approve"
+  | "notifications.view"
+  | "notifications.markRead"
+  | "notifications.resolve"
+  | "notifications.archive"
+  | "notifications.viewAll"
   | "notifications.viewOwn"
   | "notifications.viewTeam"
-  | "notifications.resolve"
+  | "staffTasks.view"
+  | "staffTasks.create"
+  | "staffTasks.assign"
+  | "staffTasks.updateStatus"
+  | "staffTasks.review"
+  | "staffTasks.cancel"
   | "approvalQueue.view"
   | "approvalQueue.approve"
   | "staffTasks.viewOwn"
-  | "staffTasks.assign"
   | "staffTasks.complete"
   | "rpn.viewAgents"
   | "rpn.createAgent"
@@ -176,11 +202,14 @@ export interface Branch {
   name: string;
   phone: string;
   whatsapp: string;
+  country?: string;
   province: string;
   cityTown: string;
   district: string;
   suburb: string;
+  streetAddress?: string;
   address: string;
+  landmark?: string;
   managerName: string;
   openingHours: string;
   isDefault: boolean;
@@ -364,6 +393,69 @@ export interface WhatsAppActivityLog {
   assignedToType?: "STAFF" | "RPN" | "ADMIN";
   assignedStaffId?: string;
   assignedStaffName?: string;
+}
+
+export type InteractionType =
+  | "Enquiry"
+  | "Complaint"
+  | "Compliment"
+  | "Price Request"
+  | "Delivery Complaint"
+  | "Stock Request"
+  | "Warranty Issue"
+  | "Fraud Alert"
+  | "Product Search"
+  | "Service Request"
+  | "Market Feedback";
+
+export type UrgencyLevel = "Low" | "Medium" | "High" | "Critical";
+export type ResolutionStatus =
+  | "Pending"
+  | "In Progress"
+  | "Resolved"
+  | "Escalated";
+export type Sentiment = "Positive" | "Neutral" | "Negative";
+export type IntelligenceSource =
+  | "WhatsApp"
+  | "Call"
+  | "Walk-in"
+  | "Catalogue"
+  | "CAH"
+  | "Storefront";
+
+export interface WhatsAppIntelligenceLog {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  loggedByStaffId: string;
+  loggedByStaffName: string;
+  customerName?: string;
+  customerPhone: string;
+  vendorId?: string;
+  vendorName?: string;
+  productId?: string;
+  productName?: string;
+  category?: string;
+  sector?: string;
+  region?: string;
+  province?: string;
+  city?: string;
+  source: IntelligenceSource;
+  interactionType: InteractionType;
+  customerMessage: string;
+  internalNotes?: string;
+  actionRequired: boolean;
+  urgencyLevel: UrgencyLevel;
+  resolutionStatus: ResolutionStatus;
+  assignedToStaffId?: string;
+  assignedToStaffName?: string;
+  followUpRequired: boolean;
+  followUpDate?: string;
+  tags: string[];
+  sentiment: Sentiment;
+  biScore?: number;
+  flaggedRisk?: boolean;
+  duplicatePatternDetected?: boolean;
 }
 
 export interface DeliveryStaff {
@@ -552,12 +644,61 @@ export type ProductStatus =
   | "out_of_stock"
   | "discontinued"
   | "pending_review";
+export type VendorProductStockStatus =
+  | "in_stock"
+  | "low_stock"
+  | "out_of_stock"
+  | "made_to_order"
+  | "unknown";
 export type ImageStatus =
   | "missing"
   | "uploaded"
   | "compressed"
   | "approved"
   | "needs replacement";
+
+export interface MasterProduct {
+  id: string;
+  productName: string;
+  brand?: string;
+  category: string;
+  sector: string;
+  description?: string;
+  barcode?: string;
+  standardSku?: string;
+  tags: string[];
+  keywords: string[];
+  imageUrl?: string;
+  additionalImages?: string[];
+  unit?: string;
+  searchableText: string;
+  status: ProductStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface VendorProductOffer {
+  id: string;
+  vendorId: string;
+  productId: string;
+  branchId?: string;
+  sellingPrice: number;
+  buyingPrice?: number;
+  discountPrice?: number;
+  minOrderQty?: number;
+  maxOrderQty?: number;
+  stockQuantity: number;
+  stockStatus: VendorProductStockStatus;
+  vendorSku?: string;
+  vendorProductImage?: string;
+  publishToCatalogue: boolean;
+  deliveryAvailable: boolean;
+  featured: boolean;
+  notes?: string;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
 
 export type ActorType = "backend_staff" | "rpn" | "admin" | "system";
 
@@ -708,22 +849,61 @@ export type SpotCheckResult =
   | "major issues"
   | "follow-up required";
 export type SpotCheckStatus =
+  | "recommended"
   | "scheduled"
+  | "in_progress"
   | "completed"
-  | "cancelled"
-  | "escalated";
+  | "escalated"
+  | "cancelled";
+export type SpotCheckSource =
+  | "manual"
+  | "whatsapp_hits"
+  | "catalogue_hits"
+  | "customer_complaints"
+  | "bi_recommendation";
+export type SpotCheckVarianceType =
+  | "matched"
+  | "possible_sales"
+  | "stock_mismatch"
+  | "overstated_stock"
+  | "understated_stock";
 
 export interface InventorySpotCheck {
   id: string;
   vendorId: string;
+  vendorName?: string;
+  productId?: string;
+  productName?: string;
+  branchId?: string;
   vendorSystemCode: string;
   vendorNameSnapshot: string;
   assignedRPNId?: string;
   backendStaffName: string;
   branchName?: string;
   sector: string;
+  source?: SpotCheckSource;
   checkDate: string;
   type: SpotCheckType;
+  startingQty?: number;
+  listedQtyBeforeAudit?: number;
+  physicalCountQty?: number;
+  restockedQty?: number;
+  adjustedQtyAfterAudit?: number;
+  estimatedSalesQty?: number;
+  varianceQty?: number;
+  varianceType?: SpotCheckVarianceType;
+  whatsappHits?: number;
+  callHits?: number;
+  searchHits?: number;
+  complaintCount?: number;
+  leadPressureScore?: number;
+  stockAccuracyScore?: number;
+  vendorReliabilityImpact?: number;
+  actionRequired?: string;
+  officeNotes?: string;
+  vendorAdvice?: string;
+  assignedToStaffId?: string;
+  assignedToStaffName?: string;
   productsCheckedCount: number;
   productsCorrectCount: number;
   productsVarianceCount: number;
@@ -741,6 +921,8 @@ export interface InventorySpotCheck {
 
 export interface Product {
   id: string;
+  productId?: string;
+  offerId?: string;
   vendorId: string;
   vendorName: string; // snapshot
   branchId: string;
@@ -873,6 +1055,7 @@ export interface CatalogueGeneration {
     includeOutOfStock: boolean;
     maxProducts: number;
     maxImages: number;
+    entitlementSummary?: any[];
   };
 }
 
@@ -1195,14 +1378,22 @@ export interface CAHBoothAsset {
 
 export type NotificationType =
   | "approval_request"
+  | "staff_task"
   | "task_due"
+  | "subscription_due"
+  | "subscription_overdue"
   | "lead_followup"
   | "catalogue_warning"
   | "customer_feedback"
   | "system_alert"
   | "permission_change";
 export type NotificationPriority = "low" | "medium" | "high" | "critical";
-export type NotificationStatus = "unread" | "read" | "resolved" | "dismissed";
+export type NotificationStatus =
+  | "unread"
+  | "read"
+  | "resolved"
+  | "archived"
+  | "dismissed";
 
 export interface ITredNotification {
   id: string;
@@ -1212,14 +1403,18 @@ export interface ITredNotification {
   priority: NotificationPriority;
   targetRole?: string;
   assignedToStaffId?: string;
+  assignedToName?: string;
   createdByStaffId?: string;
+  createdByName?: string;
   recordType: string;
   recordId: string;
   status: NotificationStatus;
   dedupeKey?: string;
   createdAt: string;
+  updatedAt?: string;
   readAt?: string;
   resolvedAt?: string;
+  archivedAt?: string;
 }
 
 export type ApprovalRequestStatus =
@@ -1276,7 +1471,7 @@ export type StaffTaskStatus =
   | "open"
   | "in_progress"
   | "completed"
-  | "overdue"
+  | "reviewed"
   | "cancelled";
 export type StaffTaskPriority = "low" | "medium" | "high" | "critical";
 
@@ -1284,16 +1479,24 @@ export interface StaffTask {
   id: string;
   title: string;
   description: string;
-  taskType: StaffTaskType;
   assignedToStaffId: string;
+  assignedToName: string;
   assignedByStaffId: string;
-  relatedRecordType?: string;
-  relatedRecordId?: string;
+  assignedByName: string;
+  module: string;
   status: StaffTaskStatus;
   priority: StaffTaskPriority;
-  dueAt?: string;
+  dueDate: string;
+  notes?: string;
+  reviewNotes?: string;
   completedAt?: string;
+  reviewedAt?: string;
   createdAt: string;
+  updatedAt: string;
+  taskType?: StaffTaskType;
+  relatedRecordType?: string;
+  relatedRecordId?: string;
+  dueAt?: string;
 }
 
 export interface FeedbackWhatsAppRoute {
@@ -1321,8 +1524,15 @@ export interface RPNPerformanceSettings {
   weeklyOnboardingThreshold: number;
   monthlyOnboardingThreshold: number;
   churnWarningPercent: number;
+  churnWarningRate?: number;
+  recurringVendorRetentionTarget?: number;
+  minimumRecurringRevenueTarget?: number;
+  overdueVendorFollowUpDays?: number;
+  inactiveAssignedVendorDays?: number;
   minimumCollectionRatePercent: number;
   graceDaysBeforeWarning: number;
+  subscriptionDueWarningDays: number;
+  subscriptionOverdueEscalationDays: number;
   enableThresholdAlerts: boolean;
   requireApprovalForThresholdChange: boolean;
   updatedAt: string;
@@ -1360,13 +1570,22 @@ export interface StaffAuditLog {
     | "CATALOGUE_DEPLOYED"
     | "STOREFRONT_GENERATED"
     | "WHATSAPP_ACTIVITY_LOGGED"
+    | "WHATSAPP_INTELLIGENCE_LOGGED"
+    | "COMPLAINT_RESOLVED"
+    | "FOLLOWUP_ASSIGNED"
+    | "ISSUE_ESCALATED"
     | "LEAD_FOLLOWED_UP"
     | "PRICE_CHANGED"
     | "STOCK_CHANGED"
     | "SUBSCRIPTION_CHANGED"
     | "PERMISSION_CHANGED"
     | "EXPORT_DOWNLOADED"
-    | "SYSTEM_SETTING_CHANGED";
+    | "SYSTEM_SETTING_CHANGED"
+    | "TASK_CREATED"
+    | "TASK_STATUS_UPDATED"
+    | "TASK_REVIEWED"
+    | "TASK_CANCELLED"
+    | "NOTIFICATION_UPDATED";
   severity: "info" | "warning" | "high" | "critical";
   staffId: string;
   staffName: string;
@@ -1383,6 +1602,8 @@ export interface StaffAuditLog {
     | "subscription"
     | "staff"
     | "approval"
+    | "staff_tasks"
+    | "notifications"
     | "settings"
     | "analytics";
   action: string;

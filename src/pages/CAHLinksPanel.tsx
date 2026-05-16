@@ -89,6 +89,19 @@ export const CAHLinksPanel: React.FC = () => {
 
   const [isQuickLogOpen, setIsQuickLogOpen] = useState(false);
   const [quickLogData, setQuickLogData] = useState<Partial<WhatsAppActivityLog>>({});
+  const [confirmConfig, setConfirmConfig] = useState<{
+    isOpen: boolean;
+    message: string;
+    confirmLabel: string;
+    variant: "danger" | "warning" | "info";
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    message: "",
+    confirmLabel: "Confirm",
+    variant: "info",
+    onConfirm: () => {},
+  });
 
   // Filters
   const [search, setSearch] = useState("");
@@ -306,20 +319,22 @@ export const CAHLinksPanel: React.FC = () => {
     setIsFormOpen(true);
   };
 
-  const handleSaveLink = () => {
+  const handleSaveLink = (forceProceed = false) => {
     if (!editingLink?.name || !editingLink?.whatsappUrl) {
       alert("Name and URL are required.");
       return;
     }
 
-    if (!cahService.validateWhatsAppUrl(editingLink.whatsappUrl)) {
-      if (
-        !confirm(
+    if (!forceProceed && !cahService.validateWhatsAppUrl(editingLink.whatsappUrl)) {
+      setConfirmConfig({
+        isOpen: true,
+        message:
           "The URL does not appear to be a standard WhatsApp link. Continue anyway?",
-        )
-      ) {
-        return;
-      }
+        confirmLabel: "Continue",
+        variant: "warning",
+        onConfirm: () => handleSaveLink(true),
+      });
+      return;
     }
 
     const linkToSave = {
@@ -383,20 +398,16 @@ export const CAHLinksPanel: React.FC = () => {
   };
 
   const handleDeleteLink = (id: string) => {
-    if (
-      confirm("Permanently archive and delete this CAH link from distribution?")
-    ) {
-      cahService.deleteLink(id);
-      logService.add({
-        userId: "STAFF-ADM",
-        action: "CAH_LINK_DELETED",
-        entityType: "cah",
-        entityId: id,
-        details: "CAH link removed from hub.",
-        severity: "warning",
-      });
-      loadData();
-    }
+    cahService.deleteLink(id);
+    logService.add({
+      userId: "STAFF-ADM",
+      action: "CAH_LINK_DELETED",
+      entityType: "cah",
+      entityId: id,
+      details: "CAH link removed from hub.",
+      severity: "warning",
+    });
+    loadData();
   };
 
   const handleLogActivity = (link: CAHLink) => {
@@ -916,7 +927,16 @@ export const CAHLinksPanel: React.FC = () => {
                     <Edit3 size={14} />
                   </button>}
                   {permissionService.canDelete("accessHub") && <button
-                    onClick={() => handleDeleteLink(link.id)}
+                    onClick={() =>
+                      setConfirmConfig({
+                        isOpen: true,
+                        message:
+                          "Permanently archive and delete this CAH link from distribution?",
+                        confirmLabel: "Delete Link",
+                        variant: "danger",
+                        onConfirm: () => handleDeleteLink(link.id),
+                      })
+                    }
                     className="p-1.5 text-stone-400 hover:text-red-500 transition-all"
                   >
                     <Trash2 size={14} />
@@ -1570,6 +1590,23 @@ export const CAHLinksPanel: React.FC = () => {
         isOpen={isQuickLogOpen}
         onClose={() => setIsQuickLogOpen(false)}
         initialData={quickLogData}
+      />
+
+      <ConfirmDialog
+        isOpen={confirmConfig.isOpen}
+        title="seiGEN Commerce"
+        message={confirmConfig.message}
+        confirmLabel={confirmConfig.confirmLabel}
+        cancelLabel="Cancel"
+        variant={confirmConfig.variant}
+        onConfirm={() => {
+          const action = confirmConfig.onConfirm;
+          setConfirmConfig((prev) => ({ ...prev, isOpen: false }));
+          action();
+        }}
+        onCancel={() =>
+          setConfirmConfig((prev) => ({ ...prev, isOpen: false }))
+        }
       />
     </div>
   );

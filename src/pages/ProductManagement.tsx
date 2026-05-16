@@ -3,969 +3,598 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
+  AlertTriangle,
+  Archive,
+  Edit3,
+  Image as ImageIcon,
+  Layers,
+  Package,
   PackageSearch,
   Plus,
-  Search,
-  Filter,
-  Trash2,
-  Edit3,
-  Eye,
-  EyeOff,
-  Image as ImageIcon,
-  Check,
-  AlertTriangle,
-  X,
-  ArrowRight,
-  Upload,
-  ChevronRight,
-  MoreVertical,
-  CheckCircle2,
-  AlertCircle,
-  Archive,
-  BarChart3,
-  Layers,
-  Tag,
-  Package,
-  MapPin,
-  User,
-  ExternalLink,
   Save,
-  RotateCcw,
+  Search,
+  Tag,
+  Trash2,
+  Upload,
 } from "lucide-react";
 import {
-  TablePanel,
-  StatusBadge,
-  PrimaryButton,
-  SecondaryButton,
-  EmptyState,
-  SearchInput,
+  BrandedAlertModal,
   ConfirmDialog,
   DataPanel,
+  EmptyState,
+  PrimaryButton,
+  SearchInput,
+  SecondaryButton,
   StatCard,
+  StatusBadge,
+  TablePanel,
 } from "../components/CommonUI.tsx";
-import { analyticsService } from "../services/analyticsService.ts";
-import { permissionService } from "../services/permissionService.ts";
-import {
-  Product,
-  Vendor,
-  Branch,
-  RPN,
-  ProductStatus,
-  ImageStatus,
-  FieldDataSource,
-} from "../types.ts";
-import { asArray } from "../utils/safeData.ts";
+import { MasterProduct, ProductStatus } from "../types.ts";
 import { productService } from "../services/productService.ts";
-import { vendorService } from "../services/vendorService.ts";
-import { rpnService } from "../services/rpnService.ts";
-import { logService } from "../services/logService.ts";
-import { compressImage, formatSize } from "../lib/imageUtils.ts";
-import { findSimilarProducts } from "../utils/duplicateDetection.ts";
-import { approvalService } from "../services/approvalService.ts";
+import { permissionService } from "../services/permissionService.ts";
 import { staffAuditService } from "../services/staffAuditService.ts";
+import { compressImage, formatSize } from "../lib/imageUtils.ts";
 
 const PRODUCT_STATUSES: ProductStatus[] = [
   "active",
   "hidden",
-  "out_of_stock",
   "discontinued",
   "pending_review",
 ];
-const IMAGE_STATUSES: ImageStatus[] = [
-  "missing",
-  "uploaded",
-  "compressed",
-  "approved",
-  "needs replacement",
-];
-const SOURCES: FieldDataSource[] = [
-  "RPN collected",
-  "backend entered",
-  "vendor submitted",
-  "imported",
-];
+
+const inputClass =
+  "w-full border-2 border-stone-200 bg-white p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange";
+
+const buildSearchableText = (product: Partial<MasterProduct>) =>
+  [
+    product.productName,
+    product.brand,
+    product.category,
+    product.sector,
+    product.description,
+    product.barcode,
+    product.standardSku,
+    ...(product.tags || []),
+    ...(product.keywords || []),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+const newMasterProduct = (): MasterProduct => {
+  const now = new Date().toISOString();
+  return {
+    id: `MP-${Math.random().toString(36).slice(2, 10).toUpperCase()}`,
+    productName: "",
+    brand: "",
+    category: "",
+    sector: "",
+    description: "",
+    barcode: "",
+    standardSku: "",
+    tags: [],
+    keywords: [],
+    imageUrl: "",
+    additionalImages: [],
+    unit: "Each",
+    searchableText: "",
+    status: "active",
+    createdAt: now,
+    updatedAt: now,
+  };
+};
 
 export const ProductManagement: React.FC = () => {
-  // View State
-  const [isFormOpen, setIsFormOpen] = useState(false);
-  const [editingProduct, setEditingProduct] = useState<Partial<Product> | null>(
-    null,
-  );
-  const [viewMode, setViewMode] = useState<"table" | "grid">("table");
-
-  // Data State
-  const [products, setProducts] = useState<Product[]>([]);
-  const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [rpns, setRpns] = useState<RPN[]>([]);
-  const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
-  const [isManagerOverride, setIsManagerOverride] = useState(false);
-
-  // Filter states
+  const [products, setProducts] = useState<MasterProduct[]>([]);
+  const [editingProduct, setEditingProduct] =
+    useState<MasterProduct | null>(null);
   const [search, setSearch] = useState("");
-  const [vendorFilter, setVendorFilter] = useState("all");
   const [sectorFilter, setSectorFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
-  const [branchFilter, setBranchFilter] = useState("all");
-  const [rpnFilter, setRpnFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [imageStatusFilter, setImageStatusFilter] = useState("all");
-  const [publishFilter, setPublishFilter] = useState("all");
-  // Farm produce filters
-  const [farmProducerFilter, setFarmProducerFilter] = useState("all");
-  const [availabilityDateFilter, setAvailabilityDateFilter] = useState("");
-  const [harvestStatusFilter, setHarvestStatusFilter] = useState("all");
-  const [quantityAvailableFilter, setQuantityAvailableFilter] = useState("");
-  const [packagingFilter, setPackagingFilter] = useState("all");
+  const [brandFilter, setBrandFilter] = useState("all");
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [duplicates, setDuplicates] = useState<
+    Array<{ product: MasterProduct; score: number }>
+  >([]);
+  const [alertConfig, setAlertConfig] = useState<{
+    isOpen: boolean;
+    title?: string;
+    message: string;
+    type?: "success" | "error" | "warning" | "info";
+  }>({ isOpen: false, title: "seiGEN Commerce", message: "", type: "success" });
 
-  // Safe array wrappers
-  const safeProducts = asArray<Product>(products);
-  const safeVendors = asArray<Vendor>(vendors);
-  const safeRpns = asArray<RPN>(rpns);
-
-  // Bulk Actions
-  const [isBulkUpdateOpen, setIsBulkUpdateOpen] = useState(false);
-  const [bulkData, setBulkData] = useState({
-    sector: "",
-    category: "",
-    status: "" as ProductStatus | "",
-    publish: undefined as boolean | undefined,
-  });
-
-  useEffect(() => {
-    loadData();
-  }, []);
+  const showAlert = (message: string, type: "success" | "error" | "warning" | "info" = "success") =>
+    setAlertConfig({ isOpen: true, title: "seiGEN Commerce", message, type });
 
   const loadData = async () => {
-    try {
-      const rawProducts = await Promise.resolve(productService.getProducts());
-      setProducts(asArray<Product>(rawProducts));
-
-      const rawVendors = await Promise.resolve(vendorService.getVendors());
-      setVendors(asArray<Vendor>(rawVendors));
-
-      const rawRpns = await Promise.resolve(rpnService.getAll());
-      setRpns(asArray<RPN>(rawRpns));
-    } catch (error) {
-      console.warn(
-        "Product Management data failed to load. Using empty arrays.",
-        error,
-      );
-      setProducts([]);
-      setVendors([]);
-      setRpns([]);
-    }
+    await productService.migrateLegacyProducts();
+    setProducts(await productService.getMasterProducts());
   };
 
+  useEffect(() => {
+    void loadData();
+  }, []);
+
+  useEffect(() => {
+    if (!editingProduct?.productName && !editingProduct?.barcode) {
+      setDuplicates([]);
+      return;
+    }
+    const handle = window.setTimeout(() => {
+      void productService
+        .findDuplicateMasterProducts(editingProduct)
+        .then(setDuplicates);
+    }, 150);
+    return () => window.clearTimeout(handle);
+  }, [
+    editingProduct?.id,
+    editingProduct?.productName,
+    editingProduct?.barcode,
+    editingProduct?.brand,
+    editingProduct?.category,
+  ]);
+
   const sectors = useMemo(
-    () => Array.from(new Set(safeVendors.map((v) => v.sector).filter(Boolean))),
-    [vendors],
+    () => Array.from(new Set(products.map((p) => p.sector).filter(Boolean))),
+    [products],
   );
   const categories = useMemo(
-    () =>
-      Array.from(new Set(safeProducts.map((p) => p.category).filter(Boolean))),
+    () => Array.from(new Set(products.map((p) => p.category).filter(Boolean))),
+    [products],
+  );
+  const brands = useMemo(
+    () => Array.from(new Set(products.map((p) => p.brand).filter(Boolean))),
     [products],
   );
 
-  // Filtering Logic
   const filteredProducts = useMemo(() => {
-    return safeProducts.filter((p) => {
-      // Any word order search
-      const searchTerms = search
-        .toLowerCase()
-        .split(" ")
-        .filter((t) => t.length > 0);
-      const productText =
-        `${p.name} ${p.sku} ${p.productCode} ${p.brand} ${p.model} ${p.vendorName}`.toLowerCase();
-      const matchesSearch = searchTerms.every((term) =>
-        productText.includes(term),
+    const terms = search.toLowerCase().split(" ").filter(Boolean);
+    return products.filter((product) => {
+      const matchesSearch = terms.every((term) =>
+        product.searchableText.includes(term),
       );
-
-      const matchesVendor =
-        vendorFilter === "all" || p.vendorId === vendorFilter;
-      const matchesSector = sectorFilter === "all" || p.sector === sectorFilter;
+      const matchesSector =
+        sectorFilter === "all" || product.sector === sectorFilter;
       const matchesCategory =
-        categoryFilter === "all" || p.category === categoryFilter;
-      const matchesBranch =
-        branchFilter === "all" || p.branchId === branchFilter;
-      const matchesRPN =
-        rpnFilter === "all" || p.collectedByRPNId === rpnFilter;
-      const matchesStatus = statusFilter === "all" || p.status === statusFilter;
-      const matchesImage =
-        imageStatusFilter === "all" || p.imageStatus === imageStatusFilter;
-      const matchesPublish =
-        publishFilter === "all" ||
-        (publishFilter === "published"
-          ? p.publishToCatalogue
-          : !p.publishToCatalogue);
-
-      // Farm produce filters
-      const matchesFarmProducer =
-        farmProducerFilter === "all" ||
-        (farmProducerFilter === "farm_produce"
-          ? p.isFarmProduce
-          : !p.isFarmProduce);
-      const matchesAvailabilityDate =
-        !availabilityDateFilter ||
-        (p.dateOfAvailability &&
-          p.dateOfAvailability >= availabilityDateFilter);
-      const matchesHarvestStatus =
-        harvestStatusFilter === "all" ||
-        p.harvestStatus === harvestStatusFilter;
-      const matchesQuantityAvailable =
-        !quantityAvailableFilter ||
-        (p.quantityAvailable &&
-          p.quantityAvailable >= parseFloat(quantityAvailableFilter));
-      const matchesPackaging =
-        packagingFilter === "all" || p.packagingType === packagingFilter;
-
-      return (
-        matchesSearch &&
-        matchesVendor &&
-        matchesSector &&
-        matchesCategory &&
-        matchesBranch &&
-        matchesRPN &&
-        matchesStatus &&
-        matchesImage &&
-        matchesPublish &&
-        matchesFarmProducer &&
-        matchesAvailabilityDate &&
-        matchesHarvestStatus &&
-        matchesQuantityAvailable &&
-        matchesPackaging
-      );
+        categoryFilter === "all" || product.category === categoryFilter;
+      const matchesBrand =
+        brandFilter === "all" || product.brand === brandFilter;
+      return matchesSearch && matchesSector && matchesCategory && matchesBrand;
     });
-  }, [
-    products,
-    search,
-    vendorFilter,
-    sectorFilter,
-    categoryFilter,
-    branchFilter,
-    rpnFilter,
-    statusFilter,
-    imageStatusFilter,
-    publishFilter,
-    farmProducerFilter,
-    availabilityDateFilter,
-    harvestStatusFilter,
-    quantityAvailableFilter,
-    packagingFilter,
-  ]);
+  }, [products, search, sectorFilter, categoryFilter, brandFilter]);
 
-  const stats = useMemo(() => {
-    return {
-      total: safeProducts.length,
-      outOfStock: safeProducts.filter((p) => p.status === "out_of_stock")
-        .length,
-      missingImage: safeProducts.filter((p) => p.imageStatus === "missing")
-        .length,
-      lowStock: safeProducts.filter(
-        (p) =>
-          p.stockQuantity <= p.minStockAlert && p.status !== "out_of_stock",
-      ).length,
-    };
-  }, [products]);
-
-  // Handlers
-  const handleEditProduct = (product: Product) => {
-    setIsManagerOverride(false);
-    setEditingProduct(product);
-    setIsFormOpen(true);
-  };
-
-  const handleAddNewProduct = () => {
-    setIsManagerOverride(false);
-    setEditingProduct({
-      id: `PRD-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
-      status: "active",
-      imageStatus: "missing",
-      source: "backend entered",
-      publishToCatalogue: true,
-      stockQuantity: 0,
-      minStockAlert: 5,
-      unitOfMeasure: "Each",
-      tags: [],
-      enteredByStaffId: "STAFF-ADM",
-      lastUpdatedBy: "STAFF-ADM",
-    });
-    setIsFormOpen(true);
-  };
-
-  const handleSaveProduct = async () => {
-    try {
-      if (
-        !editingProduct?.name ||
-        !editingProduct?.vendorId ||
-        !editingProduct?.branchId
-      ) {
-        alert("Incomplete record. Vendor identity and item name required.");
-        return;
-      }
-
-      const sessionStr = localStorage.getItem("activeStaffSession");
-      const session = sessionStr
-        ? JSON.parse(sessionStr)
-        : { staffId: "STAFF-ADM", staffName: "System Admin" };
-
-      const isNew = !editingProduct.createdAt;
-      const oldProduct = safeProducts.find((p) => p.id === editingProduct.id);
-      const priceChanged =
-        oldProduct && oldProduct.sellingPrice !== editingProduct.sellingPrice;
-      const canApprove = permissionService.canApprove("product");
-      const needsApproval = !canApprove;
-
-      const targetVendor = safeVendors.find(
-        (v) => v.id === editingProduct.vendorId,
-      );
-      const targetBranch = targetVendor?.branches.find(
-        (b) => b.id === editingProduct.branchId,
-      );
-
-      const productToSave: Product = {
-        ...editingProduct,
-        vendorName: targetVendor?.name || "",
-        branchName: targetBranch?.name || "",
-        updatedAt: new Date().toISOString(),
-      } as Product;
-
-      if (needsApproval) {
-        productToSave.status = "pending_review";
-      }
-
-      await productService.saveProduct(productToSave);
-
-      if (needsApproval) {
-        await approvalService.submitApprovalRequest({
-          requestType: isNew ? "product_create" : "product_update",
-          recordType: "product",
-          recordId: productToSave.id,
-          recordName: productToSave.name,
-          submittedByStaffId: session.staffId,
-          submittedByName: session.staffName,
-          riskLevel: priceChanged ? "high" : "medium",
-          beforeSnapshot: oldProduct || null,
-          afterSnapshot: productToSave,
-        });
-
-        void staffAuditService.logAction({
-          eventType: "APPROVAL_SUBMITTED",
-          module: "product",
-          action: `Submitted product ${isNew ? "creation" : "update"} for approval`,
-          severity: priceChanged ? "high" : "info",
-          recordType: "product",
-          recordId: productToSave.id,
-          recordName: productToSave.name,
-        });
-
-        alert("Product submitted for approval.");
-      } else {
-        analyticsService.logEvent({
-          eventType: isNew ? "PRODUCT_CREATED" : "PRODUCT_UPDATED",
-          actorType: "admin",
-          actorName: session.staffName,
-          productId: productToSave.id,
-          productName: productToSave.name,
-          vendorId: productToSave.vendorId,
-          vendorName: productToSave.vendorName,
-          details: { action: isNew ? "creation" : "update" },
-        });
-
-        if (productToSave.isFarmProduce) {
-          analyticsService.logEvent({
-            eventType: isNew ? "FARM_PRODUCE_CREATED" : "FARM_PRODUCE_UPDATED",
-            actorType: "admin",
-            actorName: session.staffName,
-            productId: productToSave.id,
-            productName: productToSave.name,
-            vendorId: productToSave.vendorId,
-            vendorName: productToSave.vendorName,
-            details: {
-              cropType: productToSave.cropType,
-              harvestStatus: productToSave.harvestStatus,
-              quantityAvailable: productToSave.quantityAvailable,
-            },
-          });
-
-          if (
-            !isNew &&
-            editingProduct.dateOfAvailability !==
-              productToSave.dateOfAvailability
-          ) {
-            analyticsService.logEvent({
-              eventType: "FARM_PRODUCE_AVAILABILITY_CHANGED",
-              actorType: "admin",
-              actorName: session.staffName,
-              productId: productToSave.id,
-              productName: productToSave.name,
-              vendorId: productToSave.vendorId,
-              vendorName: productToSave.vendorName,
-              details: {
-                oldDate: editingProduct.dateOfAvailability,
-                newDate: productToSave.dateOfAvailability,
-              },
-            });
-          }
-        }
-
-        try {
-          if (oldProduct) {
-            void staffAuditService.logUpdate(
-              "product",
-              "product",
-              productToSave.id,
-              productToSave.name,
-              oldProduct,
-              productToSave,
-            );
-            if (oldProduct.sellingPrice !== productToSave.sellingPrice) {
-              void staffAuditService.logAction({
-                eventType: "PRICE_CHANGED",
-                module: "product",
-                action: `Price changed for ${productToSave.name} from ${oldProduct.sellingPrice} to ${productToSave.sellingPrice}`,
-                severity: "high",
-                recordType: "product",
-                recordId: productToSave.id,
-                recordName: productToSave.name,
-              });
-            }
-            if (oldProduct.stockQuantity !== productToSave.stockQuantity) {
-              void staffAuditService.logAction({
-                eventType: "STOCK_CHANGED",
-                module: "product",
-                action: `Stock changed for ${productToSave.name} from ${oldProduct.stockQuantity} to ${productToSave.stockQuantity}`,
-                severity: "warning",
-                recordType: "product",
-                recordId: productToSave.id,
-                recordName: productToSave.name,
-              });
-            }
-          } else {
-            void staffAuditService.logCreate(
-              "product",
-              "product",
-              productToSave.id,
-              productToSave.name,
-              productToSave,
-            );
-          }
-        } catch (auditErr) {
-          console.error("Audit log failed", auditErr);
-        }
-        alert("Saved successfully");
-      }
-
-      loadData();
-      setIsFormOpen(false);
-      setEditingProduct(null);
-    } catch (error: any) {
-      console.error(error);
-      alert(error.message || "Save failed");
-    }
-  };
-
-  const handleDeleteProduct = async (id: string) => {
-    if (confirm("Permanently purge this item from regional inventory?")) {
-      try {
-        const product = safeProducts.find((p) => p.id === id);
-        await productService.deleteProduct(id);
-
-        analyticsService.logEvent({
-          eventType: "PRODUCT_DELETED",
-          actorType: "admin",
-          actorName: "System Admin",
-          productId: id,
-          productName: product?.name,
-          vendorId: product?.vendorId,
-          details: { action: "purged" },
-        });
-
-        loadData();
-        alert("Deleted successfully");
-
-        // Non-blocking staff audit logging
-        try {
-          void staffAuditService.logDelete(
-            "product",
-            "product",
-            id,
-            product?.name || "Unknown",
-            product,
-          );
-        } catch (e) {
-          console.error("Audit log failed", e);
-        }
-      } catch (error: any) {
-        console.error(error);
-        alert(error.message || "Delete failed");
-      }
-    }
-  };
-
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    try {
-      // 360px per requirements for thumbnail
-      const result = await compressImage(file, 360, 0.65);
-
-      analyticsService.logEvent({
-        eventType: "PRODUCT_IMAGE_COMPRESSED",
-        actorType: "admin",
-        actorName: "System Admin",
-        productId: editingProduct?.id,
-        vendorId: editingProduct?.vendorId,
-        details: {
-          originalSize: result.metadata.originalSize,
-          compressedSize: result.metadata.compressedSize,
-        },
-      });
-
-      setEditingProduct((prev) => ({
-        ...prev,
-        imageUrl: result.base64,
-        imageStatus: "compressed",
-        lastImageUpdateDate: new Date().toISOString(),
-        imageMetadata: {
-          originalName: result.metadata.originalName,
-          originalSize: result.metadata.originalSize,
-          compressedSize: result.metadata.compressedSize,
-        },
-      }));
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Asset processing failed.");
-    }
-  };
-
-  const toggleSelectAll = () => {
-    if (selectedProductIds.length === filteredProducts.length) {
-      setSelectedProductIds([]);
-    } else {
-      setSelectedProductIds(filteredProducts.map((p) => p.id));
-    }
-  };
-
-  const toggleSelectProduct = (id: string) => {
-    setSelectedProductIds((prev) =>
-      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id],
-    );
-  };
-
-  const applyBulkUpdate = async () => {
-    if (selectedProductIds.length === 0) return;
-
-    try {
-      if (bulkData.sector && bulkData.category) {
-        await productService.bulkUpdateSectorCategory(
-          selectedProductIds,
-          bulkData.sector,
-          bulkData.category,
-        );
-      }
-      if (bulkData.status) {
-        await productService.bulkUpdateStatus(
-          selectedProductIds,
-          bulkData.status as ProductStatus,
-        );
-      }
-      if (bulkData.publish !== undefined) {
-        await productService.bulkUpdatePublishStatus(
-          selectedProductIds,
-          bulkData.publish,
-        );
-      }
-
-      analyticsService.logEvent({
-        eventType: "PRODUCT_UPDATED", // Using PRODUCT_UPDATED for bulk changes
-        actorType: "admin",
-        actorName: "System Admin",
-        productId: "BULK",
-        details: {
-          count: selectedProductIds.length,
-          updates: bulkData,
-        },
-      });
-
-      // Non-blocking staff audit logging
-      try {
-        void staffAuditService.logAction({
-          eventType: "RECORD_UPDATED",
-          module: "product",
-          action: `Bulk updated ${selectedProductIds.length} products`,
-          severity: "warning",
-          afterSnapshot: bulkData,
-        });
-      } catch (e) {
-        console.error("Audit log failed", e);
-      }
-
-      loadData();
-      setIsBulkUpdateOpen(false);
-      setSelectedProductIds([]);
-      alert("Saved successfully");
-    } catch (error: any) {
-      console.error(error);
-      alert(error.message || "Save failed");
-    }
-  };
-
-  const duplicates = useMemo(() => {
-    if (
-      !isFormOpen ||
-      (!editingProduct?.name &&
-        !editingProduct?.brand &&
-        !editingProduct?.category)
-    )
-      return [];
-    const otherProducts = safeProducts.filter(
-      (p) => p.id !== editingProduct?.id,
-    );
-    return findSimilarProducts(editingProduct, otherProducts);
-  }, [editingProduct, safeProducts, isFormOpen]);
-
-  const hasCriticalDuplicate = duplicates.some(
-    (d) => d.similarity.level === "exact" || d.similarity.level === "high",
+  const stats = useMemo(
+    () => ({
+      total: products.length,
+      active: products.filter((p) => p.status === "active").length,
+      missingImage: products.filter((p) => !p.imageUrl).length,
+      duplicateWatch: duplicates.length,
+    }),
+    [products, duplicates.length],
   );
-  const canManagerOverride = permissionService.canApprove("product");
-  const isSaveBlocked = hasCriticalDuplicate && !isManagerOverride;
 
-  const handleOverrideRequest = async () => {
+  const updateEditing = (patch: Partial<MasterProduct>) => {
+    setEditingProduct((prev) =>
+      prev
+        ? {
+            ...prev,
+            ...patch,
+            searchableText: buildSearchableText({ ...prev, ...patch }),
+          }
+        : prev,
+    );
+  };
+
+  const handleAdd = () => setEditingProduct(newMasterProduct());
+  const handleEdit = (product: MasterProduct) => setEditingProduct(product);
+
+  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
     try {
-      await approvalService.submitApprovalRequest({
-        requestType: "Duplicate Product Override",
-        recordType: "product",
-        recordId: editingProduct?.id || "new",
-        submittedByStaffId: "STAFF-ADM", // Uses session ID in production
-        submittedByName: "Backend Staff",
-        riskLevel: "medium",
-        beforeSnapshot: null,
-        afterSnapshot: editingProduct,
-      });
-      alert(
-        "Override approval submitted to managers. You will be notified when reviewed.",
+      const result = await compressImage(file, 720, 0.7);
+      updateEditing({ imageUrl: result.base64 });
+    } catch (error) {
+      showAlert(
+        error instanceof Error ? error.message : "Image processing failed.",
+        "error",
       );
-      setIsFormOpen(false);
-    } catch (e) {
-      console.error(e);
-      alert("Failed to submit approval request.");
     }
+  };
+
+  const handleSave = async () => {
+    if (!editingProduct) return;
+    if (!editingProduct.productName || !editingProduct.category || !editingProduct.sector) {
+      showAlert("Product name, category and sector are required.", "error");
+      return;
+    }
+    if (
+      duplicates.some((d) => d.score >= 90) &&
+      !permissionService.canApprove("product")
+    ) {
+      showAlert("Possible existing product detected. Link vendors to the existing master product or ask a manager to approve a new one.", "warning");
+      return;
+    }
+
+    const isNew = !products.some((p) => p.id === editingProduct.id);
+    const productToSave: MasterProduct = {
+      ...editingProduct,
+      tags: editingProduct.tags || [],
+      keywords: editingProduct.keywords || [],
+      searchableText: buildSearchableText(editingProduct),
+      updatedAt: new Date().toISOString(),
+    };
+    await productService.saveMasterProduct(productToSave);
+    void staffAuditService.logAction({
+      eventType: isNew ? "RECORD_CREATED" : "RECORD_UPDATED",
+      module: "product",
+      severity: "info",
+      action: `${isNew ? "Created" : "Updated"} master product ${productToSave.productName}`,
+      recordType: "master_product",
+      recordId: productToSave.id,
+      recordName: productToSave.productName,
+      afterSnapshot: productToSave,
+    });
+    await loadData();
+    setEditingProduct(null);
+    showAlert("Master product saved.");
+  };
+
+  const handleDelete = async () => {
+    if (!deleteId) return;
+    const product = products.find((p) => p.id === deleteId);
+    await productService.deleteMasterProduct(deleteId);
+    void staffAuditService.logAction({
+      eventType: "RECORD_DELETED",
+      module: "product",
+      severity: "high",
+      action: `Deleted master product ${product?.productName || deleteId}`,
+      recordType: "master_product",
+      recordId: deleteId,
+      beforeSnapshot: product,
+    });
+    setDeleteId(null);
+    await loadData();
+    showAlert("Master product deleted.", "success");
+  };
+
+  const renderEditor = () => {
+    if (!editingProduct) return null;
+    return (
+      <div className="fixed inset-0 z-50 bg-brand-charcoal/70 p-4 flex items-center justify-center">
+        <DataPanel
+          title="Master Product Record"
+          subtitle="Global reusable product identity. Vendor price and stock live in Vendor Product Offers."
+          className="w-full max-w-5xl max-h-[92vh] bg-white border-t-4 border-t-brand-orange shadow-2xl"
+        >
+          <div className="p-6 space-y-6 overflow-y-auto">
+            {duplicates.length > 0 && (
+              <div className="border-2 border-orange-200 bg-orange-50 p-4">
+                <div className="flex gap-3">
+                  <AlertTriangle size={18} className="text-brand-orange shrink-0" />
+                  <div>
+                    <p className="text-xs font-black uppercase text-brand-charcoal">
+                      Possible existing product detected.
+                    </p>
+                    <p className="text-[10px] font-bold uppercase text-stone-500">
+                      Avoid duplicates. Reuse the existing master product when appropriate.
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {duplicates.map((match) => (
+                    <button
+                      key={match.product.id}
+                      onClick={() => setEditingProduct(match.product)}
+                      className="text-left bg-white border border-orange-200 p-3 hover:border-brand-orange"
+                    >
+                      <p className="text-xs font-black uppercase text-brand-charcoal">
+                        {match.product.productName}
+                      </p>
+                      <p className="text-[10px] font-bold uppercase text-stone-400">
+                        {match.product.brand || "No brand"} / {match.product.category} / {match.score}% match
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <label className="space-y-2 md:col-span-2">
+                <span className="text-[10px] font-bold uppercase text-stone-400">
+                  Product Name *
+                </span>
+                <input
+                  className={inputClass}
+                  value={editingProduct.productName}
+                  onChange={(e) => updateEditing({ productName: e.target.value })}
+                  placeholder="Nivea Cocoa Butter Body Cream"
+                />
+              </label>
+              <label className="space-y-2">
+                <span className="text-[10px] font-bold uppercase text-stone-400">
+                  Brand
+                </span>
+                <input
+                  className={inputClass}
+                  value={editingProduct.brand || ""}
+                  onChange={(e) => updateEditing({ brand: e.target.value })}
+                />
+              </label>
+              <label className="space-y-2">
+                <span className="text-[10px] font-bold uppercase text-stone-400">
+                  Barcode
+                </span>
+                <input
+                  className={inputClass}
+                  value={editingProduct.barcode || ""}
+                  onChange={(e) => updateEditing({ barcode: e.target.value })}
+                />
+              </label>
+              <label className="space-y-2">
+                <span className="text-[10px] font-bold uppercase text-stone-400">
+                  Sector *
+                </span>
+                <input
+                  className={inputClass}
+                  value={editingProduct.sector || ""}
+                  onChange={(e) => updateEditing({ sector: e.target.value })}
+                />
+              </label>
+              <label className="space-y-2">
+                <span className="text-[10px] font-bold uppercase text-stone-400">
+                  Category *
+                </span>
+                <input
+                  className={inputClass}
+                  value={editingProduct.category || ""}
+                  onChange={(e) => updateEditing({ category: e.target.value })}
+                />
+              </label>
+              <label className="space-y-2">
+                <span className="text-[10px] font-bold uppercase text-stone-400">
+                  Standard SKU
+                </span>
+                <input
+                  className={inputClass}
+                  value={editingProduct.standardSku || ""}
+                  onChange={(e) => updateEditing({ standardSku: e.target.value })}
+                />
+              </label>
+              <label className="space-y-2">
+                <span className="text-[10px] font-bold uppercase text-stone-400">
+                  Unit
+                </span>
+                <input
+                  className={inputClass}
+                  value={editingProduct.unit || ""}
+                  onChange={(e) => updateEditing({ unit: e.target.value })}
+                />
+              </label>
+              <label className="space-y-2">
+                <span className="text-[10px] font-bold uppercase text-stone-400">
+                  Tags
+                </span>
+                <input
+                  className={inputClass}
+                  value={(editingProduct.tags || []).join(", ")}
+                  onChange={(e) =>
+                    updateEditing({
+                      tags: e.target.value
+                        .split(",")
+                        .map((tag) => tag.trim())
+                        .filter(Boolean),
+                    })
+                  }
+                  placeholder="body lotion, skin care"
+                />
+              </label>
+              <label className="space-y-2">
+                <span className="text-[10px] font-bold uppercase text-stone-400">
+                  Keywords
+                </span>
+                <input
+                  className={inputClass}
+                  value={(editingProduct.keywords || []).join(", ")}
+                  onChange={(e) =>
+                    updateEditing({
+                      keywords: e.target.value
+                        .split(",")
+                        .map((keyword) => keyword.trim())
+                        .filter(Boolean),
+                    })
+                  }
+                  placeholder="nivea cream, cocoa butter"
+                />
+              </label>
+              <label className="space-y-2 md:col-span-2">
+                <span className="text-[10px] font-bold uppercase text-stone-400">
+                  Description
+                </span>
+                <textarea
+                  rows={4}
+                  className={`${inputClass} normal-case`}
+                  value={editingProduct.description || ""}
+                  onChange={(e) => updateEditing({ description: e.target.value })}
+                />
+              </label>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="border-2 border-dashed border-stone-200 p-8 text-center relative">
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="absolute inset-0 opacity-0 cursor-pointer"
+                  onChange={handleImageUpload}
+                />
+                <Upload size={28} className="mx-auto text-stone-300 mb-3" />
+                <p className="text-[10px] font-black uppercase text-stone-400">
+                  Upload Master Product Image
+                </p>
+              </div>
+              <div className="border border-stone-200 p-4">
+                {editingProduct.imageUrl ? (
+                  <>
+                    <img
+                      src={editingProduct.imageUrl}
+                      alt="Master product"
+                      className="h-44 w-full object-contain bg-stone-50"
+                    />
+                    <p className="mt-2 text-[10px] font-bold uppercase text-stone-400">
+                      Image embedded for catalogue fallback
+                    </p>
+                  </>
+                ) : (
+                  <div className="h-44 flex items-center justify-center bg-stone-50 text-stone-300">
+                    <ImageIcon size={36} />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              {PRODUCT_STATUSES.map((status) => (
+                <button
+                  key={status}
+                  onClick={() => updateEditing({ status })}
+                  className={`border-2 p-3 text-[10px] font-black uppercase ${
+                    editingProduct.status === status
+                      ? "border-brand-charcoal bg-brand-charcoal text-white"
+                      : "border-stone-200 bg-white text-stone-400"
+                  }`}
+                >
+                  {status}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="p-5 bg-stone-50 border-t border-stone-200 flex gap-3">
+            <SecondaryButton className="flex-1" onClick={() => setEditingProduct(null)}>
+              Cancel
+            </SecondaryButton>
+            <PrimaryButton className="flex-1" onClick={handleSave}>
+              <Save size={14} className="mr-2" /> Save Master Product
+            </PrimaryButton>
+          </div>
+        </DataPanel>
+      </div>
+    );
   };
 
   return (
-    <div className="space-y-8 pb-32">
-      {/* Infrastructure Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+    <div className="space-y-8 pb-20">
+      <BrandedAlertModal
+        {...alertConfig}
+        onClose={() => setAlertConfig({ ...alertConfig, isOpen: false })}
+      />
+      <ConfirmDialog
+        isOpen={!!deleteId}
+        title="Delete Master Product"
+        message="This removes the master product record. Existing vendor offers for this product will no longer join correctly."
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteId(null)}
+      />
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
+        <StatCard label="Master Products" value={stats.total} icon={Package} />
+        <StatCard label="Active" value={stats.active} icon={Layers} variant="success" />
         <StatCard
-          label="Total SKUs In Buffer"
-          value={stats.total.toString()}
-          icon={Package}
-        />
-        <StatCard
-          label="Critical Low Stock"
-          value={stats.lowStock.toString()}
-          icon={AlertCircle}
-          variant={stats.lowStock > 0 ? "warning" : "neutral"}
-        />
-        <StatCard
-          label="Missing Visual Assets"
-          value={stats.missingImage.toString()}
+          label="Missing Images"
+          value={stats.missingImage}
           icon={ImageIcon}
+          variant={stats.missingImage > 0 ? "warning" : "neutral"}
         />
         <StatCard
-          label="Out of Operations"
-          value={stats.outOfStock.toString()}
-          icon={Archive}
-          variant="error"
+          label="Duplicate Watch"
+          value={stats.duplicateWatch}
+          icon={AlertTriangle}
+          variant={stats.duplicateWatch > 0 ? "error" : "neutral"}
         />
       </div>
 
-      {/* Control Panel */}
-      <div className="bg-stone-50 border border-stone-200 p-6 space-y-6">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-          <div>
-            <h3 className="text-sm font-bold uppercase tracking-tight text-brand-charcoal">
-              Inventory Management Terminal
-            </h3>
-            <p className="text-[10px] text-stone-400 font-mono mt-1 uppercase italic tracking-wider">
-              Master Product Registry // Multi-Vendor Sync
-            </p>
-          </div>
-          <div className="flex gap-2">
-            {selectedProductIds.length > 0 &&
-              permissionService.canEdit("productManagement") && (
-                <PrimaryButton
-                  onClick={() => setIsBulkUpdateOpen(true)}
-                  className="bg-brand-charcoal hover:bg-brand-charcoal/90 border-0 flex items-center gap-2"
-                >
-                  <Layers size={14} /> Bulk Adjust ({selectedProductIds.length})
-                </PrimaryButton>
-              )}
-            {permissionService.canCreate("addNewProduct") && (
-              <PrimaryButton
-                onClick={handleAddNewProduct}
-                className="flex items-center gap-2"
-              >
-                <Plus size={14} /> Register New SKU
-              </PrimaryButton>
-            )}
-          </div>
+      <DataPanel
+        title="Master Product Library"
+        subtitle="Create products once globally. Vendors attach price, stock and location through product offers."
+        actions={
+          permissionService.canCreate("productManagement") && (
+            <PrimaryButton onClick={handleAdd}>
+              <Plus size={14} className="mr-2" /> New Master Product
+            </PrimaryButton>
+          )
+        }
+      >
+        <div className="p-5 border-b border-stone-200 grid grid-cols-1 md:grid-cols-5 gap-3 bg-stone-50">
+          <SearchInput
+            className="md:col-span-2"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search name, brand, barcode, keywords..."
+          />
+          <select className={inputClass} value={sectorFilter} onChange={(e) => setSectorFilter(e.target.value)}>
+            <option value="all">All sectors</option>
+            {sectors.map((sector) => (
+              <option key={sector} value={sector}>{sector}</option>
+            ))}
+          </select>
+          <select className={inputClass} value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
+            <option value="all">All categories</option>
+            {categories.map((category) => (
+              <option key={category} value={category}>{category}</option>
+            ))}
+          </select>
+          <select className={inputClass} value={brandFilter} onChange={(e) => setBrandFilter(e.target.value)}>
+            <option value="all">All brands</option>
+            {brands.map((brand) => (
+              <option key={brand} value={brand}>{brand}</option>
+            ))}
+          </select>
         </div>
-
-        {/* Dense filter bar */}
-        <div className="space-y-2">
-          <div className="grid grid-cols-1 md:grid-cols-6 gap-2 bg-white border border-stone-200 p-2 shadow-sm">
-            <div className="md:col-span-2 relative">
-              <Search
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400"
-                size={16}
-              />
-              <input
-                type="text"
-                placeholder="ANY WORD ORDER SEARCH..."
-                className="w-full pl-10 pr-4 py-2 border-2 border-stone-100 outline-none focus:border-brand-orange text-xs font-bold uppercase"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
-            <select
-              className="border border-stone-100 p-2 text-[10px] font-bold uppercase outline-none focus:border-brand-orange"
-              value={vendorFilter}
-              onChange={(e) => setVendorFilter(e.target.value)}
-            >
-              <option value="all">Filter Vendor</option>
-              {safeVendors.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.name}
-                </option>
-              ))}
-            </select>
-            <select
-              className="border border-stone-100 p-2 text-[10px] font-bold uppercase outline-none focus:border-brand-orange"
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-            >
-              <option value="all">Item Status</option>
-              {PRODUCT_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {s.toUpperCase()}
-                </option>
-              ))}
-            </select>
-            <select
-              className="border border-stone-100 p-2 text-[10px] font-bold uppercase outline-none focus:border-brand-orange"
-              value={imageStatusFilter}
-              onChange={(e) => setImageStatusFilter(e.target.value)}
-            >
-              <option value="all">Image Status</option>
-              {IMAGE_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {s.toUpperCase()}
-                </option>
-              ))}
-            </select>
-            <div className="flex gap-1">
-              <button
-                onClick={() => setViewMode("table")}
-                className={`flex-1 flex items-center justify-center border p-2 ${viewMode === "table" ? "bg-stone-100 text-brand-charcoal" : "text-stone-300"}`}
-              >
-                <BarChart3 size={14} />
-              </button>
-              <button
-                onClick={() => setViewMode("grid")}
-                className={`flex-1 flex items-center justify-center border p-2 ${viewMode === "grid" ? "bg-stone-100 text-brand-charcoal" : "text-stone-300"}`}
-              >
-                <ImageIcon size={14} />
-              </button>
-            </div>
-          </div>
-
-          {/* Farm Produce Filters */}
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-2 bg-green-50 border border-green-200 p-2 shadow-sm">
-            <select
-              className="border border-green-200 p-2 text-[10px] font-bold uppercase outline-none focus:border-green-500 bg-green-50"
-              value={farmProducerFilter}
-              onChange={(e) => setFarmProducerFilter(e.target.value)}
-            >
-              <option value="all">Farm Produce</option>
-              <option value="farm_produce">Farm Produce Only</option>
-              <option value="standard">Standard Products</option>
-            </select>
-            <input
-              type="date"
-              className="border border-green-200 p-2 text-[10px] font-bold outline-none focus:border-green-500 bg-green-50"
-              value={availabilityDateFilter}
-              onChange={(e) => setAvailabilityDateFilter(e.target.value)}
-              placeholder="Available From"
-            />
-            <select
-              className="border border-green-200 p-2 text-[10px] font-bold uppercase outline-none focus:border-green-500 bg-green-50"
-              value={harvestStatusFilter}
-              onChange={(e) => setHarvestStatusFilter(e.target.value)}
-            >
-              <option value="all">Harvest Status</option>
-              <option value="planted">Planted</option>
-              <option value="growing">Growing</option>
-              <option value="ready soon">Ready Soon</option>
-              <option value="ready now">Ready Now</option>
-              <option value="sold out">Sold Out</option>
-            </select>
-            <input
-              type="number"
-              placeholder="Min Quantity"
-              className="border border-green-200 p-2 text-[10px] font-bold outline-none focus:border-green-500 bg-green-50"
-              value={quantityAvailableFilter}
-              onChange={(e) => setQuantityAvailableFilter(e.target.value)}
-            />
-            <select
-              className="border border-green-200 p-2 text-[10px] font-bold uppercase outline-none focus:border-green-500 bg-green-50"
-              value={packagingFilter}
-              onChange={(e) => setPackagingFilter(e.target.value)}
-            >
-              <option value="all">Packaging</option>
-              <option value="loose">Loose</option>
-              <option value="bagged">Bagged</option>
-              <option value="boxed">Boxed</option>
-              <option value="crated">Crated</option>
-              <option value="bottled">Bottled</option>
-              <option value="bundled">Bundled</option>
-              <option value="other">Other</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      {/* Main Registry */}
-      {viewMode === "table" ? (
         <TablePanel
-          title="Registry Ingress"
-          subtitle={`${filteredProducts.length} items currently mapped`}
-          headers={[
-            <div className="flex items-center gap-3">
-              <input
-                type="checkbox"
-                checked={
-                  selectedProductIds.length === filteredProducts.length &&
-                  filteredProducts.length > 0
-                }
-                onChange={toggleSelectAll}
-                className="accent-brand-orange"
-              />
-              Item Specification
-            </div>,
-            "Vendor Identity",
-            "Price (Buffer)",
-            "Inventory",
-            "Status",
-            "Visual",
-            "Actions",
-          ]}
+          title="Product Identity Registry"
+          headers={["Image", "Product", "Brand", "Category", "Sector", "Barcode / SKU", "Status", "Actions"]}
         >
-          {filteredProducts.map((p) => (
-            <tr
-              key={p.id}
-              className={`group hover:bg-stone-50 transition-colors ${selectedProductIds.includes(p.id) ? "bg-orange-50/30" : ""}`}
-            >
+          {filteredProducts.map((product) => (
+            <tr key={product.id} className="hover:bg-stone-50">
               <td className="px-6 py-4">
-                <div className="flex items-center gap-3">
-                  <input
-                    type="checkbox"
-                    checked={selectedProductIds.includes(p.id)}
-                    onChange={() => toggleSelectProduct(p.id)}
-                    className="accent-brand-orange"
-                  />
-                  <div className="w-10 h-10 border border-stone-200 shrink-0 overflow-hidden bg-stone-50">
-                    {p.imageUrl ? (
-                      <img
-                        src={p.imageUrl}
-                        alt={p.name}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-stone-200">
-                        <Package size={20} />
-                      </div>
-                    )}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-xs font-bold uppercase truncate max-w-[200px]">
-                      {p.name}
-                    </p>
-                    <p className="text-[9px] font-mono text-stone-400 flex items-center gap-1 uppercase">
-                      {p.sku} <span className="opacity-30">|</span>{" "}
-                      {p.brand || "NO_BRAND"}
-                    </p>
-                  </div>
-                </div>
-              </td>
-              <td className="px-6 py-4">
-                <p className="text-xs font-bold text-stone-700 uppercase line-clamp-1">
-                  {p.vendorName}
-                </p>
-                <p className="text-[9px] text-stone-400 uppercase mt-0.5">
-                  {p.branchName}
-                </p>
-              </td>
-              <td className="px-6 py-4">
-                <div className="flex flex-col">
-                  <span className="text-[10px] font-bold font-mono">
-                    ${p.sellingPrice.toFixed(2)}
-                  </span>
-                  {p.oldPrice && p.oldPrice > p.sellingPrice && (
-                    <span className="text-[8px] text-stone-300 line-through font-mono">
-                      ${p.oldPrice.toFixed(2)}
-                    </span>
+                <div className="h-12 w-12 border border-stone-200 bg-stone-50 flex items-center justify-center">
+                  {product.imageUrl ? (
+                    <img src={product.imageUrl} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <PackageSearch size={18} className="text-stone-300" />
                   )}
                 </div>
               </td>
               <td className="px-6 py-4">
-                <div
-                  className={`flex flex-col ${p.stockQuantity <= p.minStockAlert ? "text-red-500" : "text-stone-500"}`}
-                >
-                  <span className="text-xs font-mono font-bold">
-                    {p.stockQuantity}
-                  </span>
-                  <span className="text-[8px] uppercase font-bold text-stone-300">
-                    Min Alert: {p.minStockAlert}
-                  </span>
-                </div>
+                <p className="text-xs font-black uppercase text-brand-charcoal">{product.productName}</p>
+                <p className="text-[10px] font-bold uppercase text-stone-400">{product.tags?.slice(0, 3).join(", ") || "No tags"}</p>
+              </td>
+              <td className="px-6 py-4 text-xs font-bold uppercase">{product.brand || "-"}</td>
+              <td className="px-6 py-4 text-xs font-bold uppercase">{product.category || "-"}</td>
+              <td className="px-6 py-4 text-xs font-bold uppercase">{product.sector || "-"}</td>
+              <td className="px-6 py-4 text-[10px] font-mono text-stone-500">
+                <p>{product.barcode || "No barcode"}</p>
+                <p>{product.standardSku || "No SKU"}</p>
               </td>
               <td className="px-6 py-4">
-                <StatusBadge
-                  status={p.status}
-                  variant={p.status === "active" ? "success" : "neutral"}
-                />
+                <StatusBadge status={product.status} variant={product.status === "active" ? "success" : "neutral"} />
               </td>
               <td className="px-6 py-4">
-                <StatusBadge
-                  status={p.imageStatus}
-                  variant={
-                    p.imageStatus === "approved"
-                      ? "success"
-                      : p.imageStatus === "missing"
-                        ? "warning"
-                        : "neutral"
-                  }
-                />
-              </td>
-              <td className="px-6 py-4 text-right">
-                <div className="flex justify-end gap-2 p-1">
-                  {permissionService.canEdit("productManagement") && (
-                    <button
-                      onClick={() => handleEditProduct(p)}
-                      className={`p-1.5 text-stone-400 hover:text-brand-charcoal transition-colors`}
-                    >
-                      <Edit3 size={14} />
-                    </button>
-                  )}
+                <div className="flex gap-2">
+                  <SecondaryButton size="sm" onClick={() => handleEdit(product)}>
+                    <Edit3 size={12} className="mr-1" /> Edit
+                  </SecondaryButton>
                   {permissionService.canDelete("productManagement") && (
                     <button
-                      onClick={() => handleDeleteProduct(p.id)}
-                      className={`p-1.5 text-stone-400 hover:text-red-600 transition-colors`}
+                      className="p-2 border border-stone-200 text-stone-400 hover:border-red-500 hover:text-red-600"
+                      onClick={() => setDeleteId(product.id)}
                     >
-                      <Trash2 size={14} />
+                      <Trash2 size={13} />
                     </button>
                   )}
                 </div>
@@ -974,1227 +603,45 @@ export const ProductManagement: React.FC = () => {
           ))}
           {filteredProducts.length === 0 && (
             <tr>
-              <td colSpan={7} className="px-6 py-32">
+              <td colSpan={8} className="p-10">
                 <EmptyState
-                  icon={PackageSearch}
-                  title="Buffer Silence"
-                  description="No item nodes matching current filter matrix were detected."
-                  action={
-                    <SecondaryButton
-                      onClick={() => {
-                        setSearch("");
-                        setVendorFilter("all");
-                        setStatusFilter("all");
-                      }}
-                    >
-                      Reset Terminal
-                    </SecondaryButton>
-                  }
+                  icon={Search}
+                  title="No Master Products Found"
+                  description="Create the first reusable product or adjust your filters."
                 />
               </td>
             </tr>
           )}
         </TablePanel>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-          {filteredProducts.map((p) => (
-            <div
-              key={p.id}
-              className={`bg-white border rounded-none group relative overflow-hidden flex flex-col ${selectedProductIds.includes(p.id) ? "border-brand-orange ring-1 ring-brand-orange" : "border-stone-200"}`}
-            >
-              <div className="absolute top-2 left-2 z-10">
-                <input
-                  type="checkbox"
-                  checked={selectedProductIds.includes(p.id)}
-                  onChange={() => toggleSelectProduct(p.id)}
-                  className="accent-brand-orange"
-                />
-              </div>
-              <div className="h-40 bg-stone-50 flex items-center justify-center overflow-hidden">
-                {p.imageUrl ? (
-                  <img
-                    src={p.imageUrl}
-                    alt={p.name}
-                    className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
-                  />
-                ) : (
-                  <Package size={40} className="text-stone-200" />
-                )}
-                <div className="absolute top-2 right-2 flex flex-col gap-1 items-end">
-                  <StatusBadge
-                    status={p.status}
-                    variant={p.status === "active" ? "success" : "neutral"}
-                  />
-                  {p.publishToCatalogue && (
-                    <span className="bg-brand-orange text-white p-1 rounded-full">
-                      <Eye size={8} />
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div className="p-3 flex-1 flex flex-col">
-                <h4 className="text-[10px] font-bold uppercase truncate">
-                  {p.name}
-                </h4>
-                <p className="text-[8px] text-stone-400 font-bold uppercase mt-1 line-clamp-1">
-                  {p.vendorName}
-                </p>
-                <p className="text-[7px] text-stone-300 font-bold uppercase flex items-center gap-1 mt-0.5">
-                  <MapPin size={8} /> {p.branchName}
-                </p>
+      </DataPanel>
 
-                <div className="mt-auto pt-3 flex justify-between items-end border-t border-stone-50">
-                  <div className="flex flex-col">
-                    <span className="text-[9px] font-bold font-mono">
-                      ${p.sellingPrice.toFixed(2)}
-                    </span>
-                    <span
-                      className={`text-[7px] font-bold font-mono ${p.stockQuantity <= p.minStockAlert ? "text-red-500" : "text-stone-300"}`}
-                    >
-                      STK: {p.stockQuantity}
-                    </span>
-                  </div>
-                  <div className="flex gap-1">
-                    {permissionService.canEdit("productManagement") && (
-                      <button
-                        onClick={() => handleEditProduct(p)}
-                        className={`p-1 px-2 rounded-none bg-stone-50 hover:bg-brand-charcoal hover:text-white text-stone-400 transition-colors`}
-                      >
-                        <Edit3 size={10} />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Bulk Update Tool Overlay */}
-      {isBulkUpdateOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-brand-charcoal/40 backdrop-blur-sm p-4">
-          <DataPanel
-            title="Bulk Logistics Overwrite"
-            className="w-full max-w-lg shadow-2xl"
-          >
-            <div className="p-6 space-y-6">
-              <p className="text-[10px] font-bold uppercase text-stone-400 tracking-widest border-b border-stone-100 pb-2">
-                Targeting {selectedProductIds.length} Identity Nodes
-              </p>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-[10px] uppercase font-bold text-stone-400">
-                    Target Sector
-                  </label>
-                  <select
-                    className="w-full border p-2 text-xs font-bold outline-none uppercase"
-                    value={bulkData.sector}
-                    onChange={(e) =>
-                      setBulkData({ ...bulkData, sector: e.target.value })
-                    }
-                  >
-                    <option value="">No Change</option>
-                    {sectors.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-[10px] uppercase font-bold text-stone-400">
-                    Target Category
-                  </label>
-                  <select
-                    className="w-full border p-2 text-xs font-bold outline-none uppercase"
-                    value={bulkData.category}
-                    onChange={(e) =>
-                      setBulkData({ ...bulkData, category: e.target.value })
-                    }
-                  >
-                    <option value="">No Change</option>
-                    {categories.map((c) => (
-                      <option key={c} value={c}>
-                        {c}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-[10px] uppercase font-bold text-stone-400">
-                  Status Vector
-                </label>
-                <div className="flex gap-2">
-                  {PRODUCT_STATUSES.map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => setBulkData({ ...bulkData, status: s })}
-                      className={`flex-1 py-2 text-[8px] font-bold uppercase border ${bulkData.status === s ? "bg-brand-charcoal text-white border-brand-charcoal" : "bg-white border-stone-100 hover:border-stone-200"}`}
-                    >
-                      {s}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-[10px] uppercase font-bold text-stone-400">
-                  Visibility Modulation
-                </label>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setBulkData({ ...bulkData, publish: true })}
-                    className={`flex-1 py-2 text-[8px] font-bold uppercase border ${bulkData.publish === true ? "bg-brand-orange text-white border-brand-orange" : "bg-white border-stone-100"}`}
-                  >
-                    Publish to Catalogue
-                  </button>
-                  <button
-                    onClick={() => setBulkData({ ...bulkData, publish: false })}
-                    className={`flex-1 py-2 text-[8px] font-bold uppercase border ${bulkData.publish === false ? "bg-brand-orange text-white border-brand-orange" : "bg-white border-stone-100"}`}
-                  >
-                    Withdraw from Feed
-                  </button>
-                </div>
-              </div>
-
-              <div className="pt-6 flex gap-3">
-                <SecondaryButton
-                  className="flex-1"
-                  onClick={() => setIsBulkUpdateOpen(false)}
-                >
-                  Abort Modification
-                </SecondaryButton>
-                <PrimaryButton className="flex-1" onClick={applyBulkUpdate}>
-                  Apply Logistics
-                </PrimaryButton>
-              </div>
-            </div>
-          </DataPanel>
-        </div>
-      )}
-
-      {/* Item Form Sidebar */}
-      {isFormOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-end bg-brand-charcoal/40 backdrop-blur-sm">
-          <div className="w-full max-w-3xl h-full bg-white shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-right duration-300">
-            <div className="p-6 border-b border-stone-100 flex justify-between items-center bg-stone-50 border-l border-stone-200 shrink-0">
-              <div>
-                <h2 className="text-xl font-bold uppercase tracking-tight text-brand-charcoal">
-                  {editingProduct?.createdAt
-                    ? "Technical SKU Modification"
-                    : "Add Product"}
-                </h2>
-                <p className="text-[10px] uppercase font-bold text-stone-400 mt-1 flex items-center gap-2">
-                  <BarChart3 size={10} /> Operation Stream: {editingProduct?.id}
-                </p>
-              </div>
-              <button
-                onClick={() => setIsFormOpen(false)}
-                className="p-2 hover:bg-stone-200 transition-colors"
-              >
-                <X size={20} />
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-8 space-y-10">
-              {/* Duplicate Intelligence */}
-              {duplicates.length > 0 && (
-                <DataPanel
-                  title="Duplicate Intelligence"
-                  className="border-t-4 border-t-red-500 shadow-sm bg-red-50/30"
-                >
-                  <div className="p-6 space-y-4">
-                    <div className="flex gap-3 text-red-600">
-                      <AlertTriangle size={20} className="shrink-0" />
-                      <div>
-                        <h4 className="text-sm font-bold uppercase">
-                          Potential Duplicates Detected
-                        </h4>
-                        <p className="text-xs text-stone-600 mt-1">
-                          Similar product already exists. Link this vendor to
-                          existing product instead of creating duplicate.
-                        </p>
-                      </div>
-                    </div>
-                    <div className="space-y-3 mt-4">
-                      {duplicates.map((dup, idx) => (
-                        <div
-                          key={idx}
-                          className="p-4 border border-red-200 bg-white flex flex-col md:flex-row gap-4 justify-between md:items-center"
-                        >
-                          <div>
-                            <p className="text-xs font-bold uppercase text-brand-charcoal">
-                              {dup.record.name}{" "}
-                              <span className="text-[10px] text-stone-400 font-mono">
-                                [{dup.record.sku || dup.record.id}]
-                              </span>
-                            </p>
-                            <p
-                              className={`text-[10px] font-bold mt-1 uppercase ${dup.similarity.level === "exact" || dup.similarity.level === "high" ? "text-red-500" : "text-stone-500"}`}
-                            >
-                              Match: {dup.similarity.score}% -{" "}
-                              {dup.similarity.level} ({dup.similarity.reason})
-                            </p>
-                          </div>
-                          <div className="flex flex-wrap gap-2 shrink-0">
-                            <SecondaryButton
-                              size="sm"
-                              onClick={() =>
-                                alert("Linking to master registry coming soon.")
-                              }
-                            >
-                              Link to Existing Product
-                            </SecondaryButton>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    {hasCriticalDuplicate && !isManagerOverride && (
-                      <div className="flex gap-3 mt-6 pt-4 border-t border-red-200">
-                        {!canManagerOverride ? (
-                          <PrimaryButton
-                            size="sm"
-                            onClick={handleOverrideRequest}
-                          >
-                            Submit for Approval
-                          </PrimaryButton>
-                        ) : (
-                          <PrimaryButton
-                            size="sm"
-                            onClick={() => setIsManagerOverride(true)}
-                          >
-                            Continue as New Product
-                          </PrimaryButton>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </DataPanel>
-              )}
-
-              {/* Phase 1: Identity & Assignment */}
-              <div className="space-y-6">
-                <h4 className="text-[11px] uppercase font-bold text-brand-orange border-b border-orange-100 pb-2 flex items-center gap-2">
-                  <MapPin size={14} /> Phase 1: Jurisdictional Mapping
-                </h4>
-                <div className="grid grid-cols-2 gap-6">
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] uppercase font-bold text-stone-400">
-                      Parent Vendor Protocol
-                    </label>
-                    <select
-                      className="w-full border-2 border-stone-100 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange bg-stone-50/50"
-                      value={editingProduct?.vendorId || ""}
-                      onChange={(e) =>
-                        setEditingProduct({
-                          ...editingProduct!,
-                          vendorId: e.target.value,
-                          branchId: "",
-                        })
-                      }
-                    >
-                      <option value="">Select Vendor...</option>{" "}
-                      {safeVendors.map((v) => (
-                        <option key={v.id} value={v.id}>
-                          {v.name} [{v.id}]
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] uppercase font-bold text-stone-400">
-                      Assigned Ingress Node (Branch)
-                    </label>
-                    <select
-                      className="w-full border-2 border-stone-100 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange bg-stone-50/50"
-                      value={editingProduct?.branchId || ""}
-                      onChange={(e) =>
-                        setEditingProduct({
-                          ...editingProduct!,
-                          branchId: e.target.value,
-                        })
-                      }
-                      disabled={!editingProduct?.vendorId}
-                    >
-                      <option value="">Select Location...</option>
-                      {safeVendors
-                        .find((v) => v.id === editingProduct?.vendorId)
-                        ?.branches.map((b) => (
-                          <option key={b.id} value={b.id}>
-                            {b.name}
-                          </option>
-                        ))}
-                    </select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] uppercase font-bold text-stone-400">
-                      Collected By (RPN Agent)
-                    </label>
-                    <select
-                      className="w-full border-2 border-stone-100 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange bg-stone-50/50"
-                      value={editingProduct?.collectedByRPNId || ""}
-                      onChange={(e) =>
-                        setEditingProduct({
-                          ...editingProduct!,
-                          collectedByRPNId: e.target.value,
-                        })
-                      }
-                    >
-                      <option value="">Internal Staff Entry</option>
-                      {safeRpns.map((r) => (
-                        <option key={r.id} value={r.id}>
-                          {r.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] uppercase font-bold text-stone-400">
-                      Source Protocol
-                    </label>
-                    <select
-                      className="w-full border-2 border-stone-100 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange bg-stone-50/50"
-                      value={editingProduct?.source || "backend entered"}
-                      onChange={(e) =>
-                        setEditingProduct({
-                          ...editingProduct!,
-                          source: e.target.value as FieldDataSource,
-                        })
-                      }
-                    >
-                      {SOURCES.map((s) => (
-                        <option key={s} value={s}>
-                          {s.toUpperCase()}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              {/* Phase 2: Technical Specs */}
-              <div className="space-y-6">
-                <h4 className="text-[11px] uppercase font-bold text-brand-orange border-b border-orange-100 pb-2 flex items-center gap-2">
-                  <Package size={14} /> Phase 2: Technical Specifications
-                </h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="col-span-2 space-y-1.5">
-                    <label className="text-[10px] uppercase font-bold text-stone-400">
-                      Official Product Nomenclature
-                    </label>
-                    <input
-                      className="w-full border-2 border-stone-200 p-4 text-sm font-bold uppercase outline-none focus:border-brand-orange"
-                      value={editingProduct?.name || ""}
-                      onChange={(e) =>
-                        setEditingProduct({
-                          ...editingProduct!,
-                          name: e.target.value,
-                        })
-                      }
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] uppercase font-bold text-stone-400">
-                      System SKU / Reference
-                    </label>
-                    <input
-                      className="w-full border-2 border-stone-200 p-3 text-xs font-bold font-mono outline-none focus:border-brand-orange"
-                      value={editingProduct?.sku || ""}
-                      onChange={(e) =>
-                        setEditingProduct({
-                          ...editingProduct!,
-                          sku: e.target.value,
-                        })
-                      }
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] uppercase font-bold text-stone-400">
-                      Item Barcode (Universal)
-                    </label>
-                    <input
-                      className="w-full border-2 border-stone-200 p-3 text-xs font-bold font-mono outline-none focus:border-brand-orange"
-                      value={editingProduct?.productCode || ""}
-                      onChange={(e) =>
-                        setEditingProduct({
-                          ...editingProduct!,
-                          productCode: e.target.value,
-                        })
-                      }
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] uppercase font-bold text-stone-400">
-                      Brand Identity
-                    </label>
-                    <input
-                      className="w-full border-2 border-stone-200 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange"
-                      value={editingProduct?.brand || ""}
-                      onChange={(e) =>
-                        setEditingProduct({
-                          ...editingProduct!,
-                          brand: e.target.value,
-                        })
-                      }
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] uppercase font-bold text-stone-400">
-                      Model / Version
-                    </label>
-                    <input
-                      className="w-full border-2 border-stone-200 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange"
-                      value={editingProduct?.model || ""}
-                      onChange={(e) =>
-                        setEditingProduct({
-                          ...editingProduct!,
-                          model: e.target.value,
-                        })
-                      }
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Phase 3: Taxonomy & Logistics */}
-              <div className="space-y-6">
-                <h4 className="text-[11px] uppercase font-bold text-brand-orange border-b border-orange-100 pb-2 flex items-center gap-2">
-                  <Tag size={14} /> Phase 3: Sector & Logistics
-                </h4>
-                <div className="grid grid-cols-2 gap-6">
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] uppercase font-bold text-stone-400">
-                      Primary Sector
-                    </label>
-                    <input
-                      className="w-full border-2 border-stone-200 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange"
-                      value={
-                        editingProduct?.sector ||
-                        safeVendors.find(
-                          (v) => v.id === editingProduct?.vendorId,
-                        )?.sector ||
-                        ""
-                      }
-                      onChange={(e) =>
-                        setEditingProduct({
-                          ...editingProduct!,
-                          sector: e.target.value,
-                        })
-                      }
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] uppercase font-bold text-stone-400">
-                      Technical Category
-                    </label>
-                    <input
-                      className="w-full border-2 border-stone-200 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange"
-                      value={editingProduct?.category || ""}
-                      onChange={(e) =>
-                        setEditingProduct({
-                          ...editingProduct!,
-                          category: e.target.value,
-                        })
-                      }
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] uppercase font-bold text-stone-400">
-                      Unit of Measurement
-                    </label>
-                    <input
-                      className="w-full border-2 border-stone-200 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange"
-                      value={editingProduct?.unitOfMeasure || "Each"}
-                      onChange={(e) =>
-                        setEditingProduct({
-                          ...editingProduct!,
-                          unitOfMeasure: e.target.value,
-                        })
-                      }
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] uppercase font-bold text-stone-400">
-                      In-Store Location (Display Text)
-                    </label>
-                    <input
-                      placeholder="Aisle 4, Shelf B"
-                      className="w-full border-2 border-stone-200 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange"
-                      value={editingProduct?.locationDisplayText || ""}
-                      onChange={(e) =>
-                        setEditingProduct({
-                          ...editingProduct!,
-                          locationDisplayText: e.target.value,
-                        })
-                      }
-                    />
-                  </div>
-                  <div className="col-span-2 space-y-1.5">
-                    <label className="text-[10px] uppercase font-bold text-stone-400">
-                      Indexing Tags (Comma Separated)
-                    </label>
-                    <input
-                      className="w-full border-2 border-stone-200 p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange"
-                      value={editingProduct?.tags?.join(", ") || ""}
-                      onChange={(e) =>
-                        setEditingProduct({
-                          ...editingProduct!,
-                          tags: e.target.value
-                            .split(",")
-                            .map((t) => t.trim())
-                            .filter(Boolean),
-                        })
-                      }
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Phase 3.5: Farm Produce Intelligence (Conditional) */}
-              {(() => {
-                const selectedVendor = safeVendors.find(
-                  (v) => v.id === editingProduct?.vendorId,
-                );
-                const showFarmSection =
-                  selectedVendor?.vendorType === "farm_producer" ||
-                  selectedVendor?.sector
-                    ?.toLowerCase()
-                    .includes("agricultur") ||
-                  editingProduct?.sector?.toLowerCase().includes("agricultur");
-                if (!showFarmSection) return null;
-
-                return (
-                  <div className="space-y-6 bg-green-50 p-6 border border-green-200">
-                    <h4 className="text-[11px] uppercase font-bold text-green-700 border-b border-green-200 pb-2 flex items-center gap-2">
-                      🌾 Phase 3.5: Farm Produce Intelligence
-                    </h4>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div className="space-y-1.5">
-                        <label className="text-[10px] uppercase font-bold text-green-600">
-                          Farm Produce Classification
-                        </label>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() =>
-                              setEditingProduct({
-                                ...editingProduct!,
-                                isFarmProduce: true,
-                              })
-                            }
-                            className={`flex-1 py-2 text-[10px] font-bold uppercase border ${editingProduct?.isFarmProduce ? "bg-green-600 text-white border-green-600" : "bg-white border-stone-200 text-stone-400"}`}
-                          >
-                            Farm Produce
-                          </button>
-                          <button
-                            onClick={() =>
-                              setEditingProduct({
-                                ...editingProduct!,
-                                isFarmProduce: false,
-                              })
-                            }
-                            className={`flex-1 py-2 text-[10px] font-bold uppercase border ${editingProduct?.isFarmProduce === false ? "bg-stone-600 text-white border-stone-600" : "bg-white border-stone-200 text-stone-400"}`}
-                          >
-                            Standard Product
-                          </button>
-                        </div>
-                      </div>
-                      {editingProduct?.isFarmProduce && (
-                        <>
-                          <div className="space-y-1.5">
-                            <label className="text-[10px] uppercase font-bold text-green-600">
-                              Crop Type
-                            </label>
-                            <input
-                              className="w-full border-2 border-green-200 p-3 text-xs font-bold uppercase outline-none focus:border-green-500 bg-green-50/50"
-                              value={editingProduct?.cropType || ""}
-                              onChange={(e) =>
-                                setEditingProduct({
-                                  ...editingProduct!,
-                                  cropType: e.target.value,
-                                })
-                              }
-                              placeholder="e.g., Maize, Tomatoes, Potatoes"
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <label className="text-[10px] uppercase font-bold text-green-600">
-                              Crop Variety
-                            </label>
-                            <input
-                              className="w-full border-2 border-green-200 p-3 text-xs font-bold uppercase outline-none focus:border-green-500 bg-green-50/50"
-                              value={editingProduct?.cropVariety || ""}
-                              onChange={(e) =>
-                                setEditingProduct({
-                                  ...editingProduct!,
-                                  cropVariety: e.target.value,
-                                })
-                              }
-                              placeholder="e.g., Sweet Corn, Roma, Russet"
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <label className="text-[10px] uppercase font-bold text-green-600">
-                              Date of Availability
-                            </label>
-                            <input
-                              type="date"
-                              className="w-full border-2 border-green-200 p-3 text-xs font-bold outline-none focus:border-green-500 bg-green-50/50"
-                              value={editingProduct?.dateOfAvailability || ""}
-                              onChange={(e) =>
-                                setEditingProduct({
-                                  ...editingProduct!,
-                                  dateOfAvailability: e.target.value,
-                                })
-                              }
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <label className="text-[10px] uppercase font-bold text-green-600">
-                              Harvest Window Start
-                            </label>
-                            <input
-                              type="date"
-                              className="w-full border-2 border-green-200 p-3 text-xs font-bold outline-none focus:border-green-500 bg-green-50/50"
-                              value={
-                                editingProduct?.harvestWindowStartDate || ""
-                              }
-                              onChange={(e) =>
-                                setEditingProduct({
-                                  ...editingProduct!,
-                                  harvestWindowStartDate: e.target.value,
-                                })
-                              }
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <label className="text-[10px] uppercase font-bold text-green-600">
-                              Harvest Window End
-                            </label>
-                            <input
-                              type="date"
-                              className="w-full border-2 border-green-200 p-3 text-xs font-bold outline-none focus:border-green-500 bg-green-50/50"
-                              value={editingProduct?.harvestWindowEndDate || ""}
-                              onChange={(e) =>
-                                setEditingProduct({
-                                  ...editingProduct!,
-                                  harvestWindowEndDate: e.target.value,
-                                })
-                              }
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <label className="text-[10px] uppercase font-bold text-green-600">
-                              Quantity Available
-                            </label>
-                            <input
-                              type="number"
-                              className="w-full border-2 border-green-200 p-3 text-xs font-bold outline-none focus:border-green-500 bg-green-50/50"
-                              value={editingProduct?.quantityAvailable || ""}
-                              onChange={(e) =>
-                                setEditingProduct({
-                                  ...editingProduct!,
-                                  quantityAvailable:
-                                    parseFloat(e.target.value) || undefined,
-                                })
-                              }
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <label className="text-[10px] uppercase font-bold text-green-600">
-                              Quantity Unit
-                            </label>
-                            <select
-                              className="w-full border-2 border-green-200 p-3 text-xs font-bold uppercase outline-none focus:border-green-500 bg-green-50/50"
-                              value={editingProduct?.quantityUnit || ""}
-                              onChange={(e) =>
-                                setEditingProduct({
-                                  ...editingProduct!,
-                                  quantityUnit: e.target.value as any,
-                                })
-                              }
-                            >
-                              <option value="">Select Unit...</option>
-                              <option value="kg">Kilograms (kg)</option>
-                              <option value="tonne">Tonnes</option>
-                              <option value="crate">Crates</option>
-                              <option value="bag">Bags</option>
-                              <option value="box">Boxes</option>
-                              <option value="bundle">Bundles</option>
-                              <option value="sack">Sacks</option>
-                              <option value="litre">Litres</option>
-                              <option value="other">Other</option>
-                            </select>
-                          </div>
-                          <div className="space-y-1.5">
-                            <label className="text-[10px] uppercase font-bold text-green-600">
-                              Packaging Type
-                            </label>
-                            <select
-                              className="w-full border-2 border-green-200 p-3 text-xs font-bold uppercase outline-none focus:border-green-500 bg-green-50/50"
-                              value={editingProduct?.packagingType || ""}
-                              onChange={(e) =>
-                                setEditingProduct({
-                                  ...editingProduct!,
-                                  packagingType: e.target.value as any,
-                                })
-                              }
-                            >
-                              <option value="">Select Packaging...</option>
-                              <option value="loose">Loose</option>
-                              <option value="bagged">Bagged</option>
-                              <option value="boxed">Boxed</option>
-                              <option value="crated">Crated</option>
-                              <option value="bottled">Bottled</option>
-                              <option value="bundled">Bundled</option>
-                              <option value="other">Other</option>
-                            </select>
-                          </div>
-                          <div className="space-y-1.5">
-                            <label className="text-[10px] uppercase font-bold text-green-600">
-                              Packaging Size
-                            </label>
-                            <input
-                              className="w-full border-2 border-green-200 p-3 text-xs font-bold uppercase outline-none focus:border-green-500 bg-green-50/50"
-                              value={editingProduct?.packagingSize || ""}
-                              onChange={(e) =>
-                                setEditingProduct({
-                                  ...editingProduct!,
-                                  packagingSize: e.target.value,
-                                })
-                              }
-                              placeholder="e.g., 5kg bags, 10kg boxes"
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <label className="text-[10px] uppercase font-bold text-green-600">
-                              Minimum Order Quantity
-                            </label>
-                            <input
-                              type="number"
-                              className="w-full border-2 border-green-200 p-3 text-xs font-bold outline-none focus:border-green-500 bg-green-50/50"
-                              value={editingProduct?.minimumOrderQuantity || ""}
-                              onChange={(e) =>
-                                setEditingProduct({
-                                  ...editingProduct!,
-                                  minimumOrderQuantity:
-                                    parseFloat(e.target.value) || undefined,
-                                })
-                              }
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <label className="text-[10px] uppercase font-bold text-green-600">
-                              Farm Location
-                            </label>
-                            <input
-                              className="w-full border-2 border-green-200 p-3 text-xs font-bold uppercase outline-none focus:border-green-500 bg-green-50/50"
-                              value={editingProduct?.farmLocation || ""}
-                              onChange={(e) =>
-                                setEditingProduct({
-                                  ...editingProduct!,
-                                  farmLocation: e.target.value,
-                                })
-                              }
-                              placeholder="Farm location details"
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <label className="text-[10px] uppercase font-bold text-green-600">
-                              Pickup Location
-                            </label>
-                            <input
-                              className="w-full border-2 border-green-200 p-3 text-xs font-bold uppercase outline-none focus:border-green-500 bg-green-50/50"
-                              value={editingProduct?.pickupLocation || ""}
-                              onChange={(e) =>
-                                setEditingProduct({
-                                  ...editingProduct!,
-                                  pickupLocation: e.target.value,
-                                })
-                              }
-                              placeholder="Pickup point details"
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <label className="text-[10px] uppercase font-bold text-green-600">
-                              Delivery Available
-                            </label>
-                            <div className="flex gap-2">
-                              <button
-                                onClick={() =>
-                                  setEditingProduct({
-                                    ...editingProduct!,
-                                    deliveryAvailable: true,
-                                  })
-                                }
-                                className={`flex-1 py-2 text-[10px] font-bold uppercase border ${editingProduct?.deliveryAvailable ? "bg-green-600 text-white border-green-600" : "bg-white border-stone-200 text-stone-400"}`}
-                              >
-                                Yes
-                              </button>
-                              <button
-                                onClick={() =>
-                                  setEditingProduct({
-                                    ...editingProduct!,
-                                    deliveryAvailable: false,
-                                  })
-                                }
-                                className={`flex-1 py-2 text-[10px] font-bold uppercase border ${editingProduct?.deliveryAvailable === false ? "bg-red-600 text-white border-red-600" : "bg-white border-stone-200 text-stone-400"}`}
-                              >
-                                No
-                              </button>
-                            </div>
-                          </div>
-                          <div className="space-y-1.5">
-                            <label className="text-[10px] uppercase font-bold text-green-600">
-                              Storage Condition
-                            </label>
-                            <select
-                              className="w-full border-2 border-green-200 p-3 text-xs font-bold uppercase outline-none focus:border-green-500 bg-green-50/50"
-                              value={editingProduct?.storageCondition || ""}
-                              onChange={(e) =>
-                                setEditingProduct({
-                                  ...editingProduct!,
-                                  storageCondition: e.target.value as any,
-                                })
-                              }
-                            >
-                              <option value="">Select Condition...</option>
-                              <option value="fresh">Fresh</option>
-                              <option value="dried">Dried</option>
-                              <option value="chilled">Chilled</option>
-                              <option value="frozen">Frozen</option>
-                              <option value="ambient">Ambient</option>
-                              <option value="other">Other</option>
-                            </select>
-                          </div>
-                          <div className="space-y-1.5">
-                            <label className="text-[10px] uppercase font-bold text-green-600">
-                              Harvest Status
-                            </label>
-                            <select
-                              className="w-full border-2 border-green-200 p-3 text-xs font-bold uppercase outline-none focus:border-green-500 bg-green-50/50"
-                              value={editingProduct?.harvestStatus || ""}
-                              onChange={(e) =>
-                                setEditingProduct({
-                                  ...editingProduct!,
-                                  harvestStatus: e.target.value as any,
-                                })
-                              }
-                            >
-                              <option value="">Select Status...</option>
-                              <option value="planted">Planted</option>
-                              <option value="growing">Growing</option>
-                              <option value="ready soon">Ready Soon</option>
-                              <option value="ready now">Ready Now</option>
-                              <option value="sold out">Sold Out</option>
-                            </select>
-                          </div>
-                          <div className="col-span-2 space-y-1.5">
-                            <label className="text-[10px] uppercase font-bold text-green-600">
-                              Producer Notes
-                            </label>
-                            <textarea
-                              rows={3}
-                              className="w-full border-2 border-green-200 p-4 text-xs font-medium outline-none focus:border-green-500 bg-green-50/50 leading-relaxed"
-                              value={editingProduct?.producerNotes || ""}
-                              onChange={(e) =>
-                                setEditingProduct({
-                                  ...editingProduct!,
-                                  producerNotes: e.target.value,
-                                })
-                              }
-                              placeholder="Additional notes about the produce, farming practices, quality, etc."
-                            />
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* Phase 4: Financial Matrix */}
-              <div className="space-y-6 bg-stone-50 p-6 border border-stone-200">
-                <h4 className="text-[11px] uppercase font-bold text-brand-charcoal border-b border-stone-200 pb-2 flex items-center gap-2">
-                  <BarChart3 size={14} /> Phase 4: Financial Data Matrix
-                </h4>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] uppercase font-bold text-stone-400">
-                      Active Price
-                    </label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 text-[10px] font-bold">
-                        $
-                      </span>
-                      <input
-                        type="number"
-                        className="w-full border-2 border-stone-200 pl-8 pr-3 py-3 text-sm font-bold font-mono outline-none focus:border-brand-orange"
-                        value={editingProduct?.sellingPrice || 0}
-                        onChange={(e) => {
-                          const val = parseFloat(e.target.value);
-                          setEditingProduct({
-                            ...editingProduct!,
-                            sellingPrice: val,
-                            lastPriceUpdateDate:
-                              val !== editingProduct?.sellingPrice
-                                ? new Date().toISOString()
-                                : editingProduct?.lastPriceUpdateDate,
-                          });
-                        }}
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] uppercase font-bold text-stone-300">
-                      Legacy Price
-                    </label>
-                    <div className="relative opacity-60">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 text-[10px] font-bold">
-                        $
-                      </span>
-                      <input
-                        type="number"
-                        className="w-full border-2 border-stone-200 pl-8 pr-3 py-3 text-sm font-bold font-mono outline-none focus:border-brand-orange"
-                        value={editingProduct?.oldPrice || 0}
-                        onChange={(e) =>
-                          setEditingProduct({
-                            ...editingProduct!,
-                            oldPrice: parseFloat(e.target.value),
-                          })
-                        }
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] uppercase font-bold text-stone-400 text-brand-orange">
-                      Actual Stock
-                    </label>
-                    <input
-                      type="number"
-                      className="w-full border-2 border-stone-200 p-3 text-sm font-bold font-mono outline-none focus:border-brand-orange"
-                      value={editingProduct?.stockQuantity || 0}
-                      onChange={(e) =>
-                        setEditingProduct({
-                          ...editingProduct!,
-                          stockQuantity: parseInt(e.target.value),
-                        })
-                      }
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] uppercase font-bold text-stone-400 text-red-500">
-                      Alert Min
-                    </label>
-                    <input
-                      type="number"
-                      className="w-full border-2 border-stone-200 p-3 text-sm font-bold font-mono outline-none focus:border-brand-orange text-red-500"
-                      value={editingProduct?.minStockAlert || 0}
-                      onChange={(e) =>
-                        setEditingProduct({
-                          ...editingProduct!,
-                          minStockAlert: parseInt(e.target.value),
-                        })
-                      }
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Phase 5: Visual Asset Ingestion */}
-              <div className="space-y-6">
-                <h4 className="text-[11px] uppercase font-bold text-brand-orange border-b border-orange-100 pb-2 flex items-center gap-2">
-                  <ImageIcon size={14} /> Phase 5: Visual Asset Ingestion
-                </h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
-                  <div className="border-2 border-dashed border-stone-200 p-10 flex flex-col items-center justify-center text-center relative hover:bg-stone-50 transition-colors group">
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="absolute inset-0 opacity-0 cursor-pointer z-10"
-                      onChange={handleImageUpload}
-                    />
-                    <Upload
-                      className="text-stone-300 mb-4 group-hover:text-brand-orange transition-colors duration-500"
-                      size={32}
-                    />
-                    <p className="text-[10px] font-bold uppercase text-stone-400 tracking-widest">
-                      Transmit New Asset
-                    </p>
-                    <p className="text-[9px] text-stone-300 mt-2 italic font-mono uppercase">
-                      720P Optimal // 8MB Limit
-                    </p>
-                  </div>
-                  {editingProduct?.imageUrl && (
-                    <div className="p-6 border border-stone-200 space-y-4">
-                      <div className="aspect-square bg-stone-100 overflow-hidden border border-stone-100 relative group">
-                        <img
-                          src={editingProduct.imageUrl}
-                          className="w-full h-full object-cover"
-                          alt="Asset Preview"
-                        />
-                        <div className="absolute inset-0 bg-brand-charcoal/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                          <button
-                            onClick={() =>
-                              setEditingProduct({
-                                ...editingProduct!,
-                                imageUrl: undefined,
-                                imageStatus: "missing",
-                              })
-                            }
-                            className="text-white text-[10px] font-bold uppercase bg-red-600 px-4 py-2 hover:bg-red-700"
-                          >
-                            Delete Asset
-                          </button>
-                        </div>
-                      </div>
-                      <div className="space-y-1">
-                        <p className="text-[9px] font-bold uppercase text-stone-400 italic mb-2 tracking-widest">
-                          Image Metadata Stream
-                        </p>
-                        <div className="flex justify-between text-[10px] font-mono">
-                          <span className="text-stone-400">FORMAT</span>
-                          <span className="font-bold text-brand-charcoal uppercase">
-                            WEBP (SYNCED)
-                          </span>
-                        </div>
-                        <div className="flex justify-between text-[10px] font-mono">
-                          <span className="text-stone-400">SIZE</span>
-                          <span className="font-bold text-brand-charcoal">
-                            {formatSize(
-                              editingProduct.imageMetadata?.compressedSize || 0,
-                            )}
-                          </span>
-                        </div>
-                        {(editingProduct.imageMetadata?.compressedSize || 0) >
-                          100 * 1024 && (
-                          <p className="text-[8px] text-red-500 font-bold uppercase mt-2 animate-pulse">
-                            WARNING: Asset size exceeds offline catalogue
-                            optimization limit (100KB).
-                          </p>
-                        )}
-                      </div>
-                      <div className="space-y-1.5">
-                        <label className="text-[10px] uppercase font-bold text-stone-400">
-                          Asset Verification Status
-                        </label>
-                        <select
-                          className="w-full border border-stone-200 p-2 text-[10px] font-bold uppercase outline-none"
-                          value={editingProduct?.imageStatus || "uploaded"}
-                          onChange={(e) =>
-                            setEditingProduct({
-                              ...editingProduct!,
-                              imageStatus: e.target.value as ImageStatus,
-                            })
-                          }
-                        >
-                          {IMAGE_STATUSES.map((s) => (
-                            <option key={s} value={s}>
-                              {s.toUpperCase()}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Phase 6: Final Protocol Verification */}
-              <div className="pt-10 border-t border-stone-100 space-y-6">
-                <div className="grid grid-cols-2 gap-8">
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] uppercase font-bold text-stone-400">
-                      Modulation Vector (Status)
-                    </label>
-                    <div className="grid grid-cols-2 gap-2">
-                      {PRODUCT_STATUSES.map((s) => (
-                        <button
-                          key={s}
-                          onClick={() =>
-                            setEditingProduct({ ...editingProduct!, status: s })
-                          }
-                          className={`py-3 text-[10px] font-bold uppercase border transition-all ${editingProduct?.status === s ? "bg-brand-charcoal text-white border-brand-charcoal" : "bg-white text-stone-300 border-stone-100 hover:border-stone-200"}`}
-                        >
-                          {s}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="space-y-1.5 uppercase font-bold">
-                    <label className="text-[10px] uppercase font-bold text-stone-400">
-                      Catalogue Visibility
-                    </label>
-                    <button
-                      onClick={() =>
-                        setEditingProduct({
-                          ...editingProduct!,
-                          publishToCatalogue:
-                            !editingProduct?.publishToCatalogue,
-                        })
-                      }
-                      className={`w-full py-6 flex flex-col items-center justify-center gap-3 border-4 border-double transition-all ${editingProduct?.publishToCatalogue ? "bg-green-50 border-green-200 text-green-700" : "bg-stone-50 border-stone-200 text-stone-400"}`}
-                    >
-                      {editingProduct?.publishToCatalogue ? (
-                        <>
-                          <Eye size={24} />
-                          <span className="text-xs">Published to Registry</span>
-                        </>
-                      ) : (
-                        <>
-                          <EyeOff size={24} />
-                          <span className="text-xs">Withheld from Stream</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-[10px] uppercase font-bold text-stone-400">
-                    Technical Brief / Description
-                  </label>
-                  <textarea
-                    rows={4}
-                    className="w-full border-2 border-stone-200 p-4 text-xs font-medium outline-none focus:border-brand-orange leading-relaxed"
-                    value={editingProduct?.description || ""}
-                    onChange={(e) =>
-                      setEditingProduct({
-                        ...editingProduct!,
-                        description: e.target.value,
-                      })
-                    }
-                    placeholder="Technical attributes, dimensions, compatibility specs..."
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="p-6 border-t border-stone-100 bg-stone-50 flex gap-4 shrink-0">
-              <SecondaryButton
-                className="flex-1"
-                onClick={() => setIsFormOpen(false)}
-              >
-                Cancel
-              </SecondaryButton>
-              <PrimaryButton
-                className="flex-1 py-4 text-xs"
-                onClick={handleSaveProduct}
-                disabled={
-                  (editingProduct?.createdAt
-                    ? !permissionService.canEdit("productManagement")
-                    : !permissionService.canCreate("productManagement")) ||
-                  isSaveBlocked
-                }
-              >
-                Save
-              </PrimaryButton>
-            </div>
+      <DataPanel title="Architecture Note" className="border-t-4 border-t-brand-orange">
+        <div className="p-5 grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="border border-stone-200 p-4">
+            <Package size={18} className="text-brand-orange mb-2" />
+            <p className="text-xs font-black uppercase">Master Product</p>
+            <p className="text-[10px] font-bold text-stone-500 mt-1">
+              Identity, brand, category, images, barcode and search metadata.
+            </p>
+          </div>
+          <div className="border border-stone-200 p-4">
+            <Tag size={18} className="text-brand-orange mb-2" />
+            <p className="text-xs font-black uppercase">Vendor Offer</p>
+            <p className="text-[10px] font-bold text-stone-500 mt-1">
+              Price, stock, branch, publish status, delivery and vendor notes.
+            </p>
+          </div>
+          <div className="border border-stone-200 p-4">
+            <Archive size={18} className="text-brand-orange mb-2" />
+            <p className="text-xs font-black uppercase">Migration Safe</p>
+            <p className="text-[10px] font-bold text-stone-500 mt-1">
+              Old vendor-bound products are converted into one master plus many offers.
+            </p>
           </div>
         </div>
-      )}
+      </DataPanel>
+
+      {renderEditor()}
     </div>
   );
 };
