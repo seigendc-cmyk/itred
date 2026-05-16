@@ -68,6 +68,7 @@ import {
   VendorProductOffer,
   CatalogueGeneration,
   Staff,
+  MarketingCampaign,
 } from "../types.ts";
 import { asArray } from "../utils/safeData.ts";
 import { optimizeImageToWebP } from "../utils/imageUtils.ts";
@@ -369,6 +370,7 @@ export const VendorManagement: React.FC = () => {
   const [rpns, setRpns] = useState<RPN[]>([]);
   const [staffList, setStaffList] = useState<Staff[]>([]);
   const [plans, setPlans] = useState<PricingPlan[]>([]);
+  const [campaigns, setCampaigns] = useState<MarketingCampaign[]>([]);
   const [masterProducts, setMasterProducts] = useState<MasterProduct[]>([]);
   const [vendorOffers, setVendorOffers] = useState<VendorProductOffer[]>([]);
   const [productPickerSearch, setProductPickerSearch] = useState("");
@@ -461,11 +463,15 @@ export const VendorManagement: React.FC = () => {
     const st = asArray<Staff>(
       await Promise.resolve(staffService.getAllStaff()),
     );
+    const cm = asArray<MarketingCampaign>(
+      await Promise.resolve(rpnService.getCampaigns()),
+    );
 
     setVendors(v);
     setRpns(r);
     setPlans(pl);
     setStaffList(st);
+    setCampaigns(cm);
     setMasterProducts(mp);
     setVendorOffers(offers);
 
@@ -736,6 +742,25 @@ export const VendorManagement: React.FC = () => {
               recordType: "vendor",
               recordId: vendorToSave.id,
               recordName: vendorToSave.name,
+            });
+          }
+          if (
+            vendorToSave.campaignCode &&
+            (!oldVendor || oldVendor.campaignCode !== vendorToSave.campaignCode)
+          ) {
+            await staffAuditService.logAction({
+              eventType: "RECORD_UPDATED",
+              module: "analytics",
+              action: `Attributed vendor to campaign ${vendorToSave.campaignCode}`,
+              severity: "info",
+              recordType: "vendor_campaign_attribution",
+              recordId: vendorToSave.id,
+              recordName: vendorToSave.name,
+              afterSnapshot: {
+                campaignCode: vendorToSave.campaignCode,
+                campaignSource: vendorToSave.campaignSource,
+                heardAboutUsVia: vendorToSave.heardAboutUsVia,
+              },
             });
           }
         } catch (auditErr) {
@@ -2148,6 +2173,69 @@ export const VendorManagement: React.FC = () => {
                     {DATA_SOURCES.map((d) => (
                       <option key={d} value={d}>
                         {d.toUpperCase()}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="pt-6 border-t border-stone-100 space-y-4">
+                  <label className="text-[10px] uppercase font-bold text-stone-400">
+                    Campaign Attribution
+                  </label>
+                  <select
+                    value={formData.campaignCode || ""}
+                    onChange={(e) => {
+                      const campaign = campaigns.find(
+                        (item) => item.campaignCode === e.target.value,
+                      );
+                      setFormData({
+                        ...formData,
+                        campaignCode: e.target.value,
+                        campaignSource: campaign?.campaignName || "",
+                      });
+                    }}
+                    className="w-full border-2 border-stone-200 p-3 text-xs font-bold uppercase focus:border-brand-orange outline-none bg-stone-50"
+                  >
+                    <option value="">No campaign attribution</option>
+                    {campaigns.map((campaign) => (
+                      <option key={campaign.id} value={campaign.campaignCode}>
+                        {campaign.campaignName} [{campaign.campaignCode}]
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    value={formData.campaignSource || ""}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        campaignSource: e.target.value,
+                      })
+                    }
+                    placeholder="Campaign source / free text"
+                    className="w-full border-2 border-stone-200 p-3 text-xs font-bold uppercase focus:border-brand-orange outline-none"
+                  />
+                  <select
+                    value={formData.heardAboutUsVia || ""}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        heardAboutUsVia: e.target.value as any,
+                      })
+                    }
+                    className="w-full border-2 border-stone-200 p-3 text-xs font-bold uppercase focus:border-brand-orange outline-none bg-white"
+                  >
+                    <option value="">Heard about us via...</option>
+                    {[
+                      "Radio",
+                      "TV",
+                      "Roadshow",
+                      "WhatsApp",
+                      "Referral",
+                      "CAH",
+                      "Walk-in",
+                      "Other",
+                    ].map((source) => (
+                      <option key={source} value={source}>
+                        {source}
                       </option>
                     ))}
                   </select>

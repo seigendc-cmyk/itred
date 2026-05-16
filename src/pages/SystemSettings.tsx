@@ -20,9 +20,18 @@ import { staffAuditService } from "../services/staffAuditService.ts";
 import { permissionService } from "../services/permissionService.ts";
 
 const defaultRpnSettings = {
-  dailyOnboardingThreshold: 4,
-  weeklyOnboardingThreshold: 20,
-  monthlyOnboardingThreshold: 80,
+  dailyOnboardingTarget: 2,
+  weeklyOnboardingTarget: 10,
+  monthlyOnboardingTarget: 40,
+  minimumActiveVendorRetentionRate: 85,
+  bonusEligibilityTargetPercent: 100,
+  underperformanceAlertDays: 3,
+  churnRiskThreshold: 15,
+  minimumRevenueContributionTarget: 0,
+  campaignAttributionWindowDays: 14,
+  dailyOnboardingThreshold: 2,
+  weeklyOnboardingThreshold: 10,
+  monthlyOnboardingThreshold: 40,
   churnWarningPercent: 15,
   churnWarningRate: 15,
   recurringVendorRetentionTarget: 85,
@@ -234,6 +243,7 @@ export const SystemSettings: React.FC = () => {
                     ...prev,
                     rpnPerformanceSettings: {
                       ...(prev.rpnPerformanceSettings || defaultRpnSettings),
+                      dailyOnboardingTarget: Number(e.target.value),
                       dailyOnboardingThreshold: Number(e.target.value),
                     },
                   }))
@@ -255,6 +265,7 @@ export const SystemSettings: React.FC = () => {
                     ...prev,
                     rpnPerformanceSettings: {
                       ...(prev.rpnPerformanceSettings || defaultRpnSettings),
+                      weeklyOnboardingTarget: Number(e.target.value),
                       weeklyOnboardingThreshold: Number(e.target.value),
                     },
                   }))
@@ -276,7 +287,141 @@ export const SystemSettings: React.FC = () => {
                     ...prev,
                     rpnPerformanceSettings: {
                       ...(prev.rpnPerformanceSettings || defaultRpnSettings),
+                      monthlyOnboardingTarget: Number(e.target.value),
                       monthlyOnboardingThreshold: Number(e.target.value),
+                    },
+                  }))
+                }
+                disabled={!permissionService.canSetRpnThresholds()}
+              />
+            </FormField>
+
+            <FormField label="Minimum Active Vendor Retention %">
+              <input
+                type="number"
+                className="border-2 border-stone-200 p-2 text-sm outline-none focus:border-brand-orange w-full disabled:bg-stone-100 disabled:text-stone-400"
+                value={
+                  settings.rpnPerformanceSettings
+                    ?.minimumActiveVendorRetentionRate ??
+                  defaultRpnSettings.minimumActiveVendorRetentionRate
+                }
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    rpnPerformanceSettings: {
+                      ...(prev.rpnPerformanceSettings || defaultRpnSettings),
+                      minimumActiveVendorRetentionRate: Number(e.target.value),
+                    },
+                  }))
+                }
+                disabled={!permissionService.canSetRpnThresholds()}
+              />
+            </FormField>
+
+            <FormField label="Bonus Eligibility Target %">
+              <input
+                type="number"
+                className="border-2 border-stone-200 p-2 text-sm outline-none focus:border-brand-orange w-full disabled:bg-stone-100 disabled:text-stone-400"
+                value={
+                  settings.rpnPerformanceSettings
+                    ?.bonusEligibilityTargetPercent ??
+                  defaultRpnSettings.bonusEligibilityTargetPercent
+                }
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    rpnPerformanceSettings: {
+                      ...(prev.rpnPerformanceSettings || defaultRpnSettings),
+                      bonusEligibilityTargetPercent: Number(e.target.value),
+                    },
+                  }))
+                }
+                disabled={!permissionService.canSetRpnThresholds()}
+              />
+            </FormField>
+
+            <FormField label="Underperformance Alert Days">
+              <input
+                type="number"
+                className="border-2 border-stone-200 p-2 text-sm outline-none focus:border-brand-orange w-full disabled:bg-stone-100 disabled:text-stone-400"
+                value={
+                  settings.rpnPerformanceSettings?.underperformanceAlertDays ??
+                  defaultRpnSettings.underperformanceAlertDays
+                }
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    rpnPerformanceSettings: {
+                      ...(prev.rpnPerformanceSettings || defaultRpnSettings),
+                      underperformanceAlertDays: Number(e.target.value),
+                    },
+                  }))
+                }
+                disabled={!permissionService.canSetRpnThresholds()}
+              />
+            </FormField>
+
+            <FormField label="Churn Risk Threshold %">
+              <input
+                type="number"
+                className="border-2 border-stone-200 p-2 text-sm outline-none focus:border-brand-orange w-full disabled:bg-stone-100 disabled:text-stone-400"
+                value={
+                  settings.rpnPerformanceSettings?.churnRiskThreshold ??
+                  defaultRpnSettings.churnRiskThreshold
+                }
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    rpnPerformanceSettings: {
+                      ...(prev.rpnPerformanceSettings || defaultRpnSettings),
+                      churnRiskThreshold: Number(e.target.value),
+                      churnWarningPercent: Number(e.target.value),
+                      churnWarningRate: Number(e.target.value),
+                    },
+                  }))
+                }
+                disabled={!permissionService.canSetRpnThresholds()}
+              />
+            </FormField>
+
+            <FormField label="Minimum Revenue Contribution Target">
+              <input
+                type="number"
+                className="border-2 border-stone-200 p-2 text-sm outline-none focus:border-brand-orange w-full disabled:bg-stone-100 disabled:text-stone-400"
+                value={
+                  settings.rpnPerformanceSettings
+                    ?.minimumRevenueContributionTarget ??
+                  defaultRpnSettings.minimumRevenueContributionTarget
+                }
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    rpnPerformanceSettings: {
+                      ...(prev.rpnPerformanceSettings || defaultRpnSettings),
+                      minimumRevenueContributionTarget: Number(e.target.value),
+                      minimumRecurringRevenueTarget: Number(e.target.value),
+                    },
+                  }))
+                }
+                disabled={!permissionService.canSetRpnThresholds()}
+              />
+            </FormField>
+
+            <FormField label="Campaign Attribution Window Days">
+              <input
+                type="number"
+                className="border-2 border-stone-200 p-2 text-sm outline-none focus:border-brand-orange w-full disabled:bg-stone-100 disabled:text-stone-400"
+                value={
+                  settings.rpnPerformanceSettings
+                    ?.campaignAttributionWindowDays ??
+                  defaultRpnSettings.campaignAttributionWindowDays
+                }
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    rpnPerformanceSettings: {
+                      ...(prev.rpnPerformanceSettings || defaultRpnSettings),
+                      campaignAttributionWindowDays: Number(e.target.value),
                     },
                   }))
                 }

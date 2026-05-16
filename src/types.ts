@@ -624,6 +624,17 @@ export interface Vendor {
   lastCollectionDate?: string;
   nextFollowUpDate?: string;
   collectionNotes?: string;
+  campaignSource?: string;
+  campaignCode?: string;
+  heardAboutUsVia?:
+    | "Radio"
+    | "TV"
+    | "Roadshow"
+    | "WhatsApp"
+    | "Referral"
+    | "CAH"
+    | "Walk-in"
+    | "Other";
   dataSource: FieldDataSource;
 
   // Traceability
@@ -1520,6 +1531,15 @@ export interface FeedbackWhatsAppRoute {
 }
 
 export interface RPNPerformanceSettings {
+  dailyOnboardingTarget?: number;
+  weeklyOnboardingTarget?: number;
+  monthlyOnboardingTarget?: number;
+  minimumActiveVendorRetentionRate?: number;
+  bonusEligibilityTargetPercent?: number;
+  underperformanceAlertDays?: number;
+  churnRiskThreshold?: number;
+  minimumRevenueContributionTarget?: number;
+  campaignAttributionWindowDays?: number;
   dailyOnboardingThreshold: number;
   weeklyOnboardingThreshold: number;
   monthlyOnboardingThreshold: number;
@@ -1538,6 +1558,56 @@ export interface RPNPerformanceSettings {
   updatedAt: string;
   updatedByStaffId?: string;
   updatedByName?: string;
+}
+
+export type MarketingCampaignType =
+  | "Radio"
+  | "TV"
+  | "Roadshow"
+  | "WhatsApp"
+  | "Flyer"
+  | "Social Media"
+  | "Referral"
+  | "Commerce Access Hub"
+  | "Other";
+
+export type MarketingCampaignStatus =
+  | "draft"
+  | "active"
+  | "completed"
+  | "paused"
+  | "cancelled";
+
+export interface MarketingCampaign {
+  id: string;
+  campaignName: string;
+  campaignType: MarketingCampaignType;
+  startDate: string;
+  endDate: string;
+  targetArea: string;
+  targetSector: string;
+  budget: number;
+  message: string;
+  channelPartner?: string;
+  assignedRpnIds: string[];
+  campaignCode: string;
+  status: MarketingCampaignStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CampaignPerformance {
+  campaignId: string;
+  vendorsOnboarded: number;
+  revenueGenerated: number;
+  activeVendors: number;
+  churnedVendors: number;
+  costPerVendor: number;
+  revenuePerDollarSpent: number;
+  retentionRate: number;
+  bestRpn: string;
+  bestArea: string;
+  bestSector: string;
 }
 
 export interface SystemSettings {
