@@ -244,29 +244,17 @@ export const generateCatalogueHtml = (
             display: flex;
             flex-direction: column;
             justify-content: flex-end;
-            background: linear-gradient(135deg, rgba(255, 107, 0, 0.92), rgba(255, 132, 32, 0.78));
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
+            background: linear-gradient(135deg, #FF6B00 0%, #FF8A2A 100%);
             border-bottom-left-radius: 28px;
             border-bottom-right-radius: 28px;
-            box-shadow: 0 14px 34px rgba(255, 107, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.32), inset 0 -1px 0 rgba(46, 46, 46, 0.12);
+            box-shadow: 0 10px 28px rgba(255, 107, 0, 0.20);
             overflow: hidden;
         }
-        .sector-header::after {
-            content: "";
-            position: absolute;
-            left: 14px;
-            right: 14px;
-            top: 10px;
-            height: 1px;
-            background: rgba(255, 255, 255, 0.45);
-            z-index: 1;
+        .sector-header::after { /* Removed */
+            display: none;
         }
         .header-overlay {
-            position: absolute;
-            inset: 0;
-            background: radial-gradient(circle at top left, rgba(255, 255, 255, 0.35), transparent 34%), linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.02));
-            pointer-events: none;
+            display: none;
         }
         .header-content {
             position: relative;
@@ -288,8 +276,8 @@ export const generateCatalogueHtml = (
             width: 54px;
             height: 54px;
             border-radius: 50%;
-            background: rgba(255, 255, 255, 0.96);
-            border: 2px solid rgba(255, 255, 255, 0.85);
+            background: #ffffff;
+            border: 2px solid #ffffff;
             overflow: hidden;
             z-index: 10;
             display: flex;
@@ -297,7 +285,7 @@ export const generateCatalogueHtml = (
             justify-content: center;
             box-shadow: 0 8px 18px rgba(46, 46, 46, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.8);
         }
-        .seigen-logo-badge img {
+        .seigen-logo-badge img { /* No change needed, just ensuring it's present */
             width: 100%;
             height: 100%;
             object-fit: contain;
@@ -322,18 +310,13 @@ export const generateCatalogueHtml = (
         .search-area {
             position: fixed;
             left: 50%;
-            right: auto;
-            bottom: 12px;
+            bottom: 14px;
             transform: translateX(-50%);
             z-index: 1001;
-            width: calc(100vw - 84px);
-            max-width: 480px;
-            padding: 8px 10px;
-            background: rgba(255, 255, 255, 0.92);
-            backdrop-filter: blur(14px);
-            -webkit-backdrop-filter: blur(14px);
-            border: 1px solid rgba(255, 107, 0, 0.34);
-            box-shadow: 0 14px 38px rgba(0, 0, 0, 0.18);
+            width: calc(100vw - 92px);
+            max-width: 420px;
+            padding: 7px 10px;
+            background: rgba(255, 255, 255,
         }
         .search-box {
             position: relative;

@@ -47,6 +47,15 @@ const defaultRpnSettings = {
   updatedAt: new Date().toISOString(),
 };
 
+const defaultBiMarketSettings = {
+  vendorReadinessTaskThreshold: 70,
+  enableReadinessAutoTasks: true,
+  readinessTaskCooldownDays: 3,
+  averageLeadConversionRatePercent: 12,
+  averageOrderValueUsd: 15,
+  leadRevenueConfidenceFactor: 0.65,
+};
+
 export const SystemSettings: React.FC = () => {
   const [settings, setSettings] = useState<SystemSettingsType>({});
   const [isSaving, setIsSaving] = useState(false);
@@ -641,6 +650,118 @@ export const SystemSettings: React.FC = () => {
               </PrimaryButton>
             </div>
           )}
+        </div>
+      </DataPanel>
+
+      <DataPanel title="BI Market Automation Settings">
+        <div className="p-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <FormField label="Vendor Readiness Task Threshold">
+              <input
+                type="number"
+                value={
+                  settings.vendorReadinessTaskThreshold ??
+                  defaultBiMarketSettings.vendorReadinessTaskThreshold
+                }
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    vendorReadinessTaskThreshold: Number(e.target.value),
+                  }))
+                }
+                className="border-2 border-stone-200 p-2 text-sm outline-none focus:border-brand-orange w-full"
+              />
+            </FormField>
+            <FormField label="Readiness Task Cooldown Days">
+              <input
+                type="number"
+                value={
+                  settings.readinessTaskCooldownDays ??
+                  defaultBiMarketSettings.readinessTaskCooldownDays
+                }
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    readinessTaskCooldownDays: Number(e.target.value),
+                  }))
+                }
+                className="border-2 border-stone-200 p-2 text-sm outline-none focus:border-brand-orange w-full"
+              />
+            </FormField>
+            <FormField label="Lead Conversion Rate %">
+              <input
+                type="number"
+                value={
+                  settings.averageLeadConversionRatePercent ??
+                  defaultBiMarketSettings.averageLeadConversionRatePercent
+                }
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    averageLeadConversionRatePercent: Number(e.target.value),
+                  }))
+                }
+                className="border-2 border-stone-200 p-2 text-sm outline-none focus:border-brand-orange w-full"
+              />
+            </FormField>
+            <FormField label="Average Order Value USD">
+              <input
+                type="number"
+                value={
+                  settings.averageOrderValueUsd ??
+                  defaultBiMarketSettings.averageOrderValueUsd
+                }
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    averageOrderValueUsd: Number(e.target.value),
+                  }))
+                }
+                className="border-2 border-stone-200 p-2 text-sm outline-none focus:border-brand-orange w-full"
+              />
+            </FormField>
+            <FormField label="Lead Revenue Confidence Factor">
+              <input
+                type="number"
+                step="0.01"
+                value={
+                  settings.leadRevenueConfidenceFactor ??
+                  defaultBiMarketSettings.leadRevenueConfidenceFactor
+                }
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    leadRevenueConfidenceFactor: Number(e.target.value),
+                  }))
+                }
+                className="border-2 border-stone-200 p-2 text-sm outline-none focus:border-brand-orange w-full"
+              />
+            </FormField>
+            <div className="flex items-center gap-4 pt-5">
+              <label className="flex items-center gap-2 text-xs font-bold uppercase text-stone-600 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={
+                    settings.enableReadinessAutoTasks ??
+                    defaultBiMarketSettings.enableReadinessAutoTasks
+                  }
+                  onChange={(e) =>
+                    setSettings((prev) => ({
+                      ...prev,
+                      enableReadinessAutoTasks: e.target.checked,
+                    }))
+                  }
+                  className="accent-brand-orange w-4 h-4"
+                />
+                Enable Readiness Auto Tasks
+              </label>
+            </div>
+          </div>
+          <div className="mt-6 border-t border-stone-100 pt-6">
+            <PrimaryButton onClick={handleSave} disabled={isSaving}>
+              {isSaving ? "Saving..." : "Save Settings"}
+            </PrimaryButton>
+          </div>
         </div>
       </DataPanel>
 

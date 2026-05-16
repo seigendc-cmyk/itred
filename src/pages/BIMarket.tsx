@@ -9,6 +9,7 @@ import {
   DataPanel,
   TablePanel,
   StatusBadge,
+  PrimaryButton,
 } from "../components/CommonUI.tsx";
 import {
   Zap,
@@ -34,7 +35,23 @@ import { catalogueService } from "../services/catalogueService.ts";
 import { rpnService } from "../services/rpnService.ts";
 import { analyticsService } from "../services/analyticsService.ts";
 import { permissionService } from "../services/permissionService.ts";
-import { Vendor, Product, CAHLink, CatalogueGeneration } from "../types.ts";
+import { settingsService } from "../services/settingsService.ts";
+import { whatsappActivityService } from "../services/whatsappActivityService.ts";
+import { vendorReadinessService } from "../services/vendorReadinessService.ts";
+import { taskService } from "../services/taskService.ts";
+import { notificationService } from "../services/notificationService.ts";
+import {
+  Vendor,
+  Product,
+  CAHLink,
+  CatalogueGeneration,
+  EstimatedRevenueGrowth,
+  StaffTask,
+  SystemSettings,
+  VendorReadinessResult,
+  WhatsAppActivityLog,
+  WhatsAppIntelligenceLog,
+} from "../types.ts";
 
 const normalizeArray = <T,>(value: unknown): T[] => {
   if (Array.isArray(value)) {
@@ -80,6 +97,55 @@ const safePercent = (value: unknown): number => {
   return Math.max(0, Math.min(100, safeNumber(value, 0)));
 };
 
+const defaultBiMarketSettings = {
+  vendorReadinessTaskThreshold: 70,
+  enableReadinessAutoTasks: true,
+  readinessTaskCooldownDays: 3,
+  averageLeadConversionRatePercent: 12,
+  averageOrderValueUsd: 15,
+  leadRevenueConfidenceFactor: 0.65,
+};
+
+const money = (value: number) => `$${Math.round(value || 0).toLocaleString()}`;
+
+const estimateRevenueGrowth = (
+  leadCount: number,
+  settings: SystemSettings,
+): EstimatedRevenueGrowth => {
+  const averageLeadConversionRatePercent =
+    settings.averageLeadConversionRatePercent ??
+    defaultBiMarketSettings.averageLeadConversionRatePercent;
+  const averageOrderValueUsd =
+    settings.averageOrderValueUsd ?? defaultBiMarketSettings.averageOrderValueUsd;
+  const leadRevenueConfidenceFactor =
+    settings.leadRevenueConfidenceFactor ??
+    defaultBiMarketSettings.leadRevenueConfidenceFactor;
+  const estimatedConvertedLeads =
+    leadCount * (averageLeadConversionRatePercent / 100);
+  const estimatedGrossRevenue = estimatedConvertedLeads * averageOrderValueUsd;
+  return {
+    leadCount,
+    estimatedConvertedLeads,
+    averageLeadConversionRatePercent,
+    averageOrderValueUsd,
+    leadRevenueConfidenceFactor,
+    estimatedGrossRevenue,
+    estimatedRevenueGrowth:
+      estimatedGrossRevenue * leadRevenueConfidenceFactor,
+  };
+};
+
+const leadEventTypes = new Set([
+  "WHATSAPP_VENDOR_CLICKED",
+  "CALL_VENDOR_CLICKED",
+  "PRODUCT_VIEWED",
+  "SEARCH_PERFORMED",
+  "NO_RESULTS_SEARCH",
+  "PRODUCT_ENQUIRY",
+  "CUSTOMER_REQUEST",
+  "DEMAND_SIGNAL",
+]);
+
 const getVendorKey = (vendor: Partial<Vendor> | any, index: number): string => {
   return safeString(
     vendor?.id || vendor?.vendorId || vendor?.uid,
@@ -118,22 +184,31 @@ export const BIMarket: React.FC = () => {
     CatalogueGeneration[]
   >([]);
   const [events, setEvents] = useState<any[]>([]);
+  const [whatsappLogs, setWhatsappLogs] = useState<WhatsAppActivityLog[]>([]);
+  const [intelligenceLogs, setIntelligenceLogs] = useState<
+    WhatsAppIntelligenceLog[]
+  >([]);
+  const [settings, setSettings] = useState<SystemSettings>({});
+  const [staffTasks, setStaffTasks] = useState<StaffTask[]>([]);
   const [rpns, setRpns] = useState<any[]>([]);
   const [view, setView] = useState<"market" | "readiness" | "audit">("market");
   const [loadError, setLoadError] = useState<string>("");
+  const [scanStatus, setScanStatus] = useState("");
 
   useEffect(() => {
     let isMounted = true;
     const loadData = async () => {
       try {
         setLoadError("");
-        const [v, p, c, ch, e, r] = await Promise.all([
+        const [v, p, c, ch, e, r, s, tasks] = await Promise.all([
           vendorService.getVendors(),
           productService.getProducts(),
           cahService.getLinks(),
           catalogueService.getHistory(),
           analyticsService.getEvents(),
           rpnService.getAll(),
+          settingsService.getSettings(),
+          taskService.getAll(),
         ]);
         if (isMounted) {
           setVendors(normalizeArray<Vendor>(v));
@@ -142,6 +217,10 @@ export const BIMarket: React.FC = () => {
           setCatalogueHistory(normalizeArray<CatalogueGeneration>(ch));
           setEvents(normalizeArray<any>(e));
           setRpns(normalizeArray<any>(r));
+          setSettings(s || {});
+          setStaffTasks(normalizeArray<StaffTask>(tasks));
+          setWhatsappLogs(whatsappActivityService.getLogs());
+          setIntelligenceLogs(whatsappActivityService.getIntelligenceLogs());
         }
       } catch (error) {
         console.error("Failed to load BI Market data", error);
@@ -152,6 +231,10 @@ export const BIMarket: React.FC = () => {
           setCatalogueHistory([]);
           setEvents([]);
           setRpns([]);
+          setSettings({});
+          setStaffTasks([]);
+          setWhatsappLogs([]);
+          setIntelligenceLogs([]);
           setLoadError(
             "BI Market data could not be loaded. Check Firebase permissions and service fallback handling.",
           );
@@ -179,6 +262,18 @@ export const BIMarket: React.FC = () => {
   );
   const safeEvents = useMemo(() => normalizeArray<any>(events), [events]);
   const safeRpns = useMemo(() => normalizeArray<any>(rpns), [rpns]);
+  const safeWhatsappLogs = useMemo(
+    () => normalizeArray<WhatsAppActivityLog>(whatsappLogs),
+    [whatsappLogs],
+  );
+  const safeIntelligenceLogs = useMemo(
+    () => normalizeArray<WhatsAppIntelligenceLog>(intelligenceLogs),
+    [intelligenceLogs],
+  );
+  const safeStaffTasks = useMemo(
+    () => normalizeArray<StaffTask>(staffTasks),
+    [staffTasks],
+  );
 
   const marketInsights = useMemo(() => {
     try {
@@ -249,15 +344,272 @@ export const BIMarket: React.FC = () => {
 
   const vendorReadiness = useMemo(() => {
     return safeVendors
-      .map((vendor) => biService.calculateVendorReadiness(vendor, safeProducts))
+      .map((vendor) =>
+        vendorReadinessService.calculateVendorReadiness(vendor, safeProducts),
+      )
       .sort((a, b) => safeNumber(b.score) - safeNumber(a.score));
   }, [safeVendors, safeProducts]);
+
+  const leadRows = useMemo(() => {
+    const rows: Array<{
+      vendorId?: string;
+      vendorName?: string;
+      productName?: string;
+      sector?: string;
+      region?: string;
+      source: string;
+      date?: string;
+      leadCount: number;
+    }> = [];
+
+    safeEvents.forEach((event) => {
+      const eventType = safeString(event.eventType || event.type || event.action, "");
+      if (!leadEventTypes.has(eventType)) return;
+      rows.push({
+        vendorId: event.vendorId || event.details?.vendorId,
+        vendorName: event.vendorName || event.details?.vendorName,
+        productName: event.productName || event.details?.productName,
+        sector: event.sector || event.details?.sector,
+        region:
+          event.region ||
+          event.province ||
+          event.cityTown ||
+          event.details?.region ||
+          event.details?.cityTown,
+        source: eventType,
+        date: event.timestamp || event.createdAt,
+        leadCount: 1,
+      });
+    });
+
+    safeWhatsappLogs.forEach((log) => {
+      if (
+        !["PRODUCT_ENQUIRY", "CUSTOMER_REQUEST", "DEMAND_SIGNAL", "VENDOR_REFERRAL"].includes(
+          log.activityType,
+        )
+      )
+        return;
+      rows.push({
+        vendorId: log.vendorId,
+        vendorName: log.vendorName,
+        productName: log.productName,
+        sector: log.sector,
+        region: log.cityTown || log.province || log.district,
+        source: log.activityType,
+        date: log.activityDate || log.createdAt,
+        leadCount: Math.max(1, Number(log.enquiryCount) || 1),
+      });
+    });
+
+    safeIntelligenceLogs.forEach((log) => {
+      if (
+        ![
+          "Enquiry",
+          "Price Request",
+          "Stock Request",
+          "Product Search",
+          "Service Request",
+          "Market Feedback",
+        ].includes(log.interactionType)
+      )
+        return;
+      rows.push({
+        vendorId: log.vendorId,
+        vendorName: log.vendorName,
+        productName: log.productName,
+        sector: log.sector || log.category,
+        region: log.region || log.city || log.province,
+        source: log.source,
+        date: log.createdAt,
+        leadCount: 1,
+      });
+    });
+
+    return rows;
+  }, [safeEvents, safeIntelligenceLogs, safeWhatsappLogs]);
+
+  const estimatedGrowth = useMemo(() => {
+    const vendorMap = new Map<string, any>();
+    const productMap = new Map<string, any>();
+    const sectorMap = new Map<string, number>();
+    const regionMap = new Map<string, number>();
+    let totalLeadCount = 0;
+
+    leadRows.forEach((row) => {
+      totalLeadCount += row.leadCount;
+      const vendorId =
+        row.vendorId ||
+        safeVendors.find((vendor) => vendor.name === row.vendorName)?.id ||
+        "unknown";
+      const vendor = safeVendors.find((item) => item.id === vendorId);
+      const vendorKey = vendorId || row.vendorName || "unknown";
+      const vendorEntry = vendorMap.get(vendorKey) || {
+        vendorId: vendorKey,
+        vendorName: vendor?.name || row.vendorName || "Unknown Vendor",
+        leadCount: 0,
+        region: vendor?.suburb || vendor?.cityTown || row.region || "Unknown",
+        topProduct: "N/A",
+        products: {} as Record<string, number>,
+      };
+      vendorEntry.leadCount += row.leadCount;
+      if (row.productName) {
+        vendorEntry.products[row.productName] =
+          (vendorEntry.products[row.productName] || 0) + row.leadCount;
+      }
+      vendorMap.set(vendorKey, vendorEntry);
+
+      const productKey = row.productName || "Unspecified Product";
+      const productEntry = productMap.get(productKey) || {
+        productName: productKey,
+        leadCount: 0,
+        vendorIds: new Set<string>(),
+        totalStock: 0,
+      };
+      productEntry.leadCount += row.leadCount;
+      if (vendorKey !== "unknown") productEntry.vendorIds.add(vendorKey);
+      productEntry.totalStock = safeProducts
+        .filter((product) => product.name === productKey)
+        .reduce((sum, product) => sum + safeNumber(product.stockQuantity), 0);
+      productMap.set(productKey, productEntry);
+
+      const sector = row.sector || vendor?.sector || "Unspecified";
+      sectorMap.set(sector, (sectorMap.get(sector) || 0) + row.leadCount);
+      const region = row.region || vendor?.cityTown || "Unspecified";
+      regionMap.set(region, (regionMap.get(region) || 0) + row.leadCount);
+    });
+
+    const total = estimateRevenueGrowth(totalLeadCount, settings);
+    const vendorRows = Array.from(vendorMap.values())
+      .map((entry) => {
+        const estimate = estimateRevenueGrowth(entry.leadCount, settings);
+        const topProduct = Object.entries(entry.products).sort(
+          ([, a], [, b]) => Number(b) - Number(a),
+        )[0]?.[0];
+        const readiness = vendorReadiness.find(
+          (item) => item.vendorId === entry.vendorId,
+        );
+        return {
+          ...entry,
+          ...estimate,
+          topProduct: topProduct || "N/A",
+          readinessScore: readiness?.score ?? 100,
+          recommendedAction:
+            (readiness?.score ?? 100) < (settings.vendorReadinessTaskThreshold ?? 70)
+              ? "Create readiness task before demand is wasted"
+              : estimate.estimatedRevenueGrowth > 100
+                ? "Follow up and protect stock"
+                : "Monitor demand",
+        };
+      })
+      .sort((a, b) => b.estimatedRevenueGrowth - a.estimatedRevenueGrowth);
+
+    const productRows = Array.from(productMap.values())
+      .map((entry) => {
+        const estimate = estimateRevenueGrowth(entry.leadCount, settings);
+        return {
+          ...entry,
+          vendorCount: entry.vendorIds.size,
+          ...estimate,
+          stockAuditRecommended: entry.leadCount >= 10 && entry.totalStock <= 5,
+          restockRecommended: entry.leadCount >= 10 && entry.totalStock <= 10,
+        };
+      })
+      .sort((a, b) => b.estimatedRevenueGrowth - a.estimatedRevenueGrowth);
+
+    const topVendor = vendorRows[0];
+    const topProduct = productRows[0];
+    const topSector = Array.from(sectorMap.entries()).sort(
+      ([, a], [, b]) => b - a,
+    )[0];
+
+    return {
+      total,
+      vendorRows,
+      productRows,
+      sectorMap,
+      regionMap,
+      topVendor,
+      topProduct,
+      topSector,
+    };
+  }, [leadRows, safeProducts, safeVendors, settings, vendorReadiness]);
+
+  const readinessTaskRows = useMemo(() => {
+    return vendorReadiness
+      .filter(
+        (result) =>
+          result.score < (settings.vendorReadinessTaskThreshold ?? 70),
+      )
+      .map((result) => {
+        const task = safeStaffTasks.find(
+          (item) =>
+            item.taskType === "vendor_readiness" &&
+            item.vendorId === result.vendorId &&
+            !["completed", "reviewed", "cancelled"].includes(item.status),
+        );
+        return { ...result, task };
+      });
+  }, [safeStaffTasks, settings.vendorReadinessTaskThreshold, vendorReadiness]);
 
   const hasNoMarketData =
     safeVendors.length === 0 &&
     safeProducts.length === 0 &&
     marketInsights.topSectors.length === 0 &&
     marketInsights.topLocations.length === 0;
+
+  const handleRunReadinessScan = async () => {
+    setScanStatus("Scanning vendor readiness...");
+    let created = 0;
+    let skipped = 0;
+    try {
+      for (const vendor of safeVendors) {
+        const highPotential = estimatedGrowth.vendorRows.find(
+          (row) =>
+            row.vendorId === vendor.id &&
+            row.estimatedRevenueGrowth >=
+              (settings.averageOrderValueUsd ??
+                defaultBiMarketSettings.averageOrderValueUsd) *
+                5,
+        );
+        const response = await vendorReadinessService.ensureReadinessTask(
+          vendor,
+          safeProducts,
+          settings,
+          highPotential
+            ? "Vendor has high lead potential but low readiness."
+            : "Manual BI Market readiness scan.",
+        );
+        if (response.skipped) skipped++;
+        else created++;
+      }
+
+      for (const product of estimatedGrowth.productRows.filter(
+        (row) => row.stockAuditRecommended,
+      )) {
+        const matching = safeProducts.find(
+          (item) => item.name === product.productName,
+        );
+        await notificationService.createNotification({
+          title: "High lead pressure detected",
+          message: `${product.productName} has ${product.leadCount} leads and low stock. Stock audit recommended.`,
+          type: "system_alert",
+          priority: "high",
+          targetRole: "Backoffice",
+          recordType: "product",
+          recordId: matching?.id || product.productName,
+          dedupeKey: `estimated_growth_stock_audit:${matching?.vendorId || "market"}:${matching?.productId || matching?.id || product.productName}:${new Date().toISOString().split("T")[0]}`,
+        });
+      }
+
+      setStaffTasks(await taskService.getAll());
+      setScanStatus(
+        `Readiness scan complete. Created ${created} task(s), skipped ${skipped} due to threshold/cooldown.`,
+      );
+    } catch (error) {
+      console.error("Readiness scan failed", error);
+      setScanStatus("Readiness scan failed. Check console for details.");
+    }
+  };
 
   return (
     <div className="pb-20">
@@ -292,6 +644,16 @@ export const BIMarket: React.FC = () => {
           >
             Quality Audit
           </button>
+        </div>
+        <div className="flex flex-col gap-2">
+          <PrimaryButton onClick={handleRunReadinessScan}>
+            Run Readiness Scan
+          </PrimaryButton>
+          {scanStatus && (
+            <p className="text-[10px] font-bold uppercase text-brand-orange">
+              {scanStatus}
+            </p>
+          )}
         </div>
       </div>
 
@@ -355,7 +717,152 @@ export const BIMarket: React.FC = () => {
               icon={<Target size={20} />}
               variant="warning"
             />
+            <AuditMetric
+              label="Total Lead Count"
+              value={estimatedGrowth.total.leadCount}
+              icon={<BarChart3 size={20} />}
+              variant="warning"
+            />
+            <AuditMetric
+              label="Estimated Converted Leads"
+              value={estimatedGrowth.total.estimatedConvertedLeads.toFixed(1)}
+              icon={<Target size={20} />}
+              variant="warning"
+            />
+            <AuditMetric
+              label="Estimated Revenue Growth"
+              value={money(estimatedGrowth.total.estimatedRevenueGrowth)}
+              icon={<DollarSign size={20} />}
+              variant="warning"
+            />
+            <AuditMetric
+              label="Lead-to-Revenue Confidence"
+              value={`${Math.round(estimatedGrowth.total.leadRevenueConfidenceFactor * 100)}%`}
+              icon={<Lightbulb size={20} />}
+              variant="warning"
+            />
           </div>
+
+          <DataPanel
+            title="Estimated Revenue Growth"
+            subtitle="Estimated Revenue Growth is calculated from customer lead activity using configurable conversion assumptions. It is not confirmed cash received."
+          >
+            <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="border border-stone-200 p-4">
+                <p className="text-[10px] font-black uppercase text-stone-400">
+                  Top Revenue Growth Vendor
+                </p>
+                <p className="text-lg font-black text-brand-charcoal">
+                  {estimatedGrowth.topVendor?.vendorName || "N/A"}
+                </p>
+                <p className="text-xs font-mono text-emerald-700">
+                  {money(estimatedGrowth.topVendor?.estimatedRevenueGrowth || 0)}
+                </p>
+              </div>
+              <div className="border border-stone-200 p-4">
+                <p className="text-[10px] font-black uppercase text-stone-400">
+                  Top Revenue Growth Product
+                </p>
+                <p className="text-lg font-black text-brand-charcoal">
+                  {estimatedGrowth.topProduct?.productName || "N/A"}
+                </p>
+                <p className="text-xs font-mono text-emerald-700">
+                  {money(estimatedGrowth.topProduct?.estimatedRevenueGrowth || 0)}
+                </p>
+              </div>
+              <div className="border border-stone-200 p-4">
+                <p className="text-[10px] font-black uppercase text-stone-400">
+                  Top Revenue Growth Sector
+                </p>
+                <p className="text-lg font-black text-brand-charcoal">
+                  {estimatedGrowth.topSector?.[0] || "N/A"}
+                </p>
+                <p className="text-xs font-mono text-emerald-700">
+                  {estimatedGrowth.topSector?.[1] || 0} leads
+                </p>
+              </div>
+            </div>
+          </DataPanel>
+
+          <TablePanel
+            title="Estimated Revenue Growth by Vendor"
+            headers={[
+              "Vendor",
+              "Lead Count",
+              "Converted Leads",
+              "Estimated Growth",
+              "Confidence",
+              "Top Product",
+              "Region",
+              "Recommended Action",
+            ]}
+          >
+            {estimatedGrowth.vendorRows.slice(0, 20).map((row) => (
+              <tr key={row.vendorId} className="border-b border-stone-100">
+                <td className="px-6 py-4 text-xs font-black uppercase">
+                  {row.vendorName}
+                </td>
+                <td className="px-6 py-4 text-xs font-mono">{row.leadCount}</td>
+                <td className="px-6 py-4 text-xs font-mono">
+                  {row.estimatedConvertedLeads.toFixed(1)}
+                </td>
+                <td className="px-6 py-4 text-xs font-mono text-emerald-700 font-bold">
+                  {money(row.estimatedRevenueGrowth)}
+                </td>
+                <td className="px-6 py-4 text-xs font-mono">
+                  {Math.round(row.leadRevenueConfidenceFactor * 100)}%
+                </td>
+                <td className="px-6 py-4 text-[10px] font-bold uppercase">
+                  {row.topProduct}
+                </td>
+                <td className="px-6 py-4 text-[10px] font-bold uppercase">
+                  {row.region}
+                </td>
+                <td className="px-6 py-4 text-[10px] font-bold uppercase">
+                  {row.recommendedAction}
+                </td>
+              </tr>
+            ))}
+          </TablePanel>
+
+          <TablePanel
+            title="Estimated Revenue Growth by Product"
+            headers={[
+              "Product",
+              "Lead Count",
+              "Vendor Count",
+              "Estimated Growth",
+              "Stock Audit",
+              "Restock",
+            ]}
+          >
+            {estimatedGrowth.productRows.slice(0, 20).map((row) => (
+              <tr key={row.productName} className="border-b border-stone-100">
+                <td className="px-6 py-4 text-xs font-black uppercase">
+                  {row.productName}
+                </td>
+                <td className="px-6 py-4 text-xs font-mono">{row.leadCount}</td>
+                <td className="px-6 py-4 text-xs font-mono">
+                  {row.vendorCount}
+                </td>
+                <td className="px-6 py-4 text-xs font-mono text-emerald-700 font-bold">
+                  {money(row.estimatedRevenueGrowth)}
+                </td>
+                <td className="px-6 py-4">
+                  <StatusBadge
+                    status={row.stockAuditRecommended ? "recommended" : "normal"}
+                    variant={row.stockAuditRecommended ? "warning" : "neutral"}
+                  />
+                </td>
+                <td className="px-6 py-4">
+                  <StatusBadge
+                    status={row.restockRecommended ? "recommended" : "normal"}
+                    variant={row.restockRecommended ? "warning" : "neutral"}
+                  />
+                </td>
+              </tr>
+            ))}
+          </TablePanel>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <DataPanel
@@ -646,21 +1153,29 @@ export const BIMarket: React.FC = () => {
 
           <TablePanel
             title="Vendor Readiness Scoring"
-            subtitle="Top 20 vendors by data quality and operational readiness."
+            subtitle="Top 20 vendors by catalogue/storefront readiness."
             headers={[
               "Vendor",
               "Total Score",
+              "Level",
               "Primary Issues",
               "Top Recommendation",
+              "Task Status",
             ]}
           >
             {vendorReadiness.length > 0 ? (
               vendorReadiness.slice(0, 20).map((vendor, index) => {
-                const issues = normalizeArray<string>(vendor.issues);
+                const issues = normalizeArray<string>(vendor.missingItems);
                 const recommendations = normalizeArray<string>(
-                  vendor.recommendations,
+                  vendor.recommendedActions,
                 );
-                const vendorName = safeString(vendor.name, "Unnamed Vendor");
+                const vendorName = safeString(vendor.vendorName, "Unnamed Vendor");
+                const task = safeStaffTasks.find(
+                  (item) =>
+                    item.taskType === "vendor_readiness" &&
+                    item.vendorId === vendor.vendorId &&
+                    !["completed", "reviewed", "cancelled"].includes(item.status),
+                );
 
                 return (
                   <tr
@@ -689,6 +1204,18 @@ export const BIMarket: React.FC = () => {
                           />
                         </div>
                       </div>
+                    </td>
+                    <td className="px-6 py-5">
+                      <StatusBadge
+                        status={vendor.level}
+                        variant={
+                          vendor.level === "Ready"
+                            ? "success"
+                            : vendor.level === "Needs Attention"
+                              ? "warning"
+                              : "error"
+                        }
+                      />
                     </td>
                     <td className="px-6 py-5">
                       <div className="flex flex-wrap gap-1">
@@ -722,16 +1249,71 @@ export const BIMarket: React.FC = () => {
                         </span>
                       )}
                     </td>
+                    <td className="px-6 py-5">
+                      <StatusBadge
+                        status={task ? task.status : "no open task"}
+                        variant={task ? "warning" : "neutral"}
+                      />
+                    </td>
                   </tr>
                 );
               })
             ) : (
               <tr>
                 <td
-                  colSpan={4}
+                  colSpan={6}
                   className="px-6 py-12 text-center text-xs text-stone-400 italic"
                 >
                   No vendor data found.
+                </td>
+              </tr>
+            )}
+          </TablePanel>
+
+          <TablePanel
+            title="Vendor Readiness Tasks"
+            subtitle="Low readiness vendors, open task status, assigned desk and latest task date."
+            headers={[
+              "Vendor",
+              "Score",
+              "Missing Items",
+              "Task Status",
+              "Assigned Desk",
+              "Last Task Date",
+            ]}
+          >
+            {readinessTaskRows.map((row) => (
+              <tr key={row.vendorId} className="border-b border-stone-100">
+                <td className="px-6 py-4 text-xs font-black uppercase">
+                  {row.vendorName}
+                </td>
+                <td className="px-6 py-4 text-xs font-mono">{row.score}</td>
+                <td className="px-6 py-4 text-[10px] font-bold uppercase">
+                  {row.missingItems.slice(0, 4).join(", ") || "N/A"}
+                </td>
+                <td className="px-6 py-4">
+                  <StatusBadge
+                    status={row.task?.status || "not created"}
+                    variant={row.task ? "warning" : "neutral"}
+                  />
+                </td>
+                <td className="px-6 py-4 text-[10px] font-bold uppercase">
+                  {row.task?.assignedDesk || "Backoffice / Vendor Quality Control"}
+                </td>
+                <td className="px-6 py-4 text-[10px] font-mono">
+                  {row.task?.createdAt
+                    ? new Date(row.task.createdAt).toLocaleDateString()
+                    : "N/A"}
+                </td>
+              </tr>
+            ))}
+            {readinessTaskRows.length === 0 && (
+              <tr>
+                <td
+                  colSpan={6}
+                  className="px-6 py-10 text-center text-xs text-stone-400 italic"
+                >
+                  No vendors are below the current readiness threshold.
                 </td>
               </tr>
             )}

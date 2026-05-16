@@ -1391,6 +1391,7 @@ export type NotificationType =
   | "approval_request"
   | "staff_task"
   | "task_due"
+  | "vendor_readiness"
   | "subscription_due"
   | "subscription_overdue"
   | "lead_followup"
@@ -1473,6 +1474,7 @@ export interface ApprovalRequest {
 
 export type StaffTaskType =
   | "vendor_cleanup"
+  | "vendor_readiness"
   | "product_image_fix"
   | "price_confirmation"
   | "lead_followup"
@@ -1508,6 +1510,32 @@ export interface StaffTask {
   relatedRecordType?: string;
   relatedRecordId?: string;
   dueAt?: string;
+  vendorId?: string;
+  vendorName?: string;
+  productId?: string;
+  productName?: string;
+  assignedDesk?: string;
+  sourceModule?: string;
+  metadata?: Record<string, any>;
+}
+
+export interface VendorReadinessResult {
+  vendorId: string;
+  vendorName: string;
+  score: number;
+  level: "Ready" | "Needs Attention" | "Critical";
+  missingItems: string[];
+  recommendedActions: string[];
+}
+
+export interface EstimatedRevenueGrowth {
+  leadCount: number;
+  estimatedConvertedLeads: number;
+  averageLeadConversionRatePercent: number;
+  averageOrderValueUsd: number;
+  leadRevenueConfidenceFactor: number;
+  estimatedGrossRevenue: number;
+  estimatedRevenueGrowth: number;
 }
 
 export interface FeedbackWhatsAppRoute {
@@ -1616,6 +1644,12 @@ export interface SystemSettings {
   defaultFeedbackWhatsAppNumber?: string;
   syncEndpointUrl?: string;
   rpnPerformanceSettings?: RPNPerformanceSettings;
+  vendorReadinessTaskThreshold?: number;
+  enableReadinessAutoTasks?: boolean;
+  readinessTaskCooldownDays?: number;
+  averageLeadConversionRatePercent?: number;
+  averageOrderValueUsd?: number;
+  leadRevenueConfidenceFactor?: number;
   enableSessionTimeout?: boolean;
   sessionTimeoutMinutes?: number;
   updatedAt?: string;
@@ -1652,6 +1686,7 @@ export interface StaffAuditLog {
     | "EXPORT_DOWNLOADED"
     | "SYSTEM_SETTING_CHANGED"
     | "TASK_CREATED"
+    | "STAFF_TASK_CREATED"
     | "TASK_STATUS_UPDATED"
     | "TASK_REVIEWED"
     | "TASK_CANCELLED"
@@ -1674,6 +1709,7 @@ export interface StaffAuditLog {
     | "approval"
     | "staff_tasks"
     | "notifications"
+    | "vendor_readiness"
     | "settings"
     | "analytics";
   action: string;

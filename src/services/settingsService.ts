@@ -9,9 +9,18 @@ import { SystemSettings } from "../types.ts";
 
 const SETTINGS_KEY = "itred_system_settings";
 const DEFAULT_RPN_PERFORMANCE_SETTINGS = {
-  dailyOnboardingThreshold: 4,
-  weeklyOnboardingThreshold: 20,
-  monthlyOnboardingThreshold: 80,
+  dailyOnboardingTarget: 2,
+  weeklyOnboardingTarget: 10,
+  monthlyOnboardingTarget: 40,
+  minimumActiveVendorRetentionRate: 85,
+  bonusEligibilityTargetPercent: 100,
+  underperformanceAlertDays: 3,
+  churnRiskThreshold: 15,
+  minimumRevenueContributionTarget: 0,
+  campaignAttributionWindowDays: 14,
+  dailyOnboardingThreshold: 2,
+  weeklyOnboardingThreshold: 10,
+  monthlyOnboardingThreshold: 40,
   churnWarningPercent: 15,
   churnWarningRate: 15,
   recurringVendorRetentionTarget: 85,
@@ -27,6 +36,15 @@ const DEFAULT_RPN_PERFORMANCE_SETTINGS = {
   updatedAt: new Date().toISOString(),
 };
 
+const DEFAULT_BI_MARKET_SETTINGS = {
+  vendorReadinessTaskThreshold: 70,
+  enableReadinessAutoTasks: true,
+  readinessTaskCooldownDays: 3,
+  averageLeadConversionRatePercent: 12,
+  averageOrderValueUsd: 15,
+  leadRevenueConfidenceFactor: 0.65,
+};
+
 export const settingsService = {
   getSettings: async (): Promise<SystemSettings> => {
     try {
@@ -35,6 +53,7 @@ export const settingsService = {
       return {
         enableSessionTimeout: true,
         sessionTimeoutMinutes: 30,
+        ...DEFAULT_BI_MARKET_SETTINGS,
         ...(data || {}),
         rpnPerformanceSettings: {
           ...DEFAULT_RPN_PERFORMANCE_SETTINGS,
@@ -46,6 +65,7 @@ export const settingsService = {
       return {
         enableSessionTimeout: true,
         sessionTimeoutMinutes: 30,
+        ...DEFAULT_BI_MARKET_SETTINGS,
         rpnPerformanceSettings: DEFAULT_RPN_PERFORMANCE_SETTINGS,
       };
     }

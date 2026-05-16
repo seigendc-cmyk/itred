@@ -14,6 +14,8 @@ import {
 import { getStorageAdapter } from "./storageService.ts";
 import { asArray } from "../utils/safeData.ts";
 import { analyticsService } from "./analyticsService.ts";
+import { vendorReadinessService } from "./vendorReadinessService.ts";
+import { settingsService } from "./settingsService.ts";
 
 const LEGACY_PRODUCTS_KEY = "itred_products";
 const MASTER_PRODUCTS_KEY = "itred_master_products";
@@ -330,6 +332,24 @@ export const productService = {
       (offer) => offer.id !== id,
     );
     await getStorageAdapter().setItem(VENDOR_OFFERS_KEY, offers);
+    try {
+      const [vendors, products, settings] = await Promise.all([
+        loadVendors(),
+        productService.getProducts(),
+        settingsService.getSettings(),
+      ]);
+      const vendor = vendors.find((item) => item.id === offer.vendorId);
+      if (vendor) {
+        await vendorReadinessService.ensureReadinessTask(
+          vendor,
+          products,
+          settings,
+          "Vendor product offer was saved or publish status changed.",
+        );
+      }
+    } catch (error) {
+      console.warn("Product readiness automation failed", error);
+    }
   },
 
   async getProducts(): Promise<Product[]> {

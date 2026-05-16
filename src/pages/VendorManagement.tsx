@@ -54,6 +54,8 @@ import { pdfService } from "../services/pdfService.ts";
 import { permissionService } from "../services/permissionService.ts";
 import { staffService } from "../services/staffService.ts";
 import { staffAuditService } from "../services/staffAuditService.ts";
+import { settingsService } from "../services/settingsService.ts";
+import { vendorReadinessService } from "../services/vendorReadinessService.ts";
 import {
   Vendor,
   RPN,
@@ -765,6 +767,21 @@ export const VendorManagement: React.FC = () => {
           }
         } catch (auditErr) {
           console.error("Audit log failed", auditErr);
+        }
+
+        try {
+          const [allProducts, readinessSettings] = await Promise.all([
+            productService.getProducts(),
+            settingsService.getSettings(),
+          ]);
+          await vendorReadinessService.ensureReadinessTask(
+            vendorToSave,
+            allProducts,
+            readinessSettings,
+            "Vendor was saved and readiness was re-evaluated.",
+          );
+        } catch (readinessErr) {
+          console.warn("Vendor readiness automation failed", readinessErr);
         }
       }
 

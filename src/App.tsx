@@ -35,10 +35,14 @@ import { SystemSettings } from "./pages/SystemSettings.tsx";
 import { RPNPerformanceDashboard } from "./pages/RPNPerformanceDashboard.tsx";
 import { ContactHubSettings } from "./pages/ContactHubSettings.tsx";
 import WelcomePage from "./pages/WelcomePage.tsx";
-import { HowToPage } from "./pages/HowToPage.tsx";
+import HowToPage from "./pages/HowToPage.tsx";
 import { ApprovalQueue } from "./pages/ApprovalQueue.tsx";
 import { StaffTasks } from "./pages/StaffTasks.tsx";
 import { Notifications } from "./pages/Notifications.tsx";
+import FinanceDesk from "./pages/FinanceDesk.tsx";
+import CashBankManager from "./pages/CashBankManager.tsx";
+import RPNPaymentsLedger from "./pages/RPNPaymentsLedger.tsx";
+import FinanceReports from "./pages/FinanceReports.tsx";
 import { AppRoute, MenuKey, DeskType } from "./types.ts";
 import { ErrorBoundary, PrimaryButton } from "./components/CommonUI.tsx";
 import { permissionService } from "./services/permissionService.ts";
@@ -134,6 +138,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     [AppRoute.NOTIFICATIONS]: "Notifications",
     [AppRoute.STAFF_TASKS]: "Staff Tasks",
     [AppRoute.RPN_PERFORMANCE]: "RPN Performance",
+    [AppRoute.FINANCE_DESK]: "Finance Desk",
+    [AppRoute.CASH_BANK_MANAGER]: "Cash & Bank Manager",
+    [AppRoute.RPN_PAYMENTS_LEDGER]: "RPN Payments Ledger",
+    [AppRoute.FINANCE_REPORTS]: "Finance Reports",
   };
 
   const checkAccess = (route: string) => {
@@ -164,6 +172,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       notifications: "notifications",
       "staff-tasks": "staffTasks",
       "rpn-performance": "rpnPerformance",
+      "finance-desk": "financeDesk",
+      "cash-bank-manager": "cashBankManager",
+      "rpn-payments-ledger": "rpnPaymentsLedger",
+      "finance-reports": "financeReports",
       "how-to": "howTo",
       dashboard: "dashboard",
       // Add other specific mappings if routes don't directly match MenuKey
@@ -424,8 +436,40 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         <Route
           path="/staff-tasks"
           element={
-            checkAccess("staff-tasks") ? (
-              <StaffTasks />
+            checkAccess("staff-tasks") ? <StaffTasks /> : <RestrictedAccess />
+          }
+        />
+        <Route
+          path="/finance-desk"
+          element={
+            checkAccess("finance-desk") ? <FinanceDesk /> : <RestrictedAccess />
+          }
+        />
+        <Route
+          path="/cash-bank-manager"
+          element={
+            checkAccess("cash-bank-manager") ? (
+              <CashBankManager />
+            ) : (
+              <RestrictedAccess />
+            )
+          }
+        />
+        <Route
+          path="/rpn-payments-ledger"
+          element={
+            checkAccess("rpn-payments-ledger") ? (
+              <RPNPaymentsLedger />
+            ) : (
+              <RestrictedAccess />
+            )
+          }
+        />
+        <Route
+          path="/finance-reports"
+          element={
+            checkAccess("finance-reports") ? (
+              <FinanceReports />
             ) : (
               <RestrictedAccess />
             )
