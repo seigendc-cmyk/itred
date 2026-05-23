@@ -60,6 +60,8 @@ import { staffAuditService } from '../services/staffAuditService.ts'
 import { settingsService } from '../services/settingsService.ts'
 import { taxonomyService } from '../services/taxonomyService.ts'
 import { vendorReadinessService } from '../services/vendorReadinessService.ts'
+import { productService } from '../services/productService.ts'
+import VendorProductOfferSheet from '../components/VendorProductOfferSheet.tsx'
 import {
   Vendor,
   RPN,
@@ -73,7 +75,9 @@ import {
   Staff,
   MarketingCampaign,
   IDeliverProvider,
-  SystemSettings
+  SystemSettings,
+  MasterProduct,
+  VendorProductOffer
 } from '../types.ts'
 import { asArray } from '../utils/safeData.ts'
 import { optimizeImageToWebP } from '../utils/imageUtils.ts'
@@ -84,7 +88,10 @@ import {
 } from '../utils/classificationOptions.ts'
 import { approvalService } from '../services/approvalService.ts'
 import { generateEntityId } from '../utils/idGenerator.ts'
-import { exportVendorProductRows } from '../utils/vendorProductExport.ts'
+import {
+  buildVendorProductExportRows,
+  exportVendorProductRows
+} from '../utils/vendorProductExport.ts'
 import { buildSearchText } from '../utils/searchUtils.ts'
 import { useFormDraft } from '../hooks/useFormDraft.ts'
 import { offlineSyncService } from '../services/offlineSyncService.ts'
@@ -360,6 +367,10 @@ export const VendorManagement: React.FC = () => {
   const [rpns, setRpns] = useState<RPN[]>([])
   const [staffList, setStaffList] = useState<Staff[]>([])
   const [plans, setPlans] = useState<PricingPlan[]>([])
+  const [masterProducts, setMasterProducts] = useState<MasterProduct[]>([])
+  const [vendorProductOffers, setVendorProductOffers] = useState<
+    VendorProductOffer[]
+  >([])
   const [campaigns, setCampaigns] = useState<MarketingCampaign[]>([])
   const [systemSettings, setSystemSettings] = useState<SystemSettings>({})
   const [sharedSectors, setSharedSectors] = useState<string[]>([])
@@ -401,6 +412,7 @@ export const VendorManagement: React.FC = () => {
   const [showManualUrls, setShowManualUrls] = useState<boolean>(false)
 
   const [isSaving, setIsSaving] = useState(false)
+  const [isProductSheetOpen, setIsProductSheetOpen] = useState(false)
   const [formError, setFormError] = useState('')
   const [formSuccess, setFormSuccess] = useState('')
   const [showDraftPrompt, setShowDraftPrompt] = useState(false)
@@ -537,6 +549,12 @@ export const VendorManagement: React.FC = () => {
     const pl = asArray<PricingPlan>(
       await Promise.resolve(pricingPlanService.getPlans())
     )
+    const mp = asArray<MasterProduct>(
+      await Promise.resolve(productService.getMasterProducts())
+    )
+    const vo = asArray<VendorProductOffer>(
+      await Promise.resolve(productService.getVendorProductOffers())
+    )
     const st = asArray<Staff>(await Promise.resolve(staffService.getAllStaff()))
     const cm = asArray<MarketingCampaign>(
       await Promise.resolve(rpnService.getCampaigns())
@@ -546,6 +564,8 @@ export const VendorManagement: React.FC = () => {
     setVendors(v)
     setRpns(r)
     setPlans(pl)
+    setMasterProducts(mp)
+    setVendorProductOffers(vo)
     setStaffList(st)
     setCampaigns(cm)
     setSystemSettings(settings)
@@ -553,6 +573,10 @@ export const VendorManagement: React.FC = () => {
 
     // Calculate counts
     const pCounts: Record<string, number> = {}
+    vo.forEach(offer => {
+      if (!offer.vendorId) return
+      pCounts[offer.vendorId] = (pCounts[offer.vendorId] || 0) + 1
+    })
     setProductCounts(pCounts)
 
     const cCounts: Record<string, number> = {}
@@ -634,6 +658,67 @@ export const VendorManagement: React.FC = () => {
     !!currentAssignedStaff &&
     ((currentAssignedStaff.status || '').toLowerCase() !== 'active' ||
       !!currentAssignedStaff.isLocked)
+
+  const activeVendorId = String(selectedVendor?.id || '')
+  const activeVendorName =
+    formData.tradingName || formData.name || selectedVendor?.tradingName || selectedVendor?.name || 'Vendor'
+  const activeVendorProductOffers = useMemo(
+    () =>
+      vendorProductOffers.filter(
+        offer => offer.vendorId === activeVendorId
+      ),
+    [activeVendorId, vendorProductOffers]
+  )
+
+  const refreshVendorProductOffers = async () => {
+    const offers = asArray<VendorProductOffer>(
+      await Promise.resolve(productService.getVendorProductOffers())
+    )
+    setVendorProductOffers(offers)
+    const pCounts: Record<string, number> = {}
+    offers.forEach(offer => {
+      if (!offer.vendorId) return
+      pCounts[offer.vendorId] = (pCounts[offer.vendorId] || 0) + 1
+    })
+    setProductCounts(pCounts)
+  }
+
+  const handleVendorProductSheetSaved = async (
+    savedOffers: VendorProductOffer[]
+  ) => {
+    if (savedOffers.length > 0) {
+      const savedById = new Map(savedOffers.map(offer => [offer.id, offer]))
+      setVendorProductOffers(current => {
+        const retained = current.filter(offer => !savedById.has(offer.id))
+        return [...retained, ...savedOffers]
+      })
+    }
+    await refreshVendorProductOffers()
+  }
+
+  const handleExportActiveVendorInventory = () => {
+    if (!activeVendorId) {
+      showBrandedAlert({
+        message: 'Save or select a vendor before exporting inventory.',
+        type: 'warning'
+      })
+      return
+    }
+    const rows = buildVendorProductExportRows({
+      offers: activeVendorProductOffers,
+      masterProducts,
+      vendorName: activeVendorName,
+      getBranchName: branchId =>
+        (formData.branches || []).find(branch => branch.id === branchId)
+          ?.name || ''
+    })
+    if (!exportVendorProductRows(rows, activeVendorName)) {
+      showBrandedAlert({
+        message: 'No linked or branded vendor products are available to export.',
+        type: 'info'
+      })
+    }
+  }
 
   const addCustomBusinessType = async () => {
     const value = newBusinessType.trim()
@@ -1585,6 +1670,18 @@ export const VendorManagement: React.FC = () => {
         <BrandedAlertModal
           {...alertConfig}
           onClose={() => setAlertConfig({ ...alertConfig, isOpen: false })}
+        />
+        <VendorProductOfferSheet
+          open={isProductSheetOpen}
+          onClose={() => setIsProductSheetOpen(false)}
+          vendorId={activeVendorId}
+          vendorName={activeVendorName}
+          lockVendor
+          masterProducts={masterProducts}
+          plans={plans}
+          vendors={vendors}
+          existingOffers={vendorProductOffers}
+          onSaved={handleVendorProductSheetSaved}
         />
 
         <div className='flex flex-col gap-4 bg-stone-50 p-6 border border-stone-200 min-w-0 sm:flex-row sm:items-center sm:justify-between'>
@@ -3018,38 +3115,76 @@ export const VendorManagement: React.FC = () => {
             </DataPanel>
 
             <DataPanel
-              title='Products Later'
-              subtitle='Vendor registration is separate from product upload.'
+              title='Vendor Product & Inventory Sheet'
+              subtitle='Link master products, create branded vendor products, and reconcile inventory.'
               className='border-t-4 border-t-brand-orange'
             >
               <div className='p-6 space-y-5 min-w-0'>
                 <div className='border border-stone-200 bg-stone-50 p-4 min-w-0'>
-                  <p className='text-xs font-bold uppercase text-brand-charcoal'>
-                    Vendor registration is separate from product upload.
-                    Products can be imported later using Excel.
-                  </p>
-                  <div className='mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3'>
-                    <SecondaryButton onClick={handleDownloadProductTemplate}>
-                      <Download size={14} className='mr-2 inline' /> Download
-                      Product Excel Template
-                    </SecondaryButton>
-                    <SecondaryButton
-                      onClick={handleImportProductsPlaceholder}
-                      disabled
-                    >
-                      <Upload size={14} className='mr-2 inline' /> Import
-                      Product Excel
-                    </SecondaryButton>
-                    <SecondaryButton onClick={handleExportVendorProductsPlaceholder}>
-                      <Download size={14} className='mr-2 inline' /> Export
-                      Vendor Products to Excel
-                    </SecondaryButton>
+                  <div className='flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between'>
+                    <div className='min-w-0'>
+                      <p className='text-xs font-bold uppercase text-brand-charcoal'>
+                        Product & Inventory Sheet
+                      </p>
+                      <p className='mt-2 text-[10px] font-bold uppercase text-stone-500'>
+                        Link from Master Product Library / Create Branded Vendor
+                        Product / Export Vendor Inventory Excel / Import Vendor
+                        Inventory Excel/CSV.
+                      </p>
+                      <div className='mt-3 flex flex-wrap gap-2'>
+                        <span className='border border-stone-200 bg-white px-2 py-1 text-[9px] font-black uppercase text-stone-600'>
+                          Linked master products: searchable library
+                        </span>
+                        <span className='border border-stone-200 bg-white px-2 py-1 text-[9px] font-black uppercase text-stone-600'>
+                          Branded vendor products: vendor owned
+                        </span>
+                        <span className='border border-stone-200 bg-white px-2 py-1 text-[9px] font-black uppercase text-stone-600'>
+                          Offers loaded: {activeVendorProductOffers.length}
+                        </span>
+                      </div>
+                    </div>
+                    <div className='grid grid-cols-1 gap-2 sm:grid-cols-2 lg:min-w-[420px]'>
+                      <PrimaryButton
+                        onClick={() => setIsProductSheetOpen(true)}
+                        disabled={!activeVendorId}
+                      >
+                        <Package size={14} className='mr-2 inline' /> Open
+                        Product & Inventory Sheet
+                      </PrimaryButton>
+                      <SecondaryButton
+                        onClick={handleExportActiveVendorInventory}
+                        disabled={!activeVendorId || activeVendorProductOffers.length === 0}
+                      >
+                        <Download size={14} className='mr-2 inline' /> Export
+                        Vendor Inventory Excel
+                      </SecondaryButton>
+                      <SecondaryButton onClick={handleDownloadProductTemplate}>
+                        <Download size={14} className='mr-2 inline' /> Download
+                        Inventory Template
+                      </SecondaryButton>
+                      <SecondaryButton
+                        onClick={() => setIsProductSheetOpen(true)}
+                        disabled={!activeVendorId}
+                      >
+                        <Upload size={14} className='mr-2 inline' /> Import
+                        Vendor Inventory Excel/CSV
+                      </SecondaryButton>
+                    </div>
                   </div>
-                  <p className='mt-3 text-[10px] font-bold uppercase text-stone-500'>
-                    Linked product offers, branded vendor products, storefront
-                    products, and catalogue selections remain managed in their
-                    dedicated workflows.
-                  </p>
+                  <div className='mt-4 grid grid-cols-1 gap-2 text-[9px] font-bold uppercase text-stone-500 sm:grid-cols-2 lg:grid-cols-4'>
+                    <div className='border border-stone-200 bg-white p-2'>
+                      Opening QTY
+                    </div>
+                    <div className='border border-stone-200 bg-white p-2'>
+                      Vendor Receipts
+                    </div>
+                    <div className='border border-stone-200 bg-white p-2'>
+                      Vendor Sales
+                    </div>
+                    <div className='border border-stone-200 bg-white p-2'>
+                      Current Product QTY + Notes
+                    </div>
+                  </div>
                 </div>
               </div>
             </DataPanel>
