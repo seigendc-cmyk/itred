@@ -1517,24 +1517,27 @@ export const VendorManagement: React.FC = () => {
       {
         SKU: '',
         'Product Name': '',
-        QTY: 0,
-        Price: 0,
+        'Opening QTY': 0,
+        'Vendor Receipts': 0,
+        'Vendor Sales': 0,
+        'Current Product QTY': 0,
+        Notes: '',
         'Vendor Name': getActiveVendorName(),
+        'Product Mode': 'linked_product',
+        'Master Product ID': '',
+        'Vendor Product/Offer ID': '',
         Branch: '',
-        Category: '',
-        Sector: formData.sector || '',
-        Status: 'active',
-        'Delivery Available': 'Yes',
+        'Selling Price': 0,
         'Buying Price': 0,
-        'Discount Price': 0,
+        'Publish To Catalogue': 'Yes',
+        Status: 'active',
         'Last Updated': '',
         Description: '',
-        'Image URL': '',
-        'Publish To Catalogue': 'Yes'
+        'Image URL': ''
       }
     ] as any
 
-    exportVendorProductRows(rows, getActiveVendorName(), 'Product-Excel-Template')
+    exportVendorProductRows(rows, getActiveVendorName(), 'Vendor-Inventory-Template')
   }
 
   const handleExportVendorProductsPlaceholder = () => {

@@ -1,20 +1,28 @@
 import { MasterProduct, Product, VendorProductOffer } from '../types.ts'
 
-type ExportRow = {
+export type VendorInventoryExportRow = {
   SKU: string
   'Product Name': string
-  QTY: number
-  Price: number
+  'Opening QTY': number
+  'Vendor Receipts': number
+  'Vendor Sales': number
+  'Current Product QTY': number
+  Notes: string
   'Vendor Name': string
+  'Product Mode': string
+  'Master Product ID': string
+  'Vendor Product/Offer ID': string
   Branch: string
-  Category: string
-  Sector: string
-  Status: string
-  'Delivery Available': string
+  'Selling Price': number
   'Buying Price': number
-  'Discount Price': number
+  'Publish To Catalogue': string
+  Status: string
   'Last Updated': string
 }
+
+export type VendorInventoryImportRow = Partial<
+  Record<keyof VendorInventoryExportRow | string, string>
+>
 
 const today = () => new Date().toISOString().slice(0, 10)
 
@@ -31,7 +39,7 @@ const safeString = (value: unknown) =>
     .replace(/[\r\n\t]+/g, ' ')
     .trim()
 
-const safeNumber = (value: unknown, fallback = 0) => {
+export const safeNumber = (value: unknown, fallback = 0) => {
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : fallback
 }
@@ -44,59 +52,89 @@ const safeCsvValue = (value: unknown) => {
     : guarded
 }
 
+const normalizeHeader = (value: string) =>
+  safeString(value).toLowerCase().replace(/[^a-z0-9]+/g, '')
+
 const getMasterById = (masterProducts: MasterProduct[] = []) =>
   new Map(masterProducts.map(product => [product.id, product]))
 
-export const mapLinkedOfferToExportRow = (
+const offerMasterId = (offer: VendorProductOffer) =>
+  String((offer as any).masterProductId || offer.productId || '')
+
+const offerSku = (offer: VendorProductOffer, master?: MasterProduct) =>
+  offer.productMode === 'branded_product'
+    ? safeString(offer.vendorSku || offer.sku || '')
+    : safeString(
+        offer.vendorSku ||
+          (master as any)?.sku ||
+          master?.standardSku ||
+          offer.sku ||
+          ''
+      )
+
+const offerProductName = (offer: VendorProductOffer, master?: MasterProduct) =>
+  offer.productMode === 'branded_product'
+    ? safeString(offer.productName || (offer as any).name || 'Unnamed Product')
+    : safeString(
+        master?.productName ||
+          (master as any)?.name ||
+          offer.productName ||
+          'Unnamed Product'
+      )
+
+export const mapOfferToInventoryExportRow = (
   offer: VendorProductOffer,
   master?: MasterProduct,
   vendorName = '',
   branchName = ''
-): ExportRow => ({
-  SKU: safeString(
-    offer.vendorSku ||
-      (master as any)?.standardSku ||
-      (master as any)?.sku ||
-      offer.sku ||
-      ''
+): VendorInventoryExportRow => ({
+  SKU: offerSku(offer, master),
+  'Product Name': offerProductName(offer, master),
+  'Opening QTY': safeNumber((offer as any).openingQty),
+  'Vendor Receipts': safeNumber((offer as any).vendorReceipts),
+  'Vendor Sales': safeNumber((offer as any).vendorSales),
+  'Current Product QTY': safeNumber(
+    (offer as any).currentQty ?? (offer as any).stockQuantity ?? (offer as any).qty
   ),
-  'Product Name': safeString(
-    offer.productName ||
-      (master as any)?.productName ||
-      (master as any)?.name ||
-      'Unnamed Product'
-  ),
-  QTY: safeNumber((offer as any).stockQuantity ?? (offer as any).qty),
-  Price: safeNumber((offer as any).sellingPrice ?? (offer as any).price ?? (master as any)?.price),
+  Notes: safeString(offer.notes),
   'Vendor Name': safeString(vendorName),
+  'Product Mode':
+    offer.productMode === 'branded_product'
+      ? 'branded_product'
+      : 'linked_product',
+  'Master Product ID':
+    offer.productMode === 'branded_product' ? '' : offerMasterId(offer),
+  'Vendor Product/Offer ID': safeString(offer.id),
   Branch: safeString(branchName || (offer as any).branchName),
-  Category: safeString(offer.category || master?.category),
-  Sector: safeString(offer.sector || master?.sector),
-  Status: safeString(offer.stockStatus || (offer.active ? 'active' : 'inactive')),
-  'Delivery Available': offer.deliveryAvailable ? 'Yes' : 'No',
+  'Selling Price': safeNumber((offer as any).sellingPrice ?? (offer as any).price),
   'Buying Price': safeNumber(offer.buyingPrice),
-  'Discount Price': safeNumber(offer.discountPrice),
+  'Publish To Catalogue': offer.publishToCatalogue !== false ? 'Yes' : 'No',
+  Status: offer.active === false ? 'inactive' : 'active',
   'Last Updated': safeString(offer.updatedAt || offer.createdAt)
 })
 
 export const mapProductToExportRow = (
   product: Product | any,
   vendorName = ''
-): ExportRow => ({
-  SKU: safeString(product.sku || product.vendorSku || ''),
+): VendorInventoryExportRow => ({
+  SKU: safeString(product.vendorSku || product.sku || ''),
   'Product Name': safeString(
     product.productName || product.name || 'Unnamed Product'
   ),
-  QTY: safeNumber(product.stockQuantity ?? product.qty),
-  Price: safeNumber(product.sellingPrice ?? product.price),
+  'Opening QTY': safeNumber(product.openingQty),
+  'Vendor Receipts': safeNumber(product.vendorReceipts),
+  'Vendor Sales': safeNumber(product.vendorSales),
+  'Current Product QTY': safeNumber(product.currentQty ?? product.stockQuantity ?? product.qty),
+  Notes: safeString(product.notes),
   'Vendor Name': safeString(product.vendorName || vendorName),
+  'Product Mode': product.productMode || 'branded_product',
+  'Master Product ID': safeString(product.masterProductId),
+  'Vendor Product/Offer ID': safeString(product.id),
   Branch: safeString(product.branchName),
-  Category: safeString(product.category),
-  Sector: safeString(product.sector),
-  Status: safeString(product.status || product.stockStatus),
-  'Delivery Available': product.deliveryAvailable ? 'Yes' : 'No',
+  'Selling Price': safeNumber(product.sellingPrice ?? product.price),
   'Buying Price': safeNumber(product.buyingPrice),
-  'Discount Price': safeNumber(product.discountPrice ?? product.oldPrice),
+  'Publish To Catalogue': product.publishToCatalogue !== false ? 'Yes' : 'No',
+  Status: safeString(product.status || product.stockStatus || (product.active === false ? 'inactive' : 'active')),
   'Last Updated': safeString(product.updatedAt || product.createdAt)
 })
 
@@ -105,13 +143,13 @@ export const buildVendorProductExportRows = (input: {
   products?: Array<Product | any>
   masterProducts?: MasterProduct[]
   vendorName?: string
-  getBranchName?: (branchId?: string) => string
-}): ExportRow[] => {
+  getBranchName?: (branchId?: string | null) => string
+}): VendorInventoryExportRow[] => {
   const masterById = getMasterById(input.masterProducts || [])
   const offerRows = (input.offers || []).map(offer =>
-    mapLinkedOfferToExportRow(
+    mapOfferToInventoryExportRow(
       offer,
-      masterById.get(offer.productId || String((offer as any).masterProductId || '')),
+      masterById.get(offerMasterId(offer)),
       input.vendorName,
       input.getBranchName?.(offer.branchId)
     )
@@ -123,31 +161,40 @@ export const buildVendorProductExportRows = (input: {
   return [...offerRows, ...productRows]
 }
 
+export const vendorInventoryExportHeaders: Array<keyof VendorInventoryExportRow> = [
+  'SKU',
+  'Product Name',
+  'Opening QTY',
+  'Vendor Receipts',
+  'Vendor Sales',
+  'Current Product QTY',
+  'Notes',
+  'Vendor Name',
+  'Product Mode',
+  'Master Product ID',
+  'Vendor Product/Offer ID',
+  'Branch',
+  'Selling Price',
+  'Buying Price',
+  'Publish To Catalogue',
+  'Status',
+  'Last Updated'
+]
+
 export const exportVendorProductRows = (
-  rows: ExportRow[],
+  rows: VendorInventoryExportRow[],
   vendorName: string,
-  scope = 'Product-List'
+  scope = 'Vendor-Inventory'
 ) => {
   if (!rows.length) return false
 
-  const headers: Array<keyof ExportRow> = [
-    'SKU',
-    'Product Name',
-    'QTY',
-    'Price',
-    'Vendor Name',
-    'Branch',
-    'Category',
-    'Sector',
-    'Status',
-    'Delivery Available',
-    'Buying Price',
-    'Discount Price',
-    'Last Updated'
-  ]
   const csv = [
-    headers.map(safeCsvValue).join(','),
-    ...rows.map(row => headers.map(header => safeCsvValue(row[header])).join(','))
+    vendorInventoryExportHeaders.map(safeCsvValue).join(','),
+    ...rows.map(row =>
+      vendorInventoryExportHeaders
+        .map(header => safeCsvValue(row[header]))
+        .join(',')
+    )
   ].join('\n')
 
   const blob = new Blob(['\uFEFF', csv], {
@@ -160,5 +207,54 @@ export const exportVendorProductRows = (
   anchor.click()
   URL.revokeObjectURL(url)
   return true
+}
+
+export const parseVendorInventoryCsv = (text: string): VendorInventoryImportRow[] => {
+  const rows: string[][] = []
+  let field = ''
+  let row: string[] = []
+  let quoted = false
+  const normalized = String(text || '').replace(/^\uFEFF/, '')
+
+  for (let index = 0; index < normalized.length; index += 1) {
+    const char = normalized[index]
+    const next = normalized[index + 1]
+
+    if (char === '"' && quoted && next === '"') {
+      field += '"'
+      index += 1
+    } else if (char === '"') {
+      quoted = !quoted
+    } else if (char === ',' && !quoted) {
+      row.push(field)
+      field = ''
+    } else if ((char === '\n' || char === '\r') && !quoted) {
+      if (char === '\r' && next === '\n') index += 1
+      row.push(field)
+      if (row.some(cell => safeString(cell))) rows.push(row)
+      row = []
+      field = ''
+    } else {
+      field += char
+    }
+  }
+
+  row.push(field)
+  if (row.some(cell => safeString(cell))) rows.push(row)
+  if (rows.length < 2) return []
+
+  const headers = rows[0].map(header => normalizeHeader(header))
+  const canonicalHeaders = new Map(
+    vendorInventoryExportHeaders.map(header => [normalizeHeader(header), header])
+  )
+
+  return rows.slice(1).map(cells => {
+    const mapped: VendorInventoryImportRow = {}
+    headers.forEach((header, index) => {
+      const canonical = canonicalHeaders.get(header) || rows[0][index]
+      mapped[canonical] = safeString(cells[index])
+    })
+    return mapped
+  })
 }
 

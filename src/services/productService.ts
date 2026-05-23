@@ -460,24 +460,51 @@ export const productService = {
 
   async saveVendorProductOffer(offer: VendorProductOffer): Promise<void> {
     const offers = await productService.getVendorProductOffers();
+    const productMode = offer.productMode || "linked_product";
+    const linkedMasterProductId =
+      productMode === "branded_product"
+        ? null
+        : String(offer.masterProductId || offer.productId || "");
+    if (productMode !== "branded_product" && linkedMasterProductId) {
+      const duplicate = offers.find(
+        (currentOffer) =>
+          currentOffer.id !== offer.id &&
+          currentOffer.vendorId === offer.vendorId &&
+          currentOffer.productMode !== "branded_product" &&
+          String(currentOffer.masterProductId || currentOffer.productId || "") ===
+            linkedMasterProductId,
+      );
+      if (duplicate) {
+        throw new Error("This vendor is already linked to the selected master product.");
+      }
+    }
     const normalizedOffer: VendorProductOffer = {
       ...offer,
-      productMode: offer.productMode || "linked_product",
+      productMode,
       sourceType:
-        offer.productMode === "branded_product"
+        productMode === "branded_product"
           ? "vendor_branded"
           : "master_linked",
       masterProductId:
-        offer.productMode === "branded_product"
+        productMode === "branded_product"
           ? null
-          : offer.masterProductId || offer.productId,
+          : linkedMasterProductId,
       brandOwnerVendorId:
         offer.brandOwnerVendorId ||
-        (offer.productMode === "branded_product" ? offer.vendorId : undefined),
-      isVendorBranded: offer.productMode === "branded_product",
+        (productMode === "branded_product" ? offer.vendorId : undefined),
+      isVendorBranded: productMode === "branded_product",
+      openingQty: Number((offer as any).openingQty) || 0,
+      vendorReceipts: Number((offer as any).vendorReceipts) || 0,
+      vendorSales: Number((offer as any).vendorSales) || 0,
+      currentQty:
+        Number((offer as any).currentQty ?? offer.stockQuantity ?? 0) || 0,
+      stockQuantity:
+        Number((offer as any).currentQty ?? offer.stockQuantity ?? 0) || 0,
       stockStatus:
         offer.stockStatus ||
-        stockStatusFromQuantity(Number(offer.stockQuantity) || 0),
+        stockStatusFromQuantity(
+          Number((offer as any).currentQty ?? offer.stockQuantity ?? 0) || 0,
+        ),
       active: offer.active !== false,
       publishToCatalogue: offer.publishToCatalogue !== false,
       deliveryAvailable: offer.deliveryAvailable !== false,

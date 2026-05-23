@@ -1371,6 +1371,10 @@ export interface VendorProductOffer {
   sellingPrice: number;
   buyingPrice?: number;
   discountPrice?: number;
+  openingQty?: number;
+  vendorReceipts?: number;
+  vendorSales?: number;
+  currentQty?: number;
   minOrderQty?: number;
   maxOrderQty?: number;
   stockQuantity: number;

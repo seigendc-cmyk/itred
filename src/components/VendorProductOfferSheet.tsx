@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   Check,
@@ -7,6 +7,7 @@ import {
   Save,
   Search,
   Trash2,
+  Upload,
   X,
 } from "lucide-react";
 import {
@@ -47,6 +48,8 @@ import { sanitizeForFirestore } from "../utils/firestoreSanitize.ts";
 import {
   buildVendorProductExportRows,
   exportVendorProductRows,
+  parseVendorInventoryCsv,
+  safeNumber,
 } from "../utils/vendorProductExport.ts";
 
 type SelectedVendorOfferDraft = {
@@ -65,6 +68,9 @@ type SelectedVendorOfferDraft = {
   images: { url: string; alt?: string | null; sortOrder?: number; isPrimary?: boolean }[];
   vendorId: string;
   branchId: string | null;
+  openingQty: number;
+  vendorReceipts: number;
+  vendorSales: number;
   qty: number;
   sellingPrice: number;
   buyingPrice: number | null;
@@ -133,8 +139,6 @@ const productSearchBlob = (product: MasterProduct) =>
     .filter(Boolean)
     .join(" ");
 
-const branchKey = (branchId?: string | null) => branchId || "main";
-
 export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = ({
   open,
   onClose,
@@ -162,6 +166,8 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
   const [bulkDelivery, setBulkDelivery] = useState(true);
   const [bulkActive, setBulkActive] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
   const [alertConfig, setAlertConfig] = useState<{
     isOpen: boolean;
     message: string;
@@ -218,7 +224,7 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
   const existingVendorProductLinks = useMemo(
     () =>
       existingOffers.filter(
-        (offer) => offer.vendorId === activeVendorId && !!offer.productId,
+        (offer) => offer.vendorId === activeVendorId && !!(offer.masterProductId || offer.productId),
       ),
     [activeVendorId, existingOffers],
   );
@@ -226,7 +232,8 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
   const linkedProductMap = useMemo(() => {
     const map = new Map<string, VendorProductOffer>();
     existingVendorProductLinks.forEach((link) => {
-      const key = `${link.productId}::${branchKey(link.branchId)}`;
+      if (link.productMode === "branded_product") return;
+      const key = String(link.masterProductId || link.productId);
       map.set(key, link);
     });
     return map;
@@ -235,9 +242,11 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
   const linkedByProductId = useMemo(() => {
     const map = new Map<string, VendorProductOffer[]>();
     existingVendorProductLinks.forEach((link) => {
-      const rows = map.get(link.productId) ?? [];
+      if (link.productMode === "branded_product") return;
+      const productId = String(link.masterProductId || link.productId);
+      const rows = map.get(productId) ?? [];
       rows.push(link);
-      map.set(link.productId, rows);
+      map.set(productId, rows);
     });
     return map;
   }, [existingVendorProductLinks]);
@@ -294,6 +303,120 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
     }
   };
 
+  const handleImportInventoryCsv = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!activeVendorId) {
+      showAlert("Select a vendor before importing inventory.", "warning");
+      return;
+    }
+
+    setIsImporting(true);
+    try {
+      const rows = parseVendorInventoryCsv(await file.text());
+      if (!rows.length) {
+        showAlert("No inventory rows were found in the import file.", "warning");
+        return;
+      }
+
+      const byId = new Map(existingVendorProductLinks.map((offer) => [offer.id, offer]));
+      const bySku = new Map<string, VendorProductOffer>();
+      existingVendorProductLinks.forEach((offer) => {
+        const product = productById.get(String(offer.masterProductId || offer.productId));
+        const sku = String(
+          offer.vendorSku ||
+            offer.sku ||
+            (product as any)?.sku ||
+            product?.standardSku ||
+            "",
+        )
+          .trim()
+          .toLowerCase();
+        if (sku && !bySku.has(sku)) bySku.set(sku, offer);
+      });
+
+      const warnings: string[] = [];
+      const updatedOffers: VendorProductOffer[] = [];
+      const pendingUpdates: VendorProductOffer[] = [];
+      const now = new Date().toISOString();
+
+      for (const [index, row] of rows.entries()) {
+        const offerId = String(row["Vendor Product/Offer ID"] || "").trim();
+        const sku = String(row.SKU || "").trim().toLowerCase();
+        const match = (offerId && byId.get(offerId)) || (sku && bySku.get(sku));
+        if (!match || match.vendorId !== activeVendorId) {
+          warnings.push(`Row ${index + 2}: no matching vendor offer found.`);
+          continue;
+        }
+
+        const openingQty = safeNumber(row["Opening QTY"]);
+        const vendorReceipts = safeNumber(row["Vendor Receipts"]);
+        const vendorSales = safeNumber(row["Vendor Sales"]);
+        const currentQty = safeNumber(row["Current Product QTY"]);
+        const expectedQty = openingQty + vendorReceipts - vendorSales;
+        if (Math.abs(currentQty - expectedQty) > 0.01) {
+          warnings.push(
+            `Row ${index + 2}: Current Product QTY ${currentQty} differs from Opening QTY + Vendor Receipts - Vendor Sales (${expectedQty}).`,
+          );
+        }
+
+        const updatedOffer: VendorProductOffer = sanitizeForFirestore({
+          ...match,
+          openingQty,
+          vendorReceipts,
+          vendorSales,
+          currentQty,
+          stockQuantity: currentQty,
+          stockStatus: stockStatusFromQuantity(currentQty),
+          notes: String(row.Notes || ""),
+          updatedAt: now,
+        }) as VendorProductOffer;
+        pendingUpdates.push(updatedOffer);
+      }
+
+      if (warnings.length > 0) {
+        const shouldContinue = window.confirm(
+          [
+            "Inventory import completed with warnings.",
+            "",
+            ...warnings.slice(0, 8),
+            warnings.length > 8 ? `...and ${warnings.length - 8} more warnings.` : "",
+            "",
+            "The mismatched rows were imported as operator overrides. Continue?",
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        );
+        if (!shouldContinue) {
+          showAlert("Inventory import cancelled. No offer updates were saved.", "info");
+          return;
+        }
+      }
+
+      for (const updatedOffer of pendingUpdates) {
+        await productService.saveVendorProductOffer(updatedOffer);
+        updatedOffers.push(updatedOffer);
+      }
+
+      if (updatedOffers.length > 0) onSaved(updatedOffers);
+      showAlert(
+        `Imported inventory updates for ${updatedOffers.length} vendor offer${updatedOffers.length === 1 ? "" : "s"}.`,
+        warnings.length > 0 ? "warning" : "success",
+      );
+    } catch (error) {
+      console.error("Vendor inventory import failed", error);
+      showAlert(
+        error instanceof Error ? error.message : "Inventory import failed.",
+        "error",
+      );
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   const showAlert = (
     message: string,
     type: "success" | "error" | "warning" | "info" = "info",
@@ -321,12 +444,13 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
   const draftFromExistingOffer = (
     offer: VendorProductOffer,
   ): SelectedVendorOfferDraft => {
-    const product = productById.get(offer.productId);
+    const linkedProductId = String(offer.masterProductId || offer.productId);
+    const product = productById.get(linkedProductId);
     return {
       offerId: offer.id,
       existingLinkId: offer.id,
       linkMode: "edit_existing",
-      productId: offer.productId,
+      productId: linkedProductId,
       productMode: offer.productMode || "linked_product",
       productName:
         product?.productName ||
@@ -342,6 +466,9 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
       brandBannerUrl: offer.brandBannerUrl || "",
       images: normalizeListingImages(offer, getMaxImagesForListing(activeVendor, activePlan, offer)) as any,
       branchId: offer.branchId || null,
+      openingQty: numberOrZero((offer as any).openingQty),
+      vendorReceipts: numberOrZero((offer as any).vendorReceipts),
+      vendorSales: numberOrZero((offer as any).vendorSales),
       qty: numberOrZero(offer.stockQuantity),
       sellingPrice: numberOrZero(offer.sellingPrice),
       buyingPrice:
@@ -365,11 +492,12 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
     offer: VendorProductOffer,
     options: { warn?: boolean } = {},
   ) => {
+    const linkedProductId = String(offer.masterProductId || offer.productId);
     setSelectedOfferDraftsByProductId((prev) => ({
       ...prev,
-      [offer.productId]: prev[offer.productId] || draftFromExistingOffer(offer),
+      [linkedProductId]: prev[linkedProductId] || draftFromExistingOffer(offer),
     }));
-    focusSelectedDraft(offer.productId);
+    focusSelectedDraft(linkedProductId);
     if (options.warn) {
       showAlert(
         "This product is already linked to this vendor. Edit the existing row instead.",
@@ -393,9 +521,7 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
     const defaultVendorId = activeVendorId;
     const defaultBranchId =
       bulkBranchId || vendorById.get(defaultVendorId)?.branches?.[0]?.id || null;
-    const sameBranchLink = linkedProductMap.get(
-      `${product.id}::${branchKey(defaultBranchId)}`,
-    );
+    const sameBranchLink = linkedProductMap.get(product.id);
 
     if (sameBranchLink) {
       loadExistingOfferDraft(sameBranchLink, { warn: true });
@@ -426,6 +552,9 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
           brandBannerUrl: "",
           images: normalizeListingImages(product, getMaxImagesForListing(vendorById.get(defaultVendorId), activePlan, product)) as any,
           branchId: defaultBranchId,
+          openingQty: 0,
+          vendorReceipts: 0,
+          vendorSales: 0,
           qty: 0,
           sellingPrice: Number((product as any).price ?? (product as any).sellingPrice ?? 0),
           buyingPrice: Number((product as any).buyingPrice ?? 0) || null,
@@ -478,6 +607,9 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
         brandBannerUrl: vendor?.bannerAssetUrl || vendor?.bannerUrl || "",
         images: [],
         branchId: defaultBranchId,
+        openingQty: 0,
+        vendorReceipts: 0,
+        vendorSales: 0,
         qty: 0,
         sellingPrice: 0,
         buyingPrice: null,
@@ -619,11 +751,6 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
 
   const validateRows = (): SelectedVendorOfferDraft[] => {
     const seen = new Set<string>();
-    const existing = new Set(
-      existingOffers.map(
-        (offer) => `${offer.vendorId}::${offer.productId}::${offer.branchId || ""}`,
-      ),
-    );
 
     return selectedOfferDrafts.map((row) => {
       let error = "";
@@ -636,6 +763,9 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
       else if (row.productMode === "branded_product" && !row.sector.trim())
         error = "Sector is required for branded products.";
       else if (numberOrZero(row.qty) < 0) error = "Qty must be 0 or more.";
+      else if (numberOrZero(row.openingQty) < 0) error = "Opening QTY must be 0 or more.";
+      else if (numberOrZero(row.vendorReceipts) < 0) error = "Vendor Receipts must be 0 or more.";
+      else if (numberOrZero(row.vendorSales) < 0) error = "Vendor Sales must be 0 or more.";
       else if (numberOrZero(row.sellingPrice) < 0)
         error = "Selling price must be 0 or more.";
       else if (numberOrZero(row.buyingPrice) < 0)
@@ -650,10 +780,10 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
       )
         error = "Image limit exceeded for current plan.";
       else {
-        const key = `${row.vendorId}::${row.productId}::${row.branchId || ""}`;
+        const key = `${row.vendorId}::${row.productId}`;
         const matchedExisting = existingOffers.find(
           (offer) =>
-            `${offer.vendorId}::${offer.productId}::${offer.branchId || ""}` === key,
+            `${offer.vendorId}::${offer.masterProductId || offer.productId}` === key,
         );
         const currentLinkId = row.existingLinkId || row.offerId;
         const isExistingDuplicate =
@@ -663,7 +793,7 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
           row.productMode !== "branded_product" &&
           (isExistingDuplicate || isSheetDuplicate)
         ) {
-          error = "This product is already linked to this vendor/branch.";
+          error = "This master product is already linked to this vendor.";
         }
         seen.add(key);
       }
@@ -733,6 +863,10 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
           brandLogoUrl: row.brandLogoUrl,
           brandBannerUrl: row.brandBannerUrl,
           branchId: row.branchId || "",
+          openingQty: numberOrZero(row.openingQty),
+          vendorReceipts: numberOrZero(row.vendorReceipts),
+          vendorSales: numberOrZero(row.vendorSales),
+          currentQty: numberOrZero(row.qty),
           stockQuantity: numberOrZero(row.qty),
           stockStatus: stockStatusFromQuantity(numberOrZero(row.qty)),
           sellingPrice: numberOrZero(row.sellingPrice),
@@ -857,12 +991,26 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={handleImportInventoryCsv}
+            />
+            <SecondaryButton
+              size="sm"
+              disabled={existingVendorProductLinks.length === 0 || isImporting}
+              onClick={() => importInputRef.current?.click()}
+            >
+              <Upload size={14} className="mr-2 inline" /> Import Inventory Excel
+            </SecondaryButton>
             <SecondaryButton
               size="sm"
               disabled={existingVendorProductLinks.length === 0}
               onClick={handleExportExistingOffers}
             >
-              <Download size={14} className="mr-2 inline" /> Export Products to Excel
+              <Download size={14} className="mr-2 inline" /> Export Vendor Inventory Excel
             </SecondaryButton>
             <button
               type="button"
@@ -951,14 +1099,11 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
               {searchResults.map((product) => {
                 const draft = selectedOfferDraftsByProductId[product.id];
                 const linkedRows = linkedByProductId.get(product.id) || [];
-                const selectedBranchId = bulkBranchId || null;
-                const sameBranchLink = linkedProductMap.get(
-                  `${product.id}::${branchKey(selectedBranchId)}`,
-                );
+                const sameBranchLink = linkedProductMap.get(product.id);
                 const firstLink = sameBranchLink || linkedRows[0];
                 const isSelected = !!draft;
                 const isLinked = linkedRows.length > 0;
-                const isLinkedOtherBranch = isLinked && !sameBranchLink;
+                const isLinkedOtherBranch = false;
                 const canAddToSheet = !isSelected && !sameBranchLink;
                 const statusLabel = isSelected
                   ? "SELECTED"
@@ -1047,7 +1192,7 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
                             onClick={() => addProductToSheet(product)}
                             className="border border-brand-orange bg-brand-orange px-2 py-1 text-[9px] font-black uppercase text-white hover:bg-orange-600"
                           >
-                            {isLinkedOtherBranch ? "Add This Branch" : "Add To Sheet"}
+                            Add To Sheet
                           </button>
                         )}
                         {firstLink && !isSelected && (
@@ -1153,7 +1298,10 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
                     "Product",
                     "Vendor",
                     "Branch",
-                    "Qty",
+                    "Opening QTY",
+                    "Vendor Receipts",
+                    "Vendor Sales",
+                    "Current Product QTY",
                     "Selling Price",
                     "Buying Price",
                     "Discount Price",
@@ -1332,6 +1480,9 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
                         </select>
                       </td>
                       {([
+                        ["openingQty", "number"],
+                        ["vendorReceipts", "number"],
+                        ["vendorSales", "number"],
                         ["qty", "number"],
                         ["sellingPrice", "number"],
                         ["buyingPrice", "number"],
@@ -1564,7 +1715,10 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
                           <input value={row.brandDisplayName} onChange={(event) => updateSelectedOfferDraft(row.productId, "brandDisplayName", event.target.value)} className="col-span-2 border border-stone-200 p-2 text-xs font-bold uppercase" placeholder="Brand display name" />
                         </>
                       )}
-                      <input type="number" value={row.qty} onChange={(event) => updateSelectedOfferDraft(row.productId, "qty", numberOrZero(event.target.value))} className="border border-stone-200 p-2 text-xs font-bold" placeholder="Qty" />
+                      <input type="number" value={row.openingQty} onChange={(event) => updateSelectedOfferDraft(row.productId, "openingQty", numberOrZero(event.target.value))} className="border border-stone-200 p-2 text-xs font-bold" placeholder="Opening QTY" />
+                      <input type="number" value={row.vendorReceipts} onChange={(event) => updateSelectedOfferDraft(row.productId, "vendorReceipts", numberOrZero(event.target.value))} className="border border-stone-200 p-2 text-xs font-bold" placeholder="Receipts" />
+                      <input type="number" value={row.vendorSales} onChange={(event) => updateSelectedOfferDraft(row.productId, "vendorSales", numberOrZero(event.target.value))} className="border border-stone-200 p-2 text-xs font-bold" placeholder="Sales" />
+                      <input type="number" value={row.qty} onChange={(event) => updateSelectedOfferDraft(row.productId, "qty", numberOrZero(event.target.value))} className="border border-stone-200 p-2 text-xs font-bold" placeholder="Current QTY" />
                       <input type="number" value={row.sellingPrice} onChange={(event) => updateSelectedOfferDraft(row.productId, "sellingPrice", numberOrZero(event.target.value))} className="border border-stone-200 p-2 text-xs font-bold" placeholder="Selling" />
                       <input type="number" value={row.buyingPrice ?? ""} onChange={(event) => updateSelectedOfferDraft(row.productId, "buyingPrice", event.target.value === "" ? null : numberOrZero(event.target.value))} className="border border-stone-200 p-2 text-xs font-bold" placeholder="Buying" />
                       <input type="number" value={row.discountPrice ?? ""} onChange={(event) => updateSelectedOfferDraft(row.productId, "discountPrice", event.target.value === "" ? null : numberOrZero(event.target.value))} className="border border-stone-200 p-2 text-xs font-bold" placeholder="Discount" />
