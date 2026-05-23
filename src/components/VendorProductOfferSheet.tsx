@@ -964,8 +964,8 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
   };
 
   return (
-    <div className="fixed inset-0 z-[100] bg-brand-charcoal/75 p-3 sm:p-6 flex items-center justify-center">
-      <div className="w-full max-w-7xl max-h-[94vh] bg-white border-t-4 border-t-brand-orange shadow-2xl flex min-w-0 flex-col overflow-hidden">
+    <div className="fixed inset-0 z-[100] bg-black/40">
+      <div className="mx-auto mt-4 h-[92vh] w-[96vw] max-w-[1400px] bg-white border-t-4 border-t-brand-orange shadow-2xl flex min-w-0 flex-col overflow-hidden">
         <div className="flex items-start justify-between gap-4 border-b border-stone-200 px-5 py-4">
           <div className="min-w-0">
             <h2 className="text-sm font-black uppercase tracking-widest text-brand-charcoal">

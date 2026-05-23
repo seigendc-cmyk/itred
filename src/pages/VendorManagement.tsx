@@ -1665,6 +1665,84 @@ export const VendorManagement: React.FC = () => {
       formData.bannerUrl ||
       formData.businessBannerUrl ||
       ''
+    const productInventoryPanel = (
+      <DataPanel
+        title='Vendor Product & Inventory Sheet'
+        subtitle='Link master products, create branded vendor products, and reconcile inventory.'
+        className='border-t-4 border-t-brand-orange'
+      >
+        <div className='p-6 space-y-5 min-w-0'>
+          <div className='border border-stone-200 bg-stone-50 p-4 min-w-0'>
+            <div className='flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between'>
+              <div className='min-w-0'>
+                <p className='text-xs font-bold uppercase text-brand-charcoal'>
+                  Product & Inventory Sheet
+                </p>
+                <p className='mt-2 text-[10px] font-bold uppercase text-stone-500'>
+                  Link from Master Product Library / Create Branded Vendor
+                  Product / Export Vendor Inventory Excel / Import Vendor
+                  Inventory Excel/CSV.
+                </p>
+                <div className='mt-3 flex flex-wrap gap-2'>
+                  <span className='border border-stone-200 bg-white px-2 py-1 text-[9px] font-black uppercase text-stone-600'>
+                    Linked master products: searchable library
+                  </span>
+                  <span className='border border-stone-200 bg-white px-2 py-1 text-[9px] font-black uppercase text-stone-600'>
+                    Branded vendor products: vendor owned
+                  </span>
+                  <span className='border border-stone-200 bg-white px-2 py-1 text-[9px] font-black uppercase text-stone-600'>
+                    Offers loaded: {activeVendorProductOffers.length}
+                  </span>
+                </div>
+              </div>
+              <div className='grid grid-cols-1 gap-2 sm:grid-cols-2 lg:min-w-[420px]'>
+                <PrimaryButton
+                  onClick={() => setIsProductSheetOpen(true)}
+                  disabled={!activeVendorId}
+                >
+                  <Package size={14} className='mr-2 inline' /> Open Product &
+                  Inventory Sheet
+                </PrimaryButton>
+                <SecondaryButton
+                  onClick={handleExportActiveVendorInventory}
+                  disabled={
+                    !activeVendorId || activeVendorProductOffers.length === 0
+                  }
+                >
+                  <Download size={14} className='mr-2 inline' /> Export Vendor
+                  Inventory Excel
+                </SecondaryButton>
+                <SecondaryButton onClick={handleDownloadProductTemplate}>
+                  <Download size={14} className='mr-2 inline' /> Download
+                  Inventory Template
+                </SecondaryButton>
+                <SecondaryButton
+                  onClick={() => setIsProductSheetOpen(true)}
+                  disabled={!activeVendorId}
+                >
+                  <Upload size={14} className='mr-2 inline' /> Import Vendor
+                  Inventory Excel/CSV
+                </SecondaryButton>
+              </div>
+            </div>
+            <div className='mt-4 grid grid-cols-1 gap-2 text-[9px] font-bold uppercase text-stone-500 sm:grid-cols-2 lg:grid-cols-4'>
+              <div className='border border-stone-200 bg-white p-2'>
+                Opening QTY
+              </div>
+              <div className='border border-stone-200 bg-white p-2'>
+                Vendor Receipts
+              </div>
+              <div className='border border-stone-200 bg-white p-2'>
+                Vendor Sales
+              </div>
+              <div className='border border-stone-200 bg-white p-2'>
+                Current Product QTY + Notes
+              </div>
+            </div>
+          </div>
+        </div>
+      </DataPanel>
+    )
     return (
       <div className='space-y-8 pb-32 min-w-0 max-w-full overflow-x-hidden'>
         <BrandedAlertModal
@@ -1759,6 +1837,8 @@ export const VendorManagement: React.FC = () => {
             </div>
           </div>
         )}
+
+        {selectedVendor && productInventoryPanel}
 
         <div className='grid grid-cols-1 gap-8 min-w-0 xl:[grid-template-columns:minmax(0,2fr)_minmax(0,1fr)]'>
           <div className='min-w-0 space-y-8'>
@@ -3110,81 +3190,6 @@ export const VendorManagement: React.FC = () => {
                       </option>
                     ))}
                   </select>
-                </div>
-              </div>
-            </DataPanel>
-
-            <DataPanel
-              title='Vendor Product & Inventory Sheet'
-              subtitle='Link master products, create branded vendor products, and reconcile inventory.'
-              className='border-t-4 border-t-brand-orange'
-            >
-              <div className='p-6 space-y-5 min-w-0'>
-                <div className='border border-stone-200 bg-stone-50 p-4 min-w-0'>
-                  <div className='flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between'>
-                    <div className='min-w-0'>
-                      <p className='text-xs font-bold uppercase text-brand-charcoal'>
-                        Product & Inventory Sheet
-                      </p>
-                      <p className='mt-2 text-[10px] font-bold uppercase text-stone-500'>
-                        Link from Master Product Library / Create Branded Vendor
-                        Product / Export Vendor Inventory Excel / Import Vendor
-                        Inventory Excel/CSV.
-                      </p>
-                      <div className='mt-3 flex flex-wrap gap-2'>
-                        <span className='border border-stone-200 bg-white px-2 py-1 text-[9px] font-black uppercase text-stone-600'>
-                          Linked master products: searchable library
-                        </span>
-                        <span className='border border-stone-200 bg-white px-2 py-1 text-[9px] font-black uppercase text-stone-600'>
-                          Branded vendor products: vendor owned
-                        </span>
-                        <span className='border border-stone-200 bg-white px-2 py-1 text-[9px] font-black uppercase text-stone-600'>
-                          Offers loaded: {activeVendorProductOffers.length}
-                        </span>
-                      </div>
-                    </div>
-                    <div className='grid grid-cols-1 gap-2 sm:grid-cols-2 lg:min-w-[420px]'>
-                      <PrimaryButton
-                        onClick={() => setIsProductSheetOpen(true)}
-                        disabled={!activeVendorId}
-                      >
-                        <Package size={14} className='mr-2 inline' /> Open
-                        Product & Inventory Sheet
-                      </PrimaryButton>
-                      <SecondaryButton
-                        onClick={handleExportActiveVendorInventory}
-                        disabled={!activeVendorId || activeVendorProductOffers.length === 0}
-                      >
-                        <Download size={14} className='mr-2 inline' /> Export
-                        Vendor Inventory Excel
-                      </SecondaryButton>
-                      <SecondaryButton onClick={handleDownloadProductTemplate}>
-                        <Download size={14} className='mr-2 inline' /> Download
-                        Inventory Template
-                      </SecondaryButton>
-                      <SecondaryButton
-                        onClick={() => setIsProductSheetOpen(true)}
-                        disabled={!activeVendorId}
-                      >
-                        <Upload size={14} className='mr-2 inline' /> Import
-                        Vendor Inventory Excel/CSV
-                      </SecondaryButton>
-                    </div>
-                  </div>
-                  <div className='mt-4 grid grid-cols-1 gap-2 text-[9px] font-bold uppercase text-stone-500 sm:grid-cols-2 lg:grid-cols-4'>
-                    <div className='border border-stone-200 bg-white p-2'>
-                      Opening QTY
-                    </div>
-                    <div className='border border-stone-200 bg-white p-2'>
-                      Vendor Receipts
-                    </div>
-                    <div className='border border-stone-200 bg-white p-2'>
-                      Vendor Sales
-                    </div>
-                    <div className='border border-stone-200 bg-white p-2'>
-                      Current Product QTY + Notes
-                    </div>
-                  </div>
                 </div>
               </div>
             </DataPanel>
