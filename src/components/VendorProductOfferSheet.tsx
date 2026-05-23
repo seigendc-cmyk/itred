@@ -111,6 +111,40 @@ export const matchesAllTokens = (query: string, searchBlob: string): boolean => 
   return tokens.every((token) => normalizedBlob.includes(token));
 };
 
+const normalizeFilterKey = (value: unknown) =>
+  String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+const getProductSourceVendorKey = (product: any) =>
+  normalizeFilterKey(
+    product.sourceVendorId ??
+      product.ownerVendorId ??
+      product.brandOwnerVendorId ??
+      product.createdByVendorId ??
+      product.vendorId ??
+      product.sourceVendorName ??
+      product.vendorName ??
+      product.brandName ??
+      "",
+  );
+
+const getProductSourceVendorLabel = (product: any) =>
+  String(
+    product.sourceVendorName ??
+      product.vendorName ??
+      product.brandName ??
+      product.sourceVendorId ??
+      product.ownerVendorId ??
+      product.brandOwnerVendorId ??
+      product.createdByVendorId ??
+      product.vendorId ??
+      "No vendor/source",
+  ).trim();
+
 const numberOrZero = (value: unknown): number => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -152,6 +186,8 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
   onSaved,
 }) => {
   const [search, setSearch] = useState("");
+  const [selectedSourceVendorFilter, setSelectedSourceVendorFilter] =
+    useState("all");
   const [creationMode, setCreationMode] = useState<
     "linked_product" | "branded_product"
   >("linked_product");
@@ -251,11 +287,43 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
     return map;
   }, [existingVendorProductLinks]);
 
+  const sourceVendorOptions = useMemo(() => {
+    const map = new Map<
+      string,
+      { key: string; label: string; count: number }
+    >();
+
+    masterProducts.forEach((product: any) => {
+      const key = getProductSourceVendorKey(product) || "no-source";
+      const label = getProductSourceVendorLabel(product) || "No vendor/source";
+      const existing = map.get(key);
+
+      if (existing) {
+        existing.count += 1;
+      } else {
+        map.set(key, { key, label, count: 1 });
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) =>
+      a.label.localeCompare(b.label),
+    );
+  }, [masterProducts]);
+
   const searchResults = useMemo(() => {
     return masterProducts
-      .filter((product) => matchesAllTokens(search, productSearchBlob(product)))
+      .filter((product) => {
+        const matchesSearch = matchesAllTokens(search, productSearchBlob(product));
+        const productSourceKey =
+          getProductSourceVendorKey(product) || "no-source";
+        const matchesSourceVendor =
+          selectedSourceVendorFilter === "all" ||
+          productSourceKey === selectedSourceVendorFilter;
+
+        return matchesSearch && matchesSourceVendor;
+      })
       .slice(0, 40);
-  }, [masterProducts, search]);
+  }, [masterProducts, search, selectedSourceVendorFilter]);
 
   const vendorBranches = (rowVendorId: string) =>
     vendorById.get(rowVendorId)?.branches || [];
@@ -1085,14 +1153,40 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
 
             {creationMode === "linked_product" && (
               <>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" size={15} />
-              <input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                className="w-full border-2 border-stone-200 bg-white py-3 pl-10 pr-3 text-xs font-bold uppercase outline-none focus:border-brand-orange"
-                placeholder="Search products by name, brand, barcode, SKU, category or keywords..."
-              />
+            <div className="grid grid-cols-1 gap-2 lg:[grid-template-columns:minmax(0,1fr)_280px_auto]">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" size={15} />
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  className="w-full border-2 border-stone-200 bg-white py-3 pl-10 pr-3 text-xs font-bold uppercase outline-none focus:border-brand-orange"
+                  placeholder="Search products by name, brand, barcode, SKU, category or keywords..."
+                />
+              </div>
+              <select
+                value={selectedSourceVendorFilter}
+                onChange={(event) => setSelectedSourceVendorFilter(event.target.value)}
+                aria-label="Filter by product source/vendor"
+                className="w-full border-2 border-stone-200 bg-white p-3 text-xs font-bold uppercase outline-none focus:border-brand-orange"
+              >
+                <option value="all">All Vendors / Sources</option>
+                {sourceVendorOptions.map((option) => (
+                  <option key={option.key} value={option.key}>
+                    {option.label} ({option.count})
+                  </option>
+                ))}
+              </select>
+              {(search || selectedSourceVendorFilter !== "all") && (
+                <SecondaryButton
+                  onClick={() => {
+                    setSearch("");
+                    setSelectedSourceVendorFilter("all");
+                  }}
+                >
+                  <X size={14} className="mr-2 inline" />
+                  Clear Filters
+                </SecondaryButton>
+              )}
             </div>
 
             <div className="mt-4 grid grid-cols-1 gap-2 sm:[grid-template-columns:repeat(auto-fit,minmax(280px,1fr))]">

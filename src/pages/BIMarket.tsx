@@ -9,8 +9,10 @@ import {
   DataPanel,
   TablePanel,
   StatusBadge,
-  PrimaryButton
+  PrimaryButton,
+  SecondaryButton
 } from '../components/CommonUI.tsx'
+import { doc, setDoc } from 'firebase/firestore'
 import {
   Zap,
   Target,
@@ -48,6 +50,13 @@ import {
 import { deferWork } from '../utils/deferWork.ts'
 import { taskService } from '../services/taskService.ts'
 import { notificationService } from '../services/notificationService.ts'
+import { db } from '../lib/firebase.ts'
+import { sanitizeForFirestore } from '../utils/firestoreSanitize.ts'
+import {
+  getSession,
+  getSessionStaffId,
+  getSessionStaffName
+} from '../utils/session.ts'
 import {
   Vendor,
   Product,
@@ -103,6 +112,33 @@ const safeNumber = (value: unknown, fallback = 0): number => {
 
 const safePercent = (value: unknown): number => {
   return Math.max(0, Math.min(100, safeNumber(value, 0)))
+}
+
+const normalizeKey = (value: unknown) =>
+  String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, 'and')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+
+type SectorReadinessReport = {
+  id: string
+  reportType: 'sector_readiness'
+  sectorKey: string
+  sectorLabel: string
+  score: number
+  readinessLevel: 'ready' | 'incomplete' | 'critical'
+  vendorCount: number
+  productCount: number
+  issues: string[]
+  recommendations: string[]
+  actionPlan: string[]
+  whatsappSummary: string
+  generatedAt: string
+  generatedByStaffId: string | null
+  generatedByStaffName: string | null
+  source: 'bi_market_readiness'
 }
 
 const defaultBiMarketSettings = {
@@ -225,6 +261,14 @@ export const BIMarket: React.FC = () => {
   const [marketAiReportType, setMarketAiReportType] =
     useState<MarketIntelligenceReportType>('weekly_market_intelligence_summary')
   const [isLoadingData, setIsLoadingData] = useState(true)
+  const [generatingReportKey, setGeneratingReportKey] = useState<string | null>(
+    null
+  )
+  const [activeReadinessReport, setActiveReadinessReport] =
+    useState<SectorReadinessReport | null>(null)
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false)
+  const [isSavingReport, setIsSavingReport] = useState(false)
+  const [readinessReportMessage, setReadinessReportMessage] = useState('')
 
   useEffect(() => {
     let isMounted = true
@@ -670,6 +714,185 @@ export const BIMarket: React.FC = () => {
     metric
       ? `${metric.previousValue} -> ${metric.currentValue} (${metric.trendDirection})`
       : '0 -> 0'
+
+  const buildSectorReadinessReport = (row: any): SectorReadinessReport => {
+    const score = safePercent(
+      row?.kpiScore ?? row?.score ?? row?.totalScore ?? row?.readinessScore ?? 0
+    )
+    const vendorCount = safeNumber(row?.vendors ?? row?.vendorCount ?? 0)
+    const productCount = safeNumber(row?.products ?? row?.productCount ?? 0)
+    const sectorLabel = safeString(
+      row?.sector ?? row?.sectorLabel ?? row?.label,
+      'Unknown Sector'
+    )
+    const sectorKey = normalizeKey(row?.sectorKey ?? sectorLabel) || 'unknown'
+    const session = getSession()
+
+    const issues: string[] = []
+    const recommendations: string[] = []
+    const actionPlan: string[] = []
+
+    if (vendorCount < 5) {
+      issues.push(
+        `Only ${vendorCount} vendors available. Minimum readiness target is 5 vendors.`
+      )
+      recommendations.push(
+        `Onboard more vendors in ${sectorLabel} before pushing this sector aggressively.`
+      )
+      actionPlan.push(
+        `Assign RPN team to onboard at least ${Math.max(
+          0,
+          5 - vendorCount
+        )} more vendors.`
+      )
+    }
+
+    if (productCount < 100) {
+      issues.push(
+        `Only ${productCount} products available. Minimum readiness target is 100 products.`
+      )
+      recommendations.push(
+        'Increase product capture and catalogue uploads for this sector.'
+      )
+      actionPlan.push(
+        'Collect Excel inventory/product sheets from existing vendors and upload more products.'
+      )
+    }
+
+    normalizeArray<string>(row?.issues).forEach(issue => {
+      if (issue && !issues.includes(issue)) issues.push(issue)
+    })
+
+    if (score < 40) {
+      recommendations.push(
+        'Treat this sector as critical. It is not ready for major public catalogue distribution.'
+      )
+      actionPlan.push(
+        'Focus first on vendor onboarding, product capture, and CAH readiness.'
+      )
+    } else if (score < 75) {
+      recommendations.push(
+        'Sector is developing but still needs improvement before major promotion.'
+      )
+      actionPlan.push(
+        'Run targeted RPN onboarding and improve product coverage before broad promotion.'
+      )
+    } else {
+      recommendations.push(
+        'Sector is ready for stronger CAH/catalogue distribution.'
+      )
+      actionPlan.push('Prepare WhatsApp CAH push and monitor enquiries closely.')
+    }
+
+    const readinessLevel =
+      score >= 75 ? 'ready' : score >= 40 ? 'incomplete' : 'critical'
+
+    if (!issues.length) {
+      issues.push('No critical readiness issues detected from available metrics.')
+    }
+
+    const whatsappSummary = [
+      'SCI iTred Sector Readiness Report',
+      `Sector: ${sectorLabel}`,
+      `Score: ${score}/100`,
+      `Vendors: ${vendorCount}`,
+      `Products: ${productCount}`,
+      `Status: ${readinessLevel.toUpperCase()}`,
+      `Key Issue: ${issues[0]}`,
+      `Action: ${recommendations[0] ?? 'Continue monitoring.'}`
+    ].join('\n')
+
+    return sanitizeForFirestore({
+      id: `BIR-${sectorKey}-${Date.now()}`,
+      reportType: 'sector_readiness',
+      sectorKey,
+      sectorLabel,
+      score,
+      readinessLevel,
+      vendorCount,
+      productCount,
+      issues,
+      recommendations,
+      actionPlan,
+      whatsappSummary,
+      generatedAt: new Date().toISOString(),
+      generatedByStaffId: getSessionStaffId(session) || null,
+      generatedByStaffName: getSessionStaffName(session, '') || null,
+      source: 'bi_market_readiness'
+    }) as SectorReadinessReport
+  }
+
+  const enhanceReadinessReportWithAI = async (
+    report: SectorReadinessReport
+  ) => report
+
+  const handleGenerateSectorReadinessReport = async (row: any) => {
+    const rowKey =
+      normalizeKey(
+        row?.sectorKey ?? row?.sector ?? row?.sectorLabel ?? row?.label
+      ) || 'unknown'
+
+    try {
+      setReadinessReportMessage('')
+      setGeneratingReportKey(rowKey)
+      const report = await enhanceReadinessReportWithAI(
+        buildSectorReadinessReport(row)
+      )
+      setActiveReadinessReport(report)
+      setIsReportModalOpen(true)
+    } catch (error: any) {
+      console.error('Failed to generate sector readiness report', error)
+      setReadinessReportMessage(
+        error?.message ||
+          'Report generation failed. Check console for details.'
+      )
+    } finally {
+      setGeneratingReportKey(null)
+    }
+  }
+
+  const handleSaveReadinessReport = async () => {
+    if (!activeReadinessReport) return
+    setIsSavingReport(true)
+    setReadinessReportMessage('')
+    try {
+      await setDoc(
+        doc(db, 'biMarketReports', activeReadinessReport.id),
+        sanitizeForFirestore(activeReadinessReport),
+        { merge: true }
+      )
+      setReadinessReportMessage('Report saved to BI Market Reports.')
+    } catch (error: any) {
+      console.error('Failed to save sector readiness report', error)
+      setReadinessReportMessage(
+        error?.message || 'Failed to save report. Check console for details.'
+      )
+    } finally {
+      setIsSavingReport(false)
+    }
+  }
+
+  const handleCopyReadinessWhatsAppSummary = async () => {
+    if (!activeReadinessReport) return
+    setReadinessReportMessage('')
+    try {
+      await navigator.clipboard.writeText(activeReadinessReport.whatsappSummary)
+      setReadinessReportMessage('WhatsApp summary copied.')
+    } catch (error) {
+      console.error('Failed to copy WhatsApp summary', error)
+      window.prompt(
+        'Copy WhatsApp summary',
+        activeReadinessReport.whatsappSummary
+      )
+      setReadinessReportMessage(
+        'Clipboard access failed. Use the copy field shown by the browser.'
+      )
+    }
+  }
+
+  const handlePrintReadinessReport = () => {
+    window.print()
+  }
 
   const handleRunReadinessScan = async () => {
     setScanStatus('Scanning vendor readiness...')
@@ -1553,6 +1776,12 @@ export const BIMarket: React.FC = () => {
 
       {view === 'readiness' && (
         <div className='space-y-10'>
+          {readinessReportMessage && (
+            <div className='border-l-4 border-brand-orange bg-orange-50 px-4 py-3 text-xs font-bold uppercase text-brand-charcoal'>
+              {readinessReportMessage}
+            </div>
+          )}
+
           <TablePanel
             title='Sector Readiness Scoreboard'
             subtitle='Evaluating sectors based on density, asset coverage, and distribution readiness.'
@@ -1566,78 +1795,94 @@ export const BIMarket: React.FC = () => {
             ]}
           >
             {sectorReadiness.length > 0 ? (
-              sectorReadiness.map(sector => (
-                <tr
-                  key={sector.sector}
-                  className='hover:bg-stone-50 border-b border-stone-100'
-                >
-                  <td className='px-6 py-5'>
-                    <div className='flex flex-col'>
-                      <span className='text-xs font-bold uppercase'>
-                        {safeString(sector.sector, 'Unclassified')}
-                      </span>
-                      <span className='text-[9px] text-stone-400 font-bold uppercase tracking-widest'>
-                        Market Segment
-                      </span>
-                    </div>
-                  </td>
-                  <td className='px-6 py-5'>
-                    <div className='flex items-center gap-3'>
-                      <div
-                        className={`w-10 h-10 border-4 flex items-center justify-center font-bold text-xs ${
-                          safePercent(sector.readinessScore) >= 70
-                            ? 'border-green-500 text-green-600'
-                            : 'border-stone-100 text-stone-400'
-                        }`}
+              sectorReadiness.map(sector => {
+                const rowKey =
+                  normalizeKey((sector as any).sectorKey ?? sector.sector) ||
+                  'unknown'
+                const isGenerating = generatingReportKey === rowKey
+
+                return (
+                  <tr
+                    key={sector.sector}
+                    className='hover:bg-stone-50 border-b border-stone-100'
+                  >
+                    <td className='px-6 py-5'>
+                      <div className='flex flex-col'>
+                        <span className='text-xs font-bold uppercase'>
+                          {safeString(sector.sector, 'Unclassified')}
+                        </span>
+                        <span className='text-[9px] text-stone-400 font-bold uppercase tracking-widest'>
+                          Market Segment
+                        </span>
+                      </div>
+                    </td>
+                    <td className='px-6 py-5'>
+                      <div className='flex items-center gap-3'>
+                        <div
+                          className={`w-10 h-10 border-4 flex items-center justify-center font-bold text-xs ${
+                            safePercent(sector.readinessScore) >= 70
+                              ? 'border-green-500 text-green-600'
+                              : 'border-stone-100 text-stone-400'
+                          }`}
+                        >
+                          {safePercent(sector.readinessScore)}
+                        </div>
+                        <StatusBadge
+                          status={sector.isReady ? 'ready' : 'incomplete'}
+                          variant={sector.isReady ? 'success' : 'neutral'}
+                        />
+                      </div>
+                    </td>
+                    <td className='px-6 py-5 text-center text-xs font-bold font-mono'>
+                      {safeNumber(sector.vendorCount)}
+                    </td>
+                    <td className='px-6 py-5 text-center text-xs font-bold font-mono'>
+                      {safeNumber(sector.productCount)}
+                    </td>
+                    <td className='px-6 py-5'>
+                      {normalizeArray<string>(sector.issues).length > 0 ? (
+                        <div className='flex flex-col gap-1'>
+                          {normalizeArray<string>(sector.issues)
+                            .slice(0, 2)
+                            .map((issue, index) => (
+                              <div
+                                key={`${issue}-${index}`}
+                                className='flex items-center gap-1.5 text-[9px] text-red-500 font-bold uppercase'
+                              >
+                                <AlertTriangle size={10} /> {issue}
+                              </div>
+                            ))}
+                          {normalizeArray<string>(sector.issues).length > 2 && (
+                            <span className='text-[8px] text-stone-400 font-bold italic'>
+                              +
+                              {normalizeArray<string>(sector.issues).length -
+                                2}{' '}
+                              more...
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <div className='flex items-center gap-1.5 text-[9px] text-green-500 font-bold uppercase'>
+                          <Zap size={10} fill='currentColor' /> Optimization Meta
+                          Ready
+                        </div>
+                      )}
+                    </td>
+                    <td className='px-6 py-5'>
+                      <button
+                        type='button'
+                        disabled={isGenerating}
+                        onClick={() =>
+                          handleGenerateSectorReadinessReport(sector)
+                        }
+                        className='btn btn-secondary px-4 py-2 text-[10px] w-full disabled:opacity-60 disabled:cursor-wait'
                       >
-                        {safePercent(sector.readinessScore)}
-                      </div>
-                      <StatusBadge
-                        status={sector.isReady ? 'ready' : 'incomplete'}
-                        variant={sector.isReady ? 'success' : 'neutral'}
-                      />
-                    </div>
-                  </td>
-                  <td className='px-6 py-5 text-center text-xs font-bold font-mono'>
-                    {safeNumber(sector.vendorCount)}
-                  </td>
-                  <td className='px-6 py-5 text-center text-xs font-bold font-mono'>
-                    {safeNumber(sector.productCount)}
-                  </td>
-                  <td className='px-6 py-5'>
-                    {normalizeArray<string>(sector.issues).length > 0 ? (
-                      <div className='flex flex-col gap-1'>
-                        {normalizeArray<string>(sector.issues)
-                          .slice(0, 2)
-                          .map((issue, index) => (
-                            <div
-                              key={`${issue}-${index}`}
-                              className='flex items-center gap-1.5 text-[9px] text-red-500 font-bold uppercase'
-                            >
-                              <AlertTriangle size={10} /> {issue}
-                            </div>
-                          ))}
-                        {normalizeArray<string>(sector.issues).length > 2 && (
-                          <span className='text-[8px] text-stone-400 font-bold italic'>
-                            +{normalizeArray<string>(sector.issues).length - 2}{' '}
-                            more...
-                          </span>
-                        )}
-                      </div>
-                    ) : (
-                      <div className='flex items-center gap-1.5 text-[9px] text-green-500 font-bold uppercase'>
-                        <Zap size={10} fill='currentColor' /> Optimization Meta
-                        Ready
-                      </div>
-                    )}
-                  </td>
-                  <td className='px-6 py-5'>
-                    <button className='btn btn-secondary px-4 py-2 text-[10px] w-full'>
-                      Generate Report
-                    </button>
-                  </td>
-                </tr>
-              ))
+                        {isGenerating ? 'Generating...' : 'Generate Report'}
+                      </button>
+                    </td>
+                  </tr>
+                )
+              })
             ) : (
               <tr>
                 <td
@@ -1918,6 +2163,179 @@ export const BIMarket: React.FC = () => {
                 />
               </div>
             </DataPanel>
+          </div>
+        </div>
+      )}
+
+      {isReportModalOpen && activeReadinessReport && (
+        <div className='fixed inset-0 z-50 bg-black/40 px-3 py-6 print:static print:bg-white print:p-0'>
+          <div className='mx-auto h-[90vh] w-[96vw] max-w-[1100px] overflow-auto border-t-4 border-brand-orange bg-white shadow-xl print:h-auto print:w-full print:max-w-none print:overflow-visible print:border-t-0 print:shadow-none'>
+            <div className='sticky top-0 z-10 flex flex-col gap-4 border-b border-stone-200 bg-white px-6 py-5 md:flex-row md:items-center md:justify-between print:static'>
+              <div>
+                <p className='text-[9px] font-bold uppercase tracking-[0.2em] text-brand-orange'>
+                  BI Market Analytics
+                </p>
+                <h2 className='text-lg font-black uppercase tracking-tight text-brand-charcoal'>
+                  Sector Readiness Report
+                </h2>
+                <p className='text-xs text-stone-500'>
+                  {activeReadinessReport.sectorLabel} · Generated{' '}
+                  {new Date(
+                    activeReadinessReport.generatedAt
+                  ).toLocaleString()}
+                </p>
+              </div>
+              <div className='flex flex-wrap gap-2 print:hidden'>
+                <PrimaryButton
+                  type='button'
+                  size='sm'
+                  disabled={isSavingReport}
+                  onClick={handleSaveReadinessReport}
+                >
+                  {isSavingReport ? 'Saving...' : 'Save Report'}
+                </PrimaryButton>
+                <SecondaryButton
+                  type='button'
+                  size='sm'
+                  onClick={handleCopyReadinessWhatsAppSummary}
+                >
+                  Copy WhatsApp Summary
+                </SecondaryButton>
+                <SecondaryButton
+                  type='button'
+                  size='sm'
+                  onClick={handlePrintReadinessReport}
+                >
+                  Print Report
+                </SecondaryButton>
+                <button
+                  type='button'
+                  onClick={() => setIsReportModalOpen(false)}
+                  className='btn btn-secondary px-3 py-1.5 text-[9px]'
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+
+            <div className='space-y-6 p-6'>
+              {readinessReportMessage && (
+                <div className='border-l-4 border-brand-orange bg-orange-50 px-4 py-3 text-xs font-bold uppercase text-brand-charcoal print:hidden'>
+                  {readinessReportMessage}
+                </div>
+              )}
+
+              <section className='grid gap-4 md:grid-cols-4'>
+                <div className='border border-stone-200 p-4'>
+                  <p className='text-[9px] font-bold uppercase tracking-widest text-stone-400'>
+                    Sector
+                  </p>
+                  <p className='mt-2 text-sm font-black uppercase'>
+                    {activeReadinessReport.sectorLabel}
+                  </p>
+                </div>
+                <div className='border border-stone-200 p-4'>
+                  <p className='text-[9px] font-bold uppercase tracking-widest text-stone-400'>
+                    Readiness Score
+                  </p>
+                  <p className='mt-2 text-2xl font-black'>
+                    {activeReadinessReport.score}/100
+                  </p>
+                </div>
+                <div className='border border-stone-200 p-4'>
+                  <p className='text-[9px] font-bold uppercase tracking-widest text-stone-400'>
+                    Vendors
+                  </p>
+                  <p className='mt-2 text-2xl font-black'>
+                    {activeReadinessReport.vendorCount}
+                  </p>
+                </div>
+                <div className='border border-stone-200 p-4'>
+                  <p className='text-[9px] font-bold uppercase tracking-widest text-stone-400'>
+                    Products
+                  </p>
+                  <p className='mt-2 text-2xl font-black'>
+                    {activeReadinessReport.productCount}
+                  </p>
+                </div>
+              </section>
+
+              <section className='border border-stone-200 p-5'>
+                <h3 className='text-xs font-black uppercase tracking-widest'>
+                  Executive Summary
+                </h3>
+                <p className='mt-3 text-sm leading-6 text-stone-700'>
+                  {activeReadinessReport.sectorLabel} is currently classified
+                  as{' '}
+                  <span className='font-black uppercase'>
+                    {activeReadinessReport.readinessLevel}
+                  </span>{' '}
+                  with a score of {activeReadinessReport.score}/100. The report
+                  uses current vendor density, product coverage and readiness
+                  issues from the BI Market scorecard.
+                </p>
+              </section>
+
+              <section className='grid gap-6 lg:grid-cols-2'>
+                <div className='border border-stone-200 p-5'>
+                  <h3 className='text-xs font-black uppercase tracking-widest'>
+                    Issues
+                  </h3>
+                  <ul className='mt-3 space-y-2 text-sm text-stone-700'>
+                    {activeReadinessReport.issues.map((issue, index) => (
+                      <li key={`${issue}-${index}`} className='flex gap-2'>
+                        <span className='mt-1 h-2 w-2 shrink-0 bg-red-500' />
+                        <span>{issue}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div className='border border-stone-200 p-5'>
+                  <h3 className='text-xs font-black uppercase tracking-widest'>
+                    Recommendations
+                  </h3>
+                  <ul className='mt-3 space-y-2 text-sm text-stone-700'>
+                    {activeReadinessReport.recommendations.map(
+                      (recommendation, index) => (
+                        <li
+                          key={`${recommendation}-${index}`}
+                          className='flex gap-2'
+                        >
+                          <span className='mt-1 h-2 w-2 shrink-0 bg-brand-orange' />
+                          <span>{recommendation}</span>
+                        </li>
+                      )
+                    )}
+                  </ul>
+                </div>
+              </section>
+
+              <section className='border border-stone-200 p-5'>
+                <h3 className='text-xs font-black uppercase tracking-widest'>
+                  Action Plan
+                </h3>
+                <ol className='mt-3 space-y-2 text-sm text-stone-700'>
+                  {activeReadinessReport.actionPlan.map((action, index) => (
+                    <li key={`${action}-${index}`} className='flex gap-3'>
+                      <span className='font-mono text-xs font-black text-brand-orange'>
+                        {index + 1}.
+                      </span>
+                      <span>{action}</span>
+                    </li>
+                  ))}
+                </ol>
+              </section>
+
+              <section className='border border-stone-200 p-5'>
+                <h3 className='text-xs font-black uppercase tracking-widest'>
+                  WhatsApp Summary
+                </h3>
+                <pre className='mt-3 whitespace-pre-wrap border border-stone-100 bg-stone-50 p-4 text-xs leading-5 text-stone-700'>
+                  {activeReadinessReport.whatsappSummary}
+                </pre>
+              </section>
+            </div>
           </div>
         </div>
       )}

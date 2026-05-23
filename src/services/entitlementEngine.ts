@@ -8,6 +8,9 @@ import {
   getBillableProductsForVendor,
 } from "../utils/planQuotaUtils.ts";
 import { sanitizeForFirestore } from "../utils/firestoreSanitize.ts";
+import { inventorySpotCheckService } from "./inventorySpotCheckService.ts";
+import { vendorBillingService } from "./vendorBillingService.ts";
+import { vendorInventorySpotCheckService } from "./vendorInventorySpotCheckService.ts";
 
 export interface VendorUsage {
   products: number;
@@ -164,6 +167,27 @@ const isActiveBrandedProductsAddOn = (addOn: any) => {
   return true;
 };
 
+const isActiveAddOn = (addOn: any, keys: string[]) => {
+  if (!addOn) return false;
+  if (!keys.includes(String(addOn.addOnKey || ""))) return false;
+  if (addOn.enabled === false) return false;
+  const status = String(addOn.status || "active").toLowerCase();
+  if (!["active", "trial", "paid"].includes(status)) return false;
+  const now = new Date();
+  if (addOn.startsAt && new Date(addOn.startsAt) > now) return false;
+  if (addOn.endsAt && new Date(addOn.endsAt) < now) return false;
+  return true;
+};
+
+const addQuota = (
+  included: number | "unlimited",
+  addOnQuantity: number,
+): number | "unlimited" =>
+  included === "unlimited" ? "unlimited" : Math.max(0, included + addOnQuantity);
+
+const monthKey = (value?: string) =>
+  String(value || new Date().toISOString().slice(0, 7)).slice(0, 7);
+
 export function getEffectiveBrandedProductLimit(
   plan: any,
   subscription?: any,
@@ -247,6 +271,192 @@ export function canUseBrandedProducts(input: {
   }
 
   return { allowed: true, severity: "ok", reasons: [] };
+}
+
+export function getEffectiveSpotCheckLimit(
+  plan: any,
+  subscription?: any,
+): number | "unlimited" {
+  if (!plan) return 0;
+  const included = numericLimit(
+    plan.spotChecksIncludedPerMonth ?? plan.inventorySpotChecksPerMonth,
+    0,
+  );
+  if (included === "unlimited") return "unlimited";
+  const addOnQuantity = (subscription?.addOns || [])
+    .filter((addOn: any) =>
+      isActiveAddOn(addOn, ["spot_checks", "inventory_spot_checks"]),
+    )
+    .reduce(
+      (sum: number, addOn: any) =>
+        sum + Math.max(0, Number(addOn.quantity) || 0),
+      0,
+    );
+  return addQuota(included, addOnQuantity);
+}
+
+export function getEffectiveStocktakeLimit(
+  plan: any,
+  subscription?: any,
+): number | "unlimited" {
+  if (!plan) return 0;
+  const included = numericLimit(plan.stocktakesIncludedPerMonth, 0);
+  if (included === "unlimited") return "unlimited";
+  const addOnQuantity = (subscription?.addOns || [])
+    .filter((addOn: any) => isActiveAddOn(addOn, ["stocktake", "stocktakes"]))
+    .reduce(
+      (sum: number, addOn: any) =>
+        sum + Math.max(0, Number(addOn.quantity) || 0),
+      0,
+    );
+  return addQuota(included, addOnQuantity);
+}
+
+export function calculateSpotCheckUsage(
+  vendorId: string,
+  month = monthKey(),
+): number {
+  const monthPrefix = monthKey(month);
+  const legacyChecks = inventorySpotCheckService
+    .getSpotChecks()
+    .filter(
+      (check: any) =>
+        check.vendorId === vendorId &&
+        String(check.completedAt || check.checkDate || check.createdAt || "")
+          .slice(0, 7) === monthPrefix &&
+        check.status !== "cancelled",
+    ).length;
+  const inventoryChecks = vendorInventorySpotCheckService
+    .getSpotChecks()
+    .filter(
+      (check: any) =>
+        check.vendorId === vendorId &&
+        String(check.approvedAt || check.updatedAt || check.createdAt || "")
+          .slice(0, 7) === monthPrefix &&
+        check.status !== "cancelled" &&
+        check.status !== "rejected",
+    ).length;
+  return legacyChecks + inventoryChecks;
+}
+
+export function calculateStocktakeUsage(
+  vendorId: string,
+  month = monthKey(),
+): number {
+  const monthPrefix = monthKey(month);
+  return vendorBillingService
+    .getJobs(vendorId)
+    .filter(
+      (job: any) =>
+        job.jobType === "stocktake" &&
+        String(job.completedAt || job.jobDate || job.createdAt || "").slice(0, 7) ===
+          monthPrefix &&
+        job.status !== "cancelled",
+    ).length;
+}
+
+const inventoryControlCheck = (input: {
+  vendorId: string;
+  plan: any;
+  subscription?: any;
+  usage?: number;
+  limit: number | "unlimited";
+  enabled: boolean;
+  label: string;
+  addOnAllowed: boolean;
+  addOnName: string;
+}): EntitlementCheckResult => {
+  const usage = Number(input.usage || 0);
+  if (!input.enabled) {
+    return {
+      allowed: false,
+      severity: "blocked",
+      reasons: [
+        {
+          key: input.addOnName,
+          label: input.label,
+          used: usage,
+          limit: 0,
+          overBy: usage + 1,
+          message: input.addOnAllowed
+            ? `${input.label} add-on is available but not active for this vendor.`
+            : `${input.label} is not enabled for this vendor plan.`,
+        },
+      ],
+    };
+  }
+  if (input.limit !== "unlimited" && usage >= Number(input.limit)) {
+    return {
+      allowed: false,
+      severity: "blocked",
+      reasons: [
+        {
+          key: input.addOnName,
+          label: input.label,
+          used: usage + 1,
+          limit: Number(input.limit),
+          overBy: usage + 1 - Number(input.limit),
+          message: `${input.label} quota exceeded (${usage}/${input.limit}). Add the add-on or upgrade plan.`,
+        },
+      ],
+    };
+  }
+  return { allowed: true, severity: "ok", reasons: [] };
+};
+
+export function canUseInventorySpotChecks(input: {
+  vendorId: string;
+  plan: any;
+  subscription?: any;
+  usage?: number;
+}): EntitlementCheckResult {
+  const limit = getEffectiveSpotCheckLimit(input.plan, input.subscription);
+  const enabled =
+    !!input.plan?.enableInventorySpotChecks ||
+    !!input.plan?.isInventorySpotCheckIncluded ||
+    limit === "unlimited" ||
+    Number(limit) > 0 ||
+    (input.subscription?.addOns || []).some((addOn: any) =>
+      isActiveAddOn(addOn, ["spot_checks", "inventory_spot_checks"]),
+    );
+  return inventoryControlCheck({
+    vendorId: input.vendorId,
+    plan: input.plan,
+    subscription: input.subscription,
+    usage: input.usage ?? calculateSpotCheckUsage(input.vendorId),
+    limit,
+    enabled,
+    label: "Inventory Spot Checks",
+    addOnAllowed: !!input.plan?.allowSpotCheckAddOn,
+    addOnName: "inventorySpotChecks",
+  });
+}
+
+export function canUseStocktake(input: {
+  vendorId: string;
+  plan: any;
+  subscription?: any;
+  usage?: number;
+}): EntitlementCheckResult {
+  const limit = getEffectiveStocktakeLimit(input.plan, input.subscription);
+  const enabled =
+    !!input.plan?.enableStocktake ||
+    limit === "unlimited" ||
+    Number(limit) > 0 ||
+    (input.subscription?.addOns || []).some((addOn: any) =>
+      isActiveAddOn(addOn, ["stocktake", "stocktakes"]),
+    );
+  return inventoryControlCheck({
+    vendorId: input.vendorId,
+    plan: input.plan,
+    subscription: input.subscription,
+    usage: input.usage ?? calculateStocktakeUsage(input.vendorId),
+    limit,
+    enabled,
+    label: "Stocktake",
+    addOnAllowed: !!input.plan?.allowStocktakeAddOn,
+    addOnName: "stocktake",
+  });
 }
 
 /**

@@ -2616,11 +2616,11 @@ const FinanceDesk: React.FC = () => {
           </div>
           <div className="bg-white border-2 border-brand-orange p-5">
             <h2 className="text-sm font-black uppercase text-brand-charcoal">
-              Phase 1 Boundary
+              Console Cashbook Active
             </h2>
             <p className="text-xs text-stone-500 mt-2">
-              Payments, receipts, journals, ledger posting, exports and approval
-              workflow remain disabled until later phases.
+              Use Cash & Bank Manager for iTred Console receipts, payments,
+              transfers and ledger posting.
             </p>
           </div>
         </section>

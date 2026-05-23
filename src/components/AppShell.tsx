@@ -16,6 +16,7 @@ import {
   ChevronRight,
   ClipboardCheck,
   CreditCard,
+  FileSpreadsheet,
   FileCode,
   FileText,
   Globe,
@@ -126,7 +127,12 @@ const MENU_GROUPS: {
         label: 'WhatsApp Reports',
         icon: BarChart3
       },
-      { id: AppRoute.SPOT_CHECKS, label: 'Spot Checks', icon: ClipboardCheck }
+      { id: AppRoute.SPOT_CHECKS, label: 'Spot Checks', icon: ClipboardCheck },
+      {
+        id: AppRoute.VENDOR_INVENTORY_SPOT_CHECKS,
+        label: 'Vendor Inventory Spot Checks',
+        icon: FileSpreadsheet
+      }
     ]
   },
   {
@@ -165,6 +171,11 @@ const MENU_GROUPS: {
         id: AppRoute.FINANCE_DESK,
         label: 'Finance Desk',
         icon: LayoutDashboard
+      },
+      {
+        id: AppRoute.VENDOR_BILLS,
+        label: 'Vendor Bills / Receivables',
+        icon: FileText
       },
       {
         id: AppRoute.CASH_BANK_MANAGER,
@@ -412,6 +423,7 @@ export const AppShell: React.FC<AppShellProps> = ({
       [AppRoute.BI_MARKET]: 'biMarketAnalytics',
       [AppRoute.ACTIVITY_LOGS]: 'activityLogs',
       [AppRoute.SPOT_CHECKS]: 'inventorySpotChecks',
+      [AppRoute.VENDOR_INVENTORY_SPOT_CHECKS]: 'inventorySpotChecks',
       [AppRoute.STAFF_MGMT]: 'staffManagement',
       [AppRoute.ADMIN_DASHBOARD]: 'adminDashboard',
       [AppRoute.ROLE_MENU_PERMISSIONS]: 'roleMenuPermissions',
@@ -422,6 +434,7 @@ export const AppShell: React.FC<AppShellProps> = ({
       [AppRoute.STAFF_TASKS]: 'staffTasks',
       [AppRoute.RPN_PERFORMANCE]: 'rpnPerformance',
       [AppRoute.FINANCE_DESK]: 'financeDesk',
+      [AppRoute.VENDOR_BILLS]: 'financeDesk',
       [AppRoute.CASH_BANK_MANAGER]: 'cashBankManager',
       [AppRoute.RPN_PAYMENTS_LEDGER]: 'rpnPaymentsLedger',
       [AppRoute.FINANCE_REPORTS]: 'financeReports',

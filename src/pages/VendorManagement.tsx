@@ -19,6 +19,7 @@ import {
   DollarSign,
   Package,
   FileCode,
+  FileText,
   Save,
   X,
   PlusCircle,
@@ -32,7 +33,8 @@ import {
   CheckCircle2,
   AlertTriangle,
   Loader2,
-  Download
+  Download,
+  Printer
 } from 'lucide-react'
 import {
   TablePanel,
@@ -61,6 +63,7 @@ import { settingsService } from '../services/settingsService.ts'
 import { taxonomyService } from '../services/taxonomyService.ts'
 import { vendorReadinessService } from '../services/vendorReadinessService.ts'
 import { productService } from '../services/productService.ts'
+import { vendorBillingService } from '../services/vendorBillingService.ts'
 import VendorProductOfferSheet from '../components/VendorProductOfferSheet.tsx'
 import {
   Vendor,
@@ -93,6 +96,7 @@ import {
   exportVendorProductRows
 } from '../utils/vendorProductExport.ts'
 import { buildSearchText } from '../utils/searchUtils.ts'
+import { printVendorInvoice } from '../utils/vendorInvoicePrint.ts'
 import { useFormDraft } from '../hooks/useFormDraft.ts'
 import { offlineSyncService } from '../services/offlineSyncService.ts'
 import {
@@ -662,6 +666,13 @@ export const VendorManagement: React.FC = () => {
   const activeVendorId = String(selectedVendor?.id || '')
   const activeVendorName =
     formData.tradingName || formData.name || selectedVendor?.tradingName || selectedVendor?.name || 'Vendor'
+  const activeVendorPlan = useMemo(
+    () =>
+      plans.find(
+        plan => plan.id === (selectedVendor?.planId || formData.planId || '')
+      ),
+    [formData.planId, plans, selectedVendor?.planId]
+  )
   const activeVendorProductOffers = useMemo(
     () =>
       vendorProductOffers.filter(
@@ -1642,6 +1653,81 @@ export const VendorManagement: React.FC = () => {
     })
   }
 
+  const handleGenerateVendorBill = () => {
+    if (!selectedVendor) {
+      showBrandedAlert({
+        message: 'Save or select a vendor before generating a bill.',
+        type: 'warning'
+      })
+      return
+    }
+    const result = vendorBillingService.generateInvoice({
+      vendor: selectedVendor,
+      plan: activeVendorPlan,
+      dueDate: selectedVendor.subscriptionDueDate,
+      includeCompletedJobs: true,
+      notes: 'Generated from Vendor Management.'
+    })
+    showBrandedAlert({
+      message: `Generated vendor bill ${result.invoice.invoiceNumber}.`,
+      type: 'success'
+    })
+  }
+
+  const handlePrintLatestVendorBill = () => {
+    if (!selectedVendor) return
+    const invoice = vendorBillingService
+      .getInvoices()
+      .filter(item => item.vendorId === selectedVendor.id)
+      .sort(
+        (a, b) =>
+          Number(b.balanceDue > 0) - Number(a.balanceDue > 0) ||
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      )[0]
+    if (!invoice) {
+      showBrandedAlert({
+        message: 'No vendor bill exists yet. Generate a bill first.',
+        type: 'info'
+      })
+      return
+    }
+    printVendorInvoice(invoice, selectedVendor)
+  }
+
+  const handleAddVendorJob = () => {
+    if (!selectedVendor) {
+      showBrandedAlert({
+        message: 'Save or select a vendor before adding a job.',
+        type: 'warning'
+      })
+      return
+    }
+    const description = window.prompt(
+      'Vendor job description',
+      'Manual charge'
+    )
+    if (!description) return
+    const amountText = window.prompt('Unit price / charge amount', '0')
+    const amount = Number(amountText || 0)
+    vendorBillingService.saveJob({
+      vendorId: selectedVendor.id,
+      vendorName: activeVendorName,
+      jobType: 'manual_charge',
+      description,
+      requestedBy: getSessionStaffName(getSession(), 'SCI Staff'),
+      status: 'completed',
+      jobDate: new Date().toISOString().slice(0, 10),
+      quantity: 1,
+      unitPrice: Number.isFinite(amount) ? amount : 0,
+      taxable: false,
+      taxRate: 0
+    })
+    showBrandedAlert({
+      message: 'Vendor job saved. It can be attached to the next bill.',
+      type: 'success'
+    })
+  }
+
   if (isLoadingData) {
     return (
       <div className="pb-20 min-w-0 max-w-full overflow-x-hidden flex items-center justify-center pt-20">
@@ -1743,6 +1829,52 @@ export const VendorManagement: React.FC = () => {
         </div>
       </DataPanel>
     )
+    const billingPanel = selectedVendor ? (
+      <DataPanel
+        title='Vendor Billing & Service Jobs'
+        subtitle='Generate bills, print vendor invoices, review receivables and log chargeable service jobs.'
+        className='border-t-4 border-t-brand-orange'
+      >
+        <div className='p-6 space-y-4'>
+          <div className='grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4'>
+            <PrimaryButton onClick={handleGenerateVendorBill}>
+              <FileText size={14} className='mr-2 inline' /> Generate Bill
+            </PrimaryButton>
+            <SecondaryButton onClick={handlePrintLatestVendorBill}>
+              <Printer size={14} className='mr-2 inline' /> Print Vendor Bill
+            </SecondaryButton>
+            <SecondaryButton
+              onClick={() => window.location.assign('/finance/vendor-bills')}
+            >
+              <DollarSign size={14} className='mr-2 inline' /> View Billing
+              History
+            </SecondaryButton>
+            <SecondaryButton
+              onClick={() => window.location.assign('/finance/vendor-bills')}
+            >
+              <DollarSign size={14} className='mr-2 inline' /> Record Payment
+            </SecondaryButton>
+            <SecondaryButton onClick={handleAddVendorJob}>
+              <Briefcase size={14} className='mr-2 inline' /> Add Vendor Job
+            </SecondaryButton>
+          </div>
+          <div className='grid grid-cols-1 gap-2 text-[9px] font-bold uppercase text-stone-500 sm:grid-cols-4'>
+            <div className='border border-stone-200 bg-white p-2'>
+              Plan: {activeVendorPlan?.name || 'No active plan'}
+            </div>
+            <div className='border border-stone-200 bg-white p-2'>
+              Subscription: {selectedVendor.subscriptionStatus || 'unknown'}
+            </div>
+            <div className='border border-stone-200 bg-white p-2'>
+              Due Date: {selectedVendor.subscriptionDueDate || 'not set'}
+            </div>
+            <div className='border border-stone-200 bg-white p-2'>
+              Billing Route: /finance/vendor-bills
+            </div>
+          </div>
+        </div>
+      </DataPanel>
+    ) : null
     return (
       <div className='space-y-8 pb-32 min-w-0 max-w-full overflow-x-hidden'>
         <BrandedAlertModal
@@ -1839,6 +1971,7 @@ export const VendorManagement: React.FC = () => {
         )}
 
         {selectedVendor && productInventoryPanel}
+        {billingPanel}
 
         <div className='grid grid-cols-1 gap-8 min-w-0 xl:[grid-template-columns:minmax(0,2fr)_minmax(0,1fr)]'>
           <div className='min-w-0 space-y-8'>

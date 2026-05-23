@@ -27,6 +27,7 @@ import { Analytics } from "./pages/Analytics.tsx";
 import { BIMarket } from "./pages/BIMarket.tsx";
 import { ActivityLogs } from "./pages/ActivityLogs.tsx";
 import { InventorySpotChecks } from "./pages/InventorySpotChecks.tsx";
+import { VendorInventorySpotChecks } from "./pages/VendorInventorySpotChecks.tsx";
 import { StaffManagement } from "./pages/StaffManagement.tsx";
 import { AdminDashboard } from "./pages/AdminDashboard.tsx";
 import { RoleMenuPermissions } from "./pages/RoleMenuPermissions.tsx";
@@ -40,6 +41,7 @@ import { ApprovalQueue } from "./pages/ApprovalQueue.tsx";
 import { StaffTasks } from "./pages/StaffTasks.tsx";
 import { Notifications } from "./pages/Notifications.tsx";
 import FinanceDesk from "./pages/FinanceDesk.tsx";
+import VendorBillsReceivables from "./pages/VendorBillsReceivables.tsx";
 import CashBankManager from "./pages/CashBankManager.tsx";
 import RPNPaymentsLedger from "./pages/RPNPaymentsLedger.tsx";
 import FinanceReports from "./pages/FinanceReports.tsx";
@@ -110,6 +112,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   // Map path to AppRoute enum
   const getActiveRoute = (): AppRoute => {
+    if (location.pathname.startsWith("/spot-checks/vendor-inventory")) {
+      return AppRoute.VENDOR_INVENTORY_SPOT_CHECKS;
+    }
+    if (location.pathname.startsWith("/finance/vendor-bills")) {
+      return AppRoute.VENDOR_BILLS;
+    }
     const path = location.pathname.split("/")[1] as AppRoute;
     return path || AppRoute.DASHBOARD;
   };
@@ -136,6 +144,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     [AppRoute.PERFORMANCE_METRICS]: "Performance Metrics",
     [AppRoute.ACTIVITY_LOGS]: "Activity Logs",
     [AppRoute.SPOT_CHECKS]: "Inventory Spot Checks",
+    [AppRoute.VENDOR_INVENTORY_SPOT_CHECKS]: "Vendor Inventory Spot Checks",
     [AppRoute.STAFF_MGMT]: "Staff Management",
     [AppRoute.ADMIN_DASHBOARD]: "Admin Dashboard",
     [AppRoute.ROLE_MENU_PERMISSIONS]: "Role & Menu Permissions",
@@ -148,6 +157,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     [AppRoute.STAFF_TASKS]: "Staff Tasks",
     [AppRoute.RPN_PERFORMANCE]: "RPN Performance",
     [AppRoute.FINANCE_DESK]: "Finance Desk",
+    [AppRoute.VENDOR_BILLS]: "Vendor Bills / Receivables",
     [AppRoute.CASH_BANK_MANAGER]: "Cash & Bank Manager",
     [AppRoute.RPN_PAYMENTS_LEDGER]: "RPN Payments Ledger",
     [AppRoute.FINANCE_REPORTS]: "Finance Reports",
@@ -177,6 +187,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       "bi-market": "biMarketAnalytics",
       "activity-logs": "activityLogs",
       "inventory-spot-checks": "inventorySpotChecks",
+      "spot-checks/vendor-inventory": "inventorySpotChecks",
       "staff-management": "staffManagement",
       "admin-dashboard": "adminDashboard",
       "role-menu-permissions": "roleMenuPermissions",
@@ -188,6 +199,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       "staff-tasks": "staffTasks",
       "rpn-performance": "rpnPerformance",
       "finance-desk": "financeDesk",
+      "finance/vendor-bills": "financeDesk",
       "cash-bank-manager": "cashBankManager",
       "rpn-payments-ledger": "rpnPaymentsLedger",
       "finance-reports": "financeReports",
@@ -448,6 +460,16 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             )
           }
         />
+        <Route
+          path="/spot-checks/vendor-inventory"
+          element={
+            checkAccess("spot-checks/vendor-inventory") ? (
+              <VendorInventorySpotChecks />
+            ) : (
+              <RestrictedAccess />
+            )
+          }
+        />
         <Route path="/staff-management" element={<StaffManagement />} />
         <Route
           path="/admin-dashboard"
@@ -529,6 +551,16 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           path="/finance-desk"
           element={
             checkAccess("finance-desk") ? <FinanceDesk /> : <RestrictedAccess />
+          }
+        />
+        <Route
+          path="/finance/vendor-bills"
+          element={
+            checkAccess("finance/vendor-bills") ? (
+              <VendorBillsReceivables />
+            ) : (
+              <RestrictedAccess />
+            )
           }
         />
         <Route

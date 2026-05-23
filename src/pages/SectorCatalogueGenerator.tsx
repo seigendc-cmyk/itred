@@ -326,18 +326,32 @@ const normalizeFilterValue = (value?: string | null) => {
   return String(value).trim().toLowerCase()
 }
 
-const categoryMatchesProduct = (item: any, selectedCategory: string) => {
-  const nCategory = normalizeFilterValue(selectedCategory)
-  if (!nCategory) return true
+const normalizeCatalogueFilterText = (value: unknown) =>
+  String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, 'and')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
 
-  return [
+const categoryMatchesProduct = (item: any, selectedCategory: string) => {
+  const nCategory = normalizeCatalogueFilterText(selectedCategory)
+  if (!nCategory || nCategory === 'all' || nCategory === 'all categories')
+    return true
+
+  const productCategories = [
     item.category,
     item.productCategory,
     item.categoryName,
     item.masterCategory
   ]
-    .map(normalizeFilterValue)
-    .includes(nCategory)
+    .map(normalizeCatalogueFilterText)
+    .filter(Boolean)
+
+  if (productCategories.length === 0) return true
+
+  return productCategories.includes(nCategory)
 }
 
 const getVendorDisplayName = (row: any) =>
@@ -604,7 +618,10 @@ const buildCatalogueProductFromOffer = (
       },
       maxImages
     )
-    const metrics = listingImageMetrics({ ...offer, imageUrl, images }, maxImages)
+    const metrics = listingImageMetrics(
+      { ...offer, imageUrl, images },
+      maxImages
+    )
 
     return {
       id: offer.id,
@@ -703,7 +720,10 @@ const buildCatalogueProductFromOffer = (
     },
     maxImages
   )
-  const metrics = listingImageMetrics({ ...master, ...offer, imageUrl, images }, maxImages)
+  const metrics = listingImageMetrics(
+    { ...master, ...offer, imageUrl, images },
+    maxImages
+  )
   const searchableParts = [
     productName,
     master.brand,
@@ -1139,8 +1159,8 @@ export const SectorCatalogueGenerator: React.FC = () => {
           const expirationHistory = Array.isArray(expirationResult)
             ? expirationResult
             : Array.isArray(expirationResult?.history)
-              ? expirationResult.history
-              : loadedHistory
+            ? expirationResult.history
+            : loadedHistory
 
           setHistory(asArray<CatalogueGeneration>(expirationHistory))
         } catch (error: any) {
@@ -1421,7 +1441,7 @@ export const SectorCatalogueGenerator: React.FC = () => {
     )
     const vendorById = new Map(safeVendors.map(vendor => [vendor.id, vendor]))
 
-    return safeVendorProductOffers
+    const mapped = safeVendorProductOffers
       .filter(offer => selectedVendorIds.has(offer.vendorId))
       .filter(offer => offer.active !== false)
       .filter(offer => {
@@ -1454,6 +1474,36 @@ export const SectorCatalogueGenerator: React.FC = () => {
         return buildCatalogueProductFromOffer(offer, master, vendor)
       })
       .filter(Boolean) as Product[]
+
+    const deduplicated: Product[] = []
+    const seen = new Set<string>()
+    let linkedOfferProductsCount = 0
+    let brandedVendorProductsCount = 0
+
+    for (const p of mapped) {
+      const key =
+        p.productMode === 'branded_product'
+          ? p.id
+          : p.offerId || `${p.vendorId}_${p.masterProductId}`
+
+      if (!seen.has(key)) {
+        seen.add(key)
+        deduplicated.push(p)
+        if (p.productMode === 'branded_product') {
+          brandedVendorProductsCount++
+        } else {
+          linkedOfferProductsCount++
+        }
+      }
+    }
+
+    console.log('Export Product Pipeline Counts:', {
+      linkedOfferProducts: linkedOfferProductsCount,
+      brandedVendorProducts: brandedVendorProductsCount,
+      combinedExportProducts: deduplicated.length
+    })
+
+    return deduplicated
   }, [
     config.vendorIds,
     config.category,
@@ -1526,33 +1576,45 @@ export const SectorCatalogueGenerator: React.FC = () => {
   )
 
   const rawSelectedProducts = useMemo(() => {
-    let filtered =
-      safeVendorProductOffers.length > 0
-        ? catalogueOfferProducts
-        : safeProducts.filter(p => config.vendorIds.includes(p.vendorId))
+    const combined = [...catalogueOfferProducts]
+    const seen = new Set(combined.map(p => p.id))
+
+    safeProducts.forEach(p => {
+      if (config.vendorIds.includes(p.vendorId) && !seen.has(p.id)) {
+        combined.push(p)
+        seen.add(p.id)
+      }
+    })
+
+    let filtered = combined
 
     if (config.onlyActive) {
-      filtered = filtered.filter(p =>
-        config.includeOutOfStock
-          ? p.status === 'active' || p.status === 'out_of_stock'
-          : p.status === 'active'
-      )
+      filtered = filtered.filter(p => {
+        const isActive =
+          p.status === 'active' ||
+          (p as any).active === true ||
+          p.publishToCatalogue === true ||
+          (p as any).catalogue === true
+        return config.includeOutOfStock
+          ? isActive || p.status === 'out_of_stock'
+          : isActive
+      })
     }
     if (config.onlyPublished) {
       filtered = filtered.filter(p => p.publishToCatalogue !== false)
     }
     filtered = filtered.filter(p => categoryMatchesProduct(p, config.category))
     if (!config.includeOutOfStock) {
-      filtered = filtered.filter(p => p.stockQuantity > 0)
+      filtered = filtered.filter(
+        p =>
+          Number(p.stockQuantity) > 0 ||
+          p.stockQuantity === undefined ||
+          (p as any).stockStatus === 'in_stock'
+      )
     }
 
     return filtered
-  }, [
-    catalogueOfferProducts,
-    safeProducts,
-    safeVendorProductOffers.length,
-    config
-  ])
+  }, [catalogueOfferProducts, safeProducts, config])
 
   const productSignalCounts = useMemo(() => {
     const counts = new Map<string, number>()
@@ -2596,11 +2658,29 @@ export const SectorCatalogueGenerator: React.FC = () => {
 
   const handleGenerate = async (mode: 'new' | 'update' | 'replace' = 'new') => {
     const startedAt = performance.now()
-    if (config.vendorIds.length === 0 || !config.sector || !config.category) {
+    if (config.vendorIds.length === 0) {
+      showBrandedAlert({
+        title: 'seiGEN Commerce',
+        message: 'Select at least one vendor before creating a catalogue.',
+        type: 'warning'
+      })
+      return
+    }
+
+    if (!config.sector || !config.category) {
+      showBrandedAlert({
+        title: 'seiGEN Commerce',
+        message: 'Please provide Sector and Category.',
+        type: 'warning'
+      })
+      return
+    }
+
+    if (allSelectedProducts.length === 0) {
       showBrandedAlert({
         title: 'seiGEN Commerce',
         message:
-          'Please provide Sector, Category and select at least one vendor.',
+          'No selected products found. Either select products or turn off Selected Products Only.',
         type: 'warning'
       })
       return
@@ -2785,6 +2865,18 @@ export const SectorCatalogueGenerator: React.FC = () => {
           : optimizationResult.products
 
       if (!optimizedProducts?.length) {
+        console.warn('Catalogue export pipeline empty: diagnostics below')
+        console.table({
+          selectedVendorIdsCount: config.vendorIds?.length || 0,
+          selectedSector: config.sector || 'not available',
+          selectedCategory: config.category || 'not available',
+          rawProductsCount: safeProducts?.length || 0,
+          rawOffersCount: safeVendorProductOffers?.length || 0,
+          afterVendorActiveStockCategoryFilter:
+            rawSelectedProducts?.length || 0,
+          afterEntitlementFilter: allSelectedProducts?.length || 0,
+          afterOptimizationFilter: optimizedProducts?.length || 0
+        })
         throw new Error(
           'No products available for export after filtering pipeline.'
         )

@@ -18,6 +18,7 @@ export enum AppRoute {
   PERFORMANCE_METRICS = "performance-metrics",
   ACTIVITY_LOGS = "activity-logs",
   SPOT_CHECKS = "inventory-spot-checks",
+  VENDOR_INVENTORY_SPOT_CHECKS = "spot-checks/vendor-inventory",
   STAFF_MGMT = "staff-management",
   ADMIN_DASHBOARD = "admin-dashboard",
   ROLE_MENU_PERMISSIONS = "role-menu-permissions",
@@ -33,6 +34,7 @@ export enum AppRoute {
   STAFF_TASKS = "staff-tasks",
   RPN_PERFORMANCE = "rpn-performance",
   FINANCE_DESK = "finance-desk",
+  VENDOR_BILLS = "finance/vendor-bills",
   CASH_BANK_MANAGER = "cash-bank-manager",
   RPN_PAYMENTS_LEDGER = "rpn-payments-ledger",
   FINANCE_REPORTS = "finance-reports",
@@ -340,6 +342,34 @@ export interface FinanceLedgerEntry {
   status: "draft" | "posted" | "void";
   createdByStaffId?: string;
   createdByStaffName?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CashbookTransaction {
+  id: string;
+  transactionNumber: string;
+  transactionType: "receipt" | "payment" | "deposit" | "transfer" | "adjustment";
+  accountId: string;
+  accountName: string;
+  destinationAccountId: string | null;
+  destinationAccountName: string | null;
+  vendorId: string | null;
+  vendorName: string | null;
+  invoiceId: string | null;
+  invoiceNumber: string | null;
+  jobId: string | null;
+  jobNumber: string | null;
+  amount: number;
+  currency: string;
+  paymentMethod: string | null;
+  reference: string | null;
+  transactionDate: string;
+  description: string;
+  direction: "in" | "out" | "transfer";
+  status: "draft" | "posted" | "void";
+  postedAt: string | null;
+  postedByStaffId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1090,6 +1120,20 @@ export interface PricingPlan {
   isVendorWhatsAppChannelLinkEnabled: boolean;
   isInventorySpotCheckIncluded: boolean;
   inventorySpotChecksPerMonth: number;
+  enableInventorySpotChecks?: boolean;
+  enableStocktake?: boolean;
+  spotChecksIncludedPerMonth?: number | "unlimited";
+  stocktakesIncludedPerMonth?: number | "unlimited";
+  allowSpotCheckAddOn?: boolean;
+  spotCheckAddOnPrice?: number;
+  spotCheckAddOnQuantity?: number;
+  allowStocktakeAddOn?: boolean;
+  stocktakeAddOnPrice?: number;
+  stocktakeAddOnQuantity?: number;
+  requireApprovalForSpotCheck?: boolean;
+  requireApprovalForStocktake?: boolean;
+  allowRpnSpotChecks?: boolean;
+  allowRpnStocktake?: boolean;
   biAnalyticsLevel: BIAnalyticsLevel;
   rpnSupportLevel: RPNSupportLevel;
   isVendorStorefrontEnabled: boolean;
@@ -1648,6 +1692,111 @@ export interface InventorySpotCheck {
   updatedAt: string;
 }
 
+export type VendorInventorySpotCheckSource =
+  | "excel_import"
+  | "manual_entry"
+  | "system_generated";
+
+export type VendorInventorySpotCheckStatus =
+  | "draft"
+  | "pending_review"
+  | "approved"
+  | "rejected"
+  | "posted"
+  | "cancelled";
+
+export type VendorInventorySpotCheckMatchStatus =
+  | "matched_by_offer_id"
+  | "matched_by_sku_vendor"
+  | "matched_by_name_vendor"
+  | "unmatched";
+
+export type VendorInventorySpotCheckAction =
+  | "no_change"
+  | "increase_stock"
+  | "decrease_stock"
+  | "flag_review";
+
+export interface VendorInventorySpotCheck {
+  id: string;
+  spotCheckNumber: string;
+  vendorId: string | null;
+  vendorName: string;
+  rpnId: string | null;
+  rpnName: string | null;
+  staffId: string | null;
+  staffName: string | null;
+  source: VendorInventorySpotCheckSource;
+  status: VendorInventorySpotCheckStatus;
+  periodFrom: string | null;
+  periodTo: string | null;
+  importedFileName: string | null;
+  totalRows: number;
+  changedRows: number;
+  matchedRows: number;
+  unmatchedRows: number;
+  totalPositiveAdjustments: number;
+  totalNegativeAdjustments: number;
+  createdAt: string;
+  updatedAt: string;
+  approvedAt: string | null;
+  approvedByStaffId: string | null;
+  notes: string | null;
+}
+
+export interface VendorInventorySpotCheckLine {
+  id: string;
+  spotCheckId: string;
+  vendorId: string | null;
+  vendorName: string;
+  productMode: "linked_product" | "branded_product";
+  vendorProductOfferId: string | null;
+  masterProductId: string | null;
+  sku: string | null;
+  productName: string;
+  branch: string | null;
+  openingQty: number;
+  vendorReceipts: number;
+  vendorSales: number;
+  systemCurrentQty: number;
+  checkedQty: number;
+  varianceQty: number;
+  sellingPrice: number;
+  buyingPrice: number;
+  publishToCatalogue: boolean;
+  status: string | null;
+  notes: string | null;
+  matchStatus: VendorInventorySpotCheckMatchStatus;
+  action: VendorInventorySpotCheckAction;
+  formulaWarning?: string | null;
+  overrideReason?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface VendorInventoryAdjustmentLog {
+  id: string;
+  spotCheckId: string;
+  vendorId: string | null;
+  vendorName: string;
+  productMode: "linked_product" | "branded_product";
+  vendorProductOfferId: string | null;
+  masterProductId: string | null;
+  sku: string | null;
+  productName: string;
+  previousQty: number;
+  checkedQty: number;
+  varianceQty: number;
+  adjustmentType: "increase" | "decrease" | "no_change";
+  reason: "rpn_spot_check";
+  notes: string | null;
+  rpnId: string | null;
+  rpnName: string | null;
+  approvedByStaffId: string | null;
+  approvedByStaffName: string | null;
+  createdAt: string;
+}
+
 export interface Product {
   id: string;
   productMode?: "linked_product" | "branded_product";
@@ -1896,6 +2045,169 @@ export interface VendorSubscriptionPayment {
   rpnCommissionGenerated?: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export type VendorInvoiceStatus =
+  | "draft"
+  | "pending"
+  | "unpaid"
+  | "partially_paid"
+  | "paid"
+  | "overdue"
+  | "cancelled";
+
+export type VendorInvoiceLineItemType =
+  | "subscription"
+  | "overage"
+  | "service_job"
+  | "manual_charge"
+  | "addon"
+  | "spot_check_addon"
+  | "stocktake_addon"
+  | "stocktake_service_job"
+  | "spot_check_service_job"
+  | "catalogue"
+  | "delivery";
+
+export interface VendorInvoice {
+  id: string;
+  invoiceNumber: string;
+  vendorId: string;
+  vendorName: string;
+  planId?: string | null;
+  planName?: string | null;
+  issueDate: string;
+  dueDate: string;
+  status: VendorInvoiceStatus;
+  subtotal: number;
+  taxAmount: number;
+  totalAmount: number;
+  amountPaid: number;
+  balanceDue: number;
+  currency: string;
+  notes?: string | null;
+  generatedByStaffId?: string | null;
+  generatedByStaffName?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface VendorInvoiceLine {
+  id: string;
+  invoiceId: string;
+  invoiceNumber: string;
+  vendorId: string;
+  itemType: VendorInvoiceLineItemType;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  taxable: boolean;
+  taxRate: number;
+  netAmount: number;
+  taxAmount: number;
+  grossAmount: number;
+  referenceId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type VendorPaymentMethod =
+  | "cash"
+  | "bank_transfer"
+  | "mobile_money"
+  | "card"
+  | "manual"
+  | string;
+
+export interface VendorPayment {
+  id: string;
+  invoiceId: string;
+  invoiceNumber: string;
+  vendorId: string;
+  vendorName: string;
+  amount: number;
+  paymentMethod: VendorPaymentMethod;
+  paymentDate: string;
+  referenceNumber?: string | null;
+  notes?: string | null;
+  recordedByStaffId?: string | null;
+  recordedByStaffName?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type VendorJobStatus =
+  | "draft"
+  | "scheduled"
+  | "in_progress"
+  | "completed"
+  | "cancelled"
+  | "billed";
+
+export type VendorJobType =
+  | "stocktake"
+  | "catalogue_setup"
+  | "storefront_setup"
+  | "data_capture"
+  | "image_cleanup"
+  | "onboarding_support"
+  | "training"
+  | "field_visit"
+  | "manual_charge"
+  | string;
+
+export interface VendorJob {
+  id: string;
+  jobNumber: string;
+  vendorId: string;
+  vendorName: string;
+  jobType: VendorJobType;
+  description: string;
+  requestedBy?: string | null;
+  performedByStaffId?: string | null;
+  performedByStaffName?: string | null;
+  rpnId?: string | null;
+  rpnName?: string | null;
+  status: VendorJobStatus;
+  jobDate: string;
+  completedAt?: string | null;
+  quantity: number;
+  unitPrice: number;
+  taxable: boolean;
+  taxRate: number;
+  netAmount: number;
+  taxAmount: number;
+  grossAmount: number;
+  notes?: string | null;
+  linkedInvoiceId?: string | null;
+  linkedInvoiceNumber?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface VendorBillingLedgerEntry {
+  id: string;
+  vendorId: string;
+  vendorName: string;
+  invoiceId?: string | null;
+  invoiceNumber?: string | null;
+  paymentId?: string | null;
+  jobId?: string | null;
+  entryType:
+    | "invoice_generated"
+    | "invoice_printed"
+    | "payment_recorded"
+    | "job_created"
+    | "job_completed"
+    | "job_billed"
+    | "invoice_cancelled";
+  debit: number;
+  credit: number;
+  balanceImpact: number;
+  notes?: string | null;
+  createdAt: string;
+  createdByStaffId?: string | null;
+  createdByStaffName?: string | null;
 }
 
 export type RPNLevel = "Junior RPN" | "Leader RPN" | "IMM";
