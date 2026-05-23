@@ -230,6 +230,36 @@ export const SystemSettings: React.FC = () => {
         </div>
       </DataPanel>
 
+      <DataPanel title="Catalogue Archive Retention">
+        <div className="p-6 space-y-4">
+          <p className="text-xs text-stone-500">
+            Generated catalogue archive/history records older than this value
+            are automatically removed. Vendor, product, settings and CAH data
+            are not affected.
+          </p>
+          <FormField label="Archive Retention Days">
+            <input
+              type="number"
+              min={1}
+              className="border-2 border-stone-200 p-2 text-sm outline-none focus:border-brand-orange w-full disabled:bg-stone-100 disabled:text-stone-400"
+              value={settings.catalogueArchiveRetentionDays ?? 21}
+              onChange={(e) =>
+                setSettings((prev) => ({
+                  ...prev,
+                  catalogueArchiveRetentionDays: Math.max(
+                    1,
+                    Number(e.target.value) || 21,
+                  ),
+                }))
+              }
+            />
+          </FormField>
+          <PrimaryButton onClick={handleSave} disabled={isSaving}>
+            {isSaving ? "Saving..." : "Save Settings"}
+          </PrimaryButton>
+        </div>
+      </DataPanel>
+
       <DataPanel title="RPN Performance Thresholds">
         <div className="p-6">
           {!permissionService.canSetRpnThresholds() && (
@@ -831,6 +861,60 @@ export const SystemSettings: React.FC = () => {
               placeholder="e.g. +263772123456"
               className="border-2 border-stone-200 p-2 text-sm outline-none focus:border-brand-orange w-full max-w-md"
             />
+          </div>
+
+          <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4 border-t border-stone-100 pt-6">
+            <div>
+              <label className="block text-xs font-bold text-stone-500 uppercase mb-2">
+                Exported Catalogue Support Title
+              </label>
+              <input
+                type="text"
+                value={settings.catalogueSupportTitle || ""}
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    catalogueSupportTitle: e.target.value,
+                  }))
+                }
+                placeholder="Need help with this catalogue?"
+                className="border-2 border-stone-200 p-2 text-sm outline-none focus:border-brand-orange w-full"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-stone-500 uppercase mb-2">
+                Exported Catalogue Support WhatsApp
+              </label>
+              <input
+                type="text"
+                value={settings.catalogueSupportWhatsAppNumber || ""}
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    catalogueSupportWhatsAppNumber: e.target.value,
+                  }))
+                }
+                placeholder="Falls back to feedback route"
+                className="border-2 border-stone-200 p-2 text-sm outline-none focus:border-brand-orange w-full"
+              />
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-xs font-bold text-stone-500 uppercase mb-2">
+                Exported Catalogue Support Message
+              </label>
+              <textarea
+                value={settings.catalogueSupportMessage || ""}
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    catalogueSupportMessage: e.target.value,
+                  }))
+                }
+                rows={3}
+                placeholder="Use vendor WhatsApp or call buttons for product questions..."
+                className="border-2 border-stone-200 p-2 text-sm outline-none focus:border-brand-orange w-full"
+              />
+            </div>
           </div>
 
           <div className="mb-4 flex items-center justify-between border-t border-stone-100 pt-6">

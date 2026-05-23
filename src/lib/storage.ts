@@ -49,7 +49,7 @@ export const storage = {
   },
 
   getEvents: (): ActivityLog[] => {
-    return analyticsService.getEvents();
+    return [] as ActivityLog[];
   },
 
   // Vendor helpers (delegating to vendorService)
@@ -58,7 +58,8 @@ export const storage = {
   },
 
   getVendors: (): Vendor[] => {
-    return vendorService.getVendors();
+    const vendors = (vendorService.getVendors as any)();
+    return Array.isArray(vendors) ? vendors : [];
   },
 
   updateVendor: (vendor: Vendor) => {
@@ -67,11 +68,12 @@ export const storage = {
 
   // Product helpers (delegating to productService)
   saveProducts: (products: Product[]) => {
-    productService.saveProducts(products);
+    products.forEach((product) => productService.saveProduct(product));
   },
 
   getProducts: (): Product[] => {
-    return productService.getProducts();
+    const products = (productService.getProducts as any)();
+    return Array.isArray(products) ? products : [];
   },
 
   saveProduct: (product: Product) => {

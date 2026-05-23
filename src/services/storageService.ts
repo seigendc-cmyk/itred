@@ -12,11 +12,15 @@ import {
   getDoc,
   deleteDoc,
   writeBatch,
+  onSnapshot,
+  Unsubscribe,
 } from "firebase/firestore";
 import { asArray } from "../utils/safeData";
+import { firebaseHealthService } from "./firebaseHealthService.ts";
 
 // Storage Mode Switcher
 export type StorageMode = "local" | "firebase";
+export type ReadMode = "once" | "live";
 
 export const storageConfig = {
   mode: (import.meta.env.VITE_STORAGE_MODE as StorageMode) || "firebase",
@@ -24,13 +28,23 @@ export const storageConfig = {
 
 // Generic storage interface to keep services clean
 export interface StorageAdapter {
-  getItem: <T>(key: string) => Promise<T | null> | T | null;
+  getItem: <T>(key: string, mode?: ReadMode) => Promise<T | null> | T | null;
   setItem: <T>(key: string, value: T) => Promise<void> | void;
   removeItem: (key: string) => Promise<void> | void;
+  batchSetItems?: <T>(collectionName: string, records: T[]) => Promise<void>;
+  batchUpdateItems?: <T>(
+    collectionName: string,
+    records: Partial<T>[],
+  ) => Promise<void>;
+  batchDeleteRecords?: (collectionName: string, ids: string[]) => Promise<void>;
+  subscribeCollection?: <T>(
+    collectionName: string,
+    callback: (data: T) => void,
+  ) => () => void;
 }
 
 export const localStorageAdapter: StorageAdapter = {
-  getItem: <T>(key: string): T | null => {
+  getItem: <T>(key: string, mode: ReadMode = "once"): T | null => {
     try {
       const data = localStorage.getItem(key);
       if (!data) return null;
@@ -49,6 +63,46 @@ export const localStorageAdapter: StorageAdapter = {
   },
   removeItem: (key: string): void => {
     localStorage.removeItem(key);
+  },
+  batchSetItems: async <T>(
+    collectionName: string,
+    records: T[],
+  ): Promise<void> => {
+    const existing = (await Promise.resolve(localStorageAdapter.getItem<any[]>(collectionName))) || [];
+    const next = [...existing];
+    records.forEach((record: any) => {
+      const idx = next.findIndex((r) => r.id === record.id);
+      if (idx >= 0) next[idx] = record;
+      else next.push(record);
+    });
+    localStorageAdapter.setItem(collectionName, next);
+  },
+  batchUpdateItems: async <T>(
+    collectionName: string,
+    records: Partial<T>[],
+  ): Promise<void> => {
+    const existing = (await Promise.resolve(localStorageAdapter.getItem<any[]>(collectionName))) || [];
+    records.forEach((record: any) => {
+      const idx = existing.findIndex((r) => r.id === record.id);
+      if (idx >= 0) existing[idx] = { ...existing[idx], ...record };
+    });
+    localStorageAdapter.setItem(collectionName, existing);
+  },
+  batchDeleteRecords: async (
+    collectionName: string,
+    ids: string[],
+  ): Promise<void> => {
+    const existing = (await Promise.resolve(localStorageAdapter.getItem<any[]>(collectionName))) || [];
+    localStorageAdapter.setItem(
+      collectionName,
+      existing.filter((r) => !ids.includes(r.id)),
+    );
+  },
+  subscribeCollection: <T>(
+    collectionName: string,
+    callback: (data: T) => void,
+  ) => {
+    return () => {};
   },
 };
 
@@ -126,8 +180,13 @@ export function resolveDocumentId(item: any, collectionKey: string): string {
   return doc(collection(db, collectionKey)).id;
 }
 
+const activeListeners = new Map<string, Unsubscribe>();
+
 export const firebaseAdapter: StorageAdapter = {
-  getItem: async <T>(key: string): Promise<T | null> => {
+  getItem: async <T>(
+    key: string,
+    mode: ReadMode = "once",
+  ): Promise<T | null> => {
     try {
       if (isSingletonKey(key)) {
         const docSnap = await getDoc(doc(db, key, "singleton"));
@@ -321,6 +380,109 @@ export const firebaseAdapter: StorageAdapter = {
     } catch (err) {
       console.error(`Firebase Error: Failed to remove data for "${key}"`, err);
     }
+  },
+  batchSetItems: async <T>(
+    collectionName: string,
+    records: T[],
+  ): Promise<void> => {
+    const chunks: T[][] = [];
+    let currentChunk: T[] = [];
+    for (const record of records) {
+      currentChunk.push(record);
+      if (currentChunk.length >= 400) {
+        chunks.push(currentChunk);
+        currentChunk = [];
+      }
+    }
+    if (currentChunk.length > 0) chunks.push(currentChunk);
+    for (const chunk of chunks) {
+      const batch = writeBatch(db);
+      chunk.forEach((item: any) => {
+        const docId = resolveDocumentId(item, collectionName);
+        batch.set(
+          doc(db, collectionName, docId),
+          { ...item, id: docId, updatedAt: new Date().toISOString() },
+          { merge: true },
+        );
+      });
+      await batch.commit();
+    }
+  },
+  batchUpdateItems: async <T>(
+    collectionName: string,
+    records: Partial<T>[],
+  ): Promise<void> => {
+    const chunks: Partial<T>[][] = [];
+    let currentChunk: Partial<T>[] = [];
+    for (const record of records) {
+      currentChunk.push(record);
+      if (currentChunk.length >= 400) {
+        chunks.push(currentChunk);
+        currentChunk = [];
+      }
+    }
+    if (currentChunk.length > 0) chunks.push(currentChunk);
+    for (const chunk of chunks) {
+      const batch = writeBatch(db);
+      chunk.forEach((item: any) => {
+        const docId = resolveDocumentId(item, collectionName);
+        batch.update(doc(db, collectionName, docId), {
+          ...item,
+          updatedAt: new Date().toISOString(),
+        });
+      });
+      await batch.commit();
+    }
+  },
+  batchDeleteRecords: async (
+    collectionName: string,
+    ids: string[],
+  ): Promise<void> => {
+    const chunks: string[][] = [];
+    let currentChunk: string[] = [];
+    for (const id of ids) {
+      currentChunk.push(id);
+      if (currentChunk.length >= 400) {
+        chunks.push(currentChunk);
+        currentChunk = [];
+      }
+    }
+    if (currentChunk.length > 0) chunks.push(currentChunk);
+    for (const chunk of chunks) {
+      const batch = writeBatch(db);
+      chunk.forEach((id) => {
+        batch.delete(doc(db, collectionName, id));
+      });
+      await batch.commit();
+    }
+  },
+  subscribeCollection: <T>(
+    collectionName: string,
+    callback: (data: T) => void,
+  ) => {
+    if (activeListeners.has(collectionName))
+      activeListeners.get(collectionName)!();
+    const unsub = onSnapshot(
+      collection(db, collectionName),
+      (snapshot) => {
+        const results: any[] = [];
+        snapshot.forEach((docSnap) => {
+          if (docSnap.id !== "singleton")
+            results.push({ id: docSnap.id, ...docSnap.data() });
+        });
+        callback(results as unknown as T);
+      },
+      (error) =>
+        firebaseHealthService.reportError(
+          error,
+          `subscribeCollection:${collectionName}`,
+        ),
+    );
+    activeListeners.set(collectionName, unsub);
+    return () => {
+      unsub();
+      activeListeners.delete(collectionName);
+    };
   },
 };
 

@@ -30,6 +30,14 @@ import { cahService } from '../services/cahService.ts';
 import { logService } from '../services/logService.ts';
 import { analyticsService } from '../services/analyticsService.ts';
 import { CAHBooth, CAHBoothAsset, CAHBoothStatus, CAHBoothInternetStatus, CAHBoothAssetCondition } from '../types.ts';
+import { generateEntityId } from '../utils/idGenerator.ts';
+import {
+  getSession,
+  getSessionRole,
+  getSessionStaffId,
+  getSessionStaffName,
+  hasValidSession,
+} from '../utils/session.ts';
 
 const BOOTH_STATUSES: CAHBoothStatus[] = ['planned', 'active', 'maintenance', 'suspended', 'closed'];
 const INTERNET_STATUSES: CAHBoothInternetStatus[] = ['active', 'unstable', 'offline', 'suspended'];
@@ -59,6 +67,15 @@ export const CAHBoothsPanel: React.FC = () => {
     setAssets(cahService.getBoothAssets());
   };
 
+  const requireSession = () => {
+    const session = getSession();
+    if (!hasValidSession(session)) {
+      alert('Session expired. Please login again before saving operational changes.');
+      return null;
+    }
+    return session;
+  };
+
   const provinces = useMemo(() => Array.from(new Set(booths.map(b => b.province).filter(Boolean))), [booths]);
 
   const filteredBooths = useMemo(() => {
@@ -85,8 +102,8 @@ export const CAHBoothsPanel: React.FC = () => {
 
   const handleCreateBooth = () => {
     setEditingBooth({
-      id: `BOOTH-${Math.random().toString(36).substr(2, 6).toUpperCase()}`,
-      code: `CB-${Math.random().toString(36).substr(2, 4).toUpperCase()}`,
+      id: generateEntityId('BOOTH'),
+      code: generateEntityId('CB'),
       status: 'planned',
       internetStatus: 'offline',
       powerSource: 'grid',
@@ -98,6 +115,11 @@ export const CAHBoothsPanel: React.FC = () => {
   };
 
   const handleSaveBooth = () => {
+    const session = requireSession();
+    if (!session) return;
+    const staffId = getSessionStaffId(session);
+    const staffName = getSessionStaffName(session);
+
     if (!editingBooth?.name || !editingBooth?.province || !editingBooth?.cityTown) {
       alert('Name, Province and City are required.');
       return;
@@ -105,30 +127,34 @@ export const CAHBoothsPanel: React.FC = () => {
 
     const boothToSave = {
       ...editingBooth,
-      createdBy: editingBooth.createdBy || 'STAFF-ADM',
-      updatedBy: 'STAFF-ADM',
+      createdBy: editingBooth.createdBy || staffId,
+      updatedBy: staffId,
     } as CAHBooth;
 
     cahService.saveBooth(boothToSave);
 
     const isNew = !editingBooth.createdAt;
     
-    analyticsService.logEvent({
-      eventType: isNew ? 'CAH_BOOTH_CREATED' : 'CAH_BOOTH_UPDATED',
-      actorType: 'admin',
-      actorName: 'System Admin',
-      cahBoothId: boothToSave.id,
-      details: { name: boothToSave.name, code: boothToSave.code }
-    });
+    try {
+      analyticsService.logEvent({
+        eventType: isNew ? 'CAH_BOOTH_CREATED' : 'CAH_BOOTH_UPDATED',
+        actorType: getSessionRole(session),
+        actorName: staffName,
+        cahBoothId: boothToSave.id,
+        details: { name: boothToSave.name, code: boothToSave.code }
+      });
 
-    logService.add({
-      userId: 'STAFF-ADM',
-      action: isNew ? 'CAH_BOOTH_CREATED' : 'CAH_BOOTH_UPDATED',
-      entityType: 'cah_booth',
-      entityId: boothToSave.id,
-      details: `CAH Booth "${boothToSave.name}" was ${isNew ? 'created' : 'updated'}.`,
-      severity: 'info'
-    });
+      logService.add({
+        userId: staffId,
+        action: isNew ? 'CAH_BOOTH_CREATED' : 'CAH_BOOTH_UPDATED',
+        entityType: 'cah_booth',
+        entityId: boothToSave.id,
+        details: `CAH Booth "${boothToSave.name}" was ${isNew ? 'created' : 'updated'}.`,
+        severity: 'info'
+      });
+    } catch (auditError) {
+      console.error('CAH booth audit logging failed', auditError);
+    }
 
     loadData();
     setIsFormOpen(false);
@@ -137,7 +163,7 @@ export const CAHBoothsPanel: React.FC = () => {
 
   const handleCreateAsset = (boothId: string) => {
     setEditingAsset({
-      id: `AST-${Math.random().toString(36).substr(2, 6).toUpperCase()}`,
+      id: generateEntityId('AST'),
       boothId,
       type: 'other',
       condition: 'new',
@@ -148,6 +174,11 @@ export const CAHBoothsPanel: React.FC = () => {
   };
 
   const handleSaveAsset = () => {
+    const session = requireSession();
+    if (!session) return;
+    const staffId = getSessionStaffId(session);
+    const staffName = getSessionStaffName(session);
+
     if (!editingAsset?.name || !editingAsset?.serialNumber) {
       alert('Name and Serial Number are required.');
       return;
@@ -155,9 +186,9 @@ export const CAHBoothsPanel: React.FC = () => {
 
     const assetToSave = {
       ...editingAsset,
-      checkedById: editingAsset.checkedById || 'STAFF-ADM',
-      createdBy: editingAsset.createdBy || 'STAFF-ADM',
-      updatedBy: 'STAFF-ADM',
+      checkedById: editingAsset.checkedById || staffId,
+      createdBy: editingAsset.createdBy || staffId,
+      updatedBy: staffId,
     } as CAHBoothAsset;
 
     cahService.saveBoothAsset(assetToSave);
@@ -167,13 +198,17 @@ export const CAHBoothsPanel: React.FC = () => {
     if (!isNew && assetToSave.condition === 'damaged') eventType = 'CAH_ASSET_MARKED_DAMAGED';
     if (!isNew && assetToSave.condition === 'missing') eventType = 'CAH_ASSET_MARKED_MISSING';
 
-    analyticsService.logEvent({
-      eventType: eventType as any,
-      actorType: 'admin',
-      actorName: 'System Admin',
-      cahBoothId: assetToSave.boothId,
-      details: { name: assetToSave.name, condition: assetToSave.condition }
-    });
+    try {
+      analyticsService.logEvent({
+        eventType: eventType as any,
+        actorType: getSessionRole(session),
+        actorName: staffName,
+        cahBoothId: assetToSave.boothId,
+        details: { name: assetToSave.name, condition: assetToSave.condition }
+      });
+    } catch (auditError) {
+      console.error('CAH asset audit logging failed', auditError);
+    }
 
     loadData();
     setIsAssetFormOpen(false);

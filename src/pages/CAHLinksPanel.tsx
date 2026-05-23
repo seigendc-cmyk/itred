@@ -77,6 +77,15 @@ const AUDIENCES: CAHTargetAudience[] = [
 ];
 const STATUSES: CAHStatus[] = ["active", "inactive", "archived"];
 
+const getRandomIcon = (type?: string) => {
+  const key = String(type || "").toLowerCase();
+  if (key.includes("community") || key.includes("group")) return <Users size={20} />;
+  if (key.includes("catalogue") || key.includes("document")) return <FileText size={20} />;
+  if (key.includes("support")) return <ShieldCheck size={20} />;
+  if (key.includes("channel")) return <Share2 size={20} />;
+  return <Globe size={20} />;
+};
+
 export const CAHLinksPanel: React.FC = () => {
   const navigate = useNavigate();
 
@@ -802,7 +811,7 @@ export const CAHLinksPanel: React.FC = () => {
                         title="Quick Update Follower Count"
                       >
                         <Users size={12} />
-                      </button>}
+                      </button>
                       {permissionService.canEdit("accessHub") && <button
                         onClick={() => handleEditLink(link)}
                         className="p-2 border border-stone-100 hover:border-brand-orange text-stone-400 hover:text-brand-orange transition-all"
@@ -1578,7 +1587,7 @@ export const CAHLinksPanel: React.FC = () => {
               >
                 Discard
               </SecondaryButton>
-              <PrimaryButton className="flex-1" onClick={handleSaveLink}>
+              <PrimaryButton className="flex-1" onClick={() => handleSaveLink()}>
                 Commit to Hub Registry
               </PrimaryButton>
             </div>

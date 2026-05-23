@@ -13,13 +13,13 @@ export const logService = {
       log.userId === "admin" || log.userId?.includes("ADM")
         ? "admin"
         : "system";
-    await analyticsService.logEvent({
+    void analyticsService.logEvent({
       eventType: (log.action || "SYSTEM_EVENT") as any,
       actorType: actorType as any,
       actorName: log.userId || "System",
       details: log.details,
-      vendorId: log.entityType === "vendor" ? log.entityId : undefined,
-      productId: log.entityType === "product" ? log.entityId : undefined,
+      vendorId: log.entityType === "vendor" ? log.entityId : null,
+      productId: log.entityType === "product" ? log.entityId : null,
     });
   },
   clear: analyticsService.clearEvents,

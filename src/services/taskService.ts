@@ -7,6 +7,7 @@ import { StaffTask, StaffTaskStatus } from "../types.ts";
 import { getStorageAdapter } from "./storageService.ts";
 import { notificationService } from "./notificationService.ts";
 import { staffAuditService } from "./staffAuditService.ts";
+import { generateTaskId } from "../utils/idGenerator.ts";
 
 const STORAGE_KEY = "itred_staff_tasks";
 
@@ -27,10 +28,7 @@ const priorityToSeverity = (
   return "info";
 };
 
-const taskId = () =>
-  `TASK-${Date.now()}-${Math.floor(Math.random() * 1000)
-    .toString()
-    .padStart(3, "0")}`;
+const taskId = () => generateTaskId();
 
 const saveAll = async (tasks: StaffTask[]): Promise<void> => {
   await getStorageAdapter().setItem(STORAGE_KEY, safeTasks(tasks));

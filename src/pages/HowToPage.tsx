@@ -445,8 +445,8 @@ const manualSections: ManualSection[] = [
           </thead>
           <tbody className="divide-y divide-stone-100">
             {troubleshootingGuides.map(({ problem, likelyCause, fix }) => (
-              <tr key={problem}>
-                <td className="px-4 py-3 font-bold text-brand-charcoal">{problem}</td>
+              <tr key={problem.replace(/\s/g, '-')}>
+                <td className="px-4 py-3 font-bold text-brand-charcoal" >{problem}</td>
                 <td className="px-4 py-3 text-stone-600">{likelyCause}</td>
                 <td className="px-4 py-3 text-stone-600">{fix}</td>
               </tr>

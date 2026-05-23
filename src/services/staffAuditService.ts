@@ -5,17 +5,26 @@
 
 import { StaffAuditLog } from "../types.ts";
 import { getStorageAdapter } from "./storageService.ts";
+import { readDiagnosticsService } from "./readDiagnosticsService.ts";
+import { generateAuditLogId } from "../utils/idGenerator.ts";
+import { firebaseHealthService } from "./firebaseHealthService.ts";
+import {
+  getSession,
+  getSessionRole,
+  getSessionStaffId,
+  getSessionStaffName,
+} from "../utils/session.ts";
+import { sanitizeForFirestore } from "../utils/firestoreSanitize.ts";
 
 const STORAGE_KEY = "itred_staff_audit_logs";
-const SESSION_KEY = "activeStaffSession";
 
 const sanitizeSnapshot = (data: any): any => {
-  if (!data) return data;
+  if (!data) return null;
   try {
-    // Deep copy and remove undefined by dropping them in serialization
-    return JSON.parse(JSON.stringify(data));
+    const parsed = JSON.parse(JSON.stringify(data));
+    return sanitizeForFirestore(parsed);
   } catch (e) {
-    return data;
+    return null;
   }
 };
 
@@ -23,17 +32,50 @@ export const staffAuditService = {
   getLogs: async (): Promise<StaffAuditLog[]> => {
     const data =
       await getStorageAdapter().getItem<StaffAuditLog[]>(STORAGE_KEY);
-    return Array.isArray(data)
+    const logs = Array.isArray(data)
       ? data.sort(
           (a, b) =>
             new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
         )
       : [];
+    readDiagnosticsService.track(
+      "staffAuditService",
+      STORAGE_KEY,
+      "getLogs",
+      logs.length,
+    );
+    return logs;
   },
 
   getRecentLogs: async (limit: number = 50): Promise<StaffAuditLog[]> => {
     const logs = await staffAuditService.getLogs();
     return logs.slice(0, limit);
+  },
+
+  getPage: async (
+    page = 0,
+    pageSize = 100,
+  ): Promise<{ items: StaffAuditLog[]; hasMore: boolean }> => {
+    const logs = await staffAuditService.getLogs();
+    const start = page * pageSize;
+    return {
+      items: logs.slice(start, start + pageSize),
+      hasMore: logs.length > start + pageSize,
+    };
+  },
+
+  getByDateRange: async (
+    from: string,
+    to: string,
+    limit = 100,
+  ): Promise<StaffAuditLog[]> => {
+    const logs = await staffAuditService.getLogs();
+    return logs
+      .filter((log) => {
+        const date = log.createdAt.slice(0, 10);
+        return (!from || date >= from) && (!to || date <= to);
+      })
+      .slice(0, limit);
   },
 
   getLogsByStaff: async (staffId: string): Promise<StaffAuditLog[]> => {
@@ -56,48 +98,41 @@ export const staffAuditService = {
       severity: StaffAuditLog["severity"];
     },
   ): Promise<void> => {
-    const sessionStr = localStorage.getItem(SESSION_KEY);
-    let staffSession: any = {
-      staffId: "unknown",
-      staffName: "Unknown Staff",
-      role: "Unknown",
-    };
-    if (sessionStr) {
-      try {
-        staffSession = JSON.parse(sessionStr);
-      } catch (e) {}
-    }
+    const staffSession = getSession();
 
-    const newLog: StaffAuditLog = {
+    const newLog: StaffAuditLog = sanitizeForFirestore({
       ...input,
-      id: `AUDIT-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
-      staffId: input.staffId || staffSession.staffId || "unknown",
+      id: input.id || generateAuditLogId(),
+      staffId: input.staffId || getSessionStaffId(staffSession) || "unknown",
       staffName:
-        input.staffName ||
-        staffSession.staffName ||
-        staffSession.displayName ||
-        "Unknown Staff",
-      staffRole: input.staffRole || staffSession.role || "Unknown",
+        input.staffName || getSessionStaffName(staffSession, "Unknown staff"),
+      staffRole: input.staffRole || getSessionRole(staffSession),
       beforeSnapshot: sanitizeSnapshot(input.beforeSnapshot),
       afterSnapshot: sanitizeSnapshot(input.afterSnapshot),
-      sessionId: staffSession.loginAt,
+      sessionId: (staffSession as any)?.loginAt || null,
       deviceInfo: {
-        userAgent: navigator.userAgent,
-        platform: navigator.platform,
-        language: navigator.language,
+        userAgent:
+          typeof navigator !== "undefined" ? navigator.userAgent : null,
+        platform: typeof navigator !== "undefined" ? navigator.platform : null,
+        language: typeof navigator !== "undefined" ? navigator.language : null,
       },
       createdAt: new Date().toISOString(),
-    };
+    }) as StaffAuditLog;
 
     // Execute save asynchronously without blocking the caller
     Promise.resolve().then(async () => {
       try {
+        if (firebaseHealthService.shouldSkipNonEssentialWrites()) return;
+        const storage = getStorageAdapter();
+        if (storage.batchSetItems) {
+          await storage.batchSetItems(STORAGE_KEY, [newLog]);
+          return;
+        }
         const logs =
-          (await getStorageAdapter().getItem<StaffAuditLog[]>(STORAGE_KEY)) ||
-          [];
-        logs.push(newLog);
-        await getStorageAdapter().setItem(STORAGE_KEY, logs);
+          (await storage.getItem<StaffAuditLog[]>(STORAGE_KEY)) || [];
+        await storage.setItem(STORAGE_KEY, [...logs, newLog]);
       } catch (err) {
+        firebaseHealthService.reportError(err, "staffAuditService.logAction");
         console.error("Failed to persist staff audit log non-blockingly:", err);
       }
     });

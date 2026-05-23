@@ -13,6 +13,7 @@ import {
   SecondaryButton,
   EmptyState,
   StatCard,
+  BrandedAlertModal,
 } from "../components/CommonUI.tsx";
 import { approvalService } from "../services/approvalService.ts";
 import { notificationService } from "../services/notificationService.ts";
@@ -28,6 +29,12 @@ import {
   ArchiveX,
 } from "lucide-react";
 import { staffService } from "../services/staffService.ts";
+import {
+  getSession,
+  getSessionStaffId,
+  getSessionStaffName,
+  hasValidSession,
+} from "../utils/session.ts";
 
 export const ApprovalQueue: React.FC = () => {
   const [requests, setRequests] = useState<ApprovalRequest[]>([]);
@@ -38,6 +45,19 @@ export const ApprovalQueue: React.FC = () => {
   } | null>(null);
   const [managerComment, setManagerComment] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
+  const [processingRequestId, setProcessingRequestId] = useState<string | null>(null);
+  const [alertConfig, setAlertConfig] = useState<{
+    isOpen: boolean;
+    title?: string;
+    message: string;
+    type?: "success" | "error" | "warning" | "info";
+  }>({ isOpen: false, title: "seiGEN Commerce", message: "", type: "info" });
+
+  const showBrandedAlert = (config: {
+    title?: string;
+    message: string;
+    type?: "success" | "error" | "warning" | "info";
+  }) => setAlertConfig({ title: "seiGEN Commerce", ...config, isOpen: true });
 
   const loadRequests = async () => {
     const allReqs = await approvalService.getAll();
@@ -53,11 +73,9 @@ export const ApprovalQueue: React.FC = () => {
     loadRequests();
   }, []);
 
-  const sessionStr = localStorage.getItem("activeStaffSession");
-  const staffId = sessionStr ? JSON.parse(sessionStr).staffId : "STAFF-ADM";
-  const staffName = sessionStr
-    ? JSON.parse(sessionStr).staffName
-    : "Backend Manager";
+  const session = getSession();
+  const staffId = getSessionStaffId(session);
+  const staffName = getSessionStaffName(session, "Unknown staff");
 
   const pendingRequests = requests.filter((r) => r.status === "pending");
   const todayStr = new Date().toISOString().split("T")[0];
@@ -94,19 +112,36 @@ export const ApprovalQueue: React.FC = () => {
 
   const handleAction = async () => {
     if (!activeModal) return;
+    if (!hasValidSession(session)) {
+      const message = "Session expired. Please login again.";
+      setActionError(message);
+      showBrandedAlert({ message, type: "warning" });
+      return;
+    }
 
     try {
       setActionError(null);
+      setProcessingRequestId(activeModal.request.id);
       if (activeModal.type === "approve") {
+        if (!permissionService.canApproveWork()) {
+          const message = "You do not have permission to approve requests.";
+          setActionError(message);
+          showBrandedAlert({ message, type: "warning" });
+          return;
+        }
         if (activeModal.request.requestType === "staff_delete") {
           if (
             !permissionService.hasActionPermission("staff.approveDelete" as any)
           ) {
-            setActionError("You do not have permission to approve staff deletions.");
+            const message = "You do not have permission to approve staff deletions.";
+            setActionError(message);
+            showBrandedAlert({ message, type: "warning" });
             return;
           }
           if (staffService.isLastActiveSysAdmin(activeModal.request.recordId)) {
-            setActionError("Cannot approve deletion of the last active SysAdmin.");
+            const message = "Cannot approve deletion of the last active SysAdmin.";
+            setActionError(message);
+            showBrandedAlert({ message, type: "warning" });
             return;
           }
         }
@@ -118,6 +153,12 @@ export const ApprovalQueue: React.FC = () => {
           managerComment,
         );
       } else if (activeModal.type === "reject") {
+        if (!permissionService.canRejectWork()) {
+          const message = "You do not have permission to reject requests.";
+          setActionError(message);
+          showBrandedAlert({ message, type: "warning" });
+          return;
+        }
         await approvalService.rejectRequest(
           activeModal.request.id,
           staffId,
@@ -125,6 +166,12 @@ export const ApprovalQueue: React.FC = () => {
           managerComment,
         );
       } else if (activeModal.type === "return") {
+        if (!permissionService.canReturnWorkForCorrection()) {
+          const message = "You do not have permission to return requests for correction.";
+          setActionError(message);
+          showBrandedAlert({ message, type: "warning" });
+          return;
+        }
         await approvalService.returnForCorrection(
           activeModal.request.id,
           staffId,
@@ -133,18 +180,59 @@ export const ApprovalQueue: React.FC = () => {
         );
       }
 
-      notificationService.toast("Approval queue updated");
+      const now = new Date().toISOString();
+      const nextStatus: ApprovalRequestStatus =
+        activeModal.type === "approve"
+          ? "approved"
+          : activeModal.type === "reject"
+            ? "rejected"
+            : "returned_for_correction";
+      const updatedRequest: ApprovalRequest = {
+        ...activeModal.request,
+        status: nextStatus,
+        reviewedByStaffId: staffId,
+        reviewedByName: staffName,
+        reviewedAt: now,
+        managerComment:
+          activeModal.type === "approve" || activeModal.type === "reject"
+            ? managerComment
+            : activeModal.request.managerComment,
+        correctionNotes:
+          activeModal.type === "return"
+            ? managerComment
+            : activeModal.request.correctionNotes,
+      };
+      setRequests((prev) =>
+        prev.map((request) =>
+          request.id === activeModal.request.id ? updatedRequest : request,
+        ),
+      );
+      const successMessage =
+        activeModal.type === "approve"
+          ? "Approval request approved."
+          : activeModal.type === "reject"
+            ? "Approval request rejected."
+            : "Approval request returned for correction.";
+      notificationService.toast(successMessage);
+      showBrandedAlert({ message: successMessage, type: "success" });
       setActiveModal(null);
       setManagerComment("");
-      loadRequests();
     } catch (err) {
       console.error(err);
-      setActionError(err instanceof Error ? err.message : "Save failed");
+      const message = err instanceof Error ? err.message : "Failed to process approval request.";
+      setActionError(message);
+      showBrandedAlert({ message, type: "error" });
+    } finally {
+      setProcessingRequestId(null);
     }
   };
 
   return (
     <div className="space-y-8 pb-20">
+      <BrandedAlertModal
+        {...alertConfig}
+        onClose={() => setAlertConfig((prev) => ({ ...prev, isOpen: false }))}
+      />
       <PageHeader
         title="Approval Queue"
         subtitle="Managerial governance layer for high-risk systemic actions."
@@ -223,7 +311,15 @@ export const ApprovalQueue: React.FC = () => {
               {filteredRequests.map((req) => (
                 <tr
                   key={req.id}
-                  className="hover:bg-stone-50/50 transition-colors"
+                  className={`hover:bg-stone-50/50 transition-colors ${
+                    req.status === "approved"
+                      ? "bg-emerald-50/20"
+                      : req.status === "rejected"
+                        ? "bg-red-50/20"
+                        : req.status !== "pending"
+                          ? "opacity-70"
+                          : ""
+                  }`}
                 >
                   <td className="px-6 py-4">
                     <p className="text-xs font-bold text-brand-charcoal uppercase">
@@ -282,7 +378,7 @@ export const ApprovalQueue: React.FC = () => {
                                 setActiveModal({ type: "approve", request: req });
                               }
                             }
-                            disabled={!permissionService.canApproveWork()}
+                            disabled={processingRequestId === req.id}
                             className="p-1.5 px-3 bg-emerald-50 hover:bg-emerald-100 text-[10px] font-bold uppercase text-emerald-700 disabled:opacity-50"
                             title={
                               !permissionService.canApproveWork()
@@ -290,7 +386,7 @@ export const ApprovalQueue: React.FC = () => {
                                 : "Approve"
                             }
                           >
-                            Approve
+                            {processingRequestId === req.id ? "Approving..." : "Approve"}
                           </button>
                           <button
                             onClick={() =>
@@ -299,9 +395,7 @@ export const ApprovalQueue: React.FC = () => {
                                 setActiveModal({ type: "return", request: req });
                               }
                             }
-                            disabled={
-                              !permissionService.canReturnWorkForCorrection()
-                            }
+                            disabled={processingRequestId === req.id}
                             className="p-1.5 px-3 bg-orange-50 hover:bg-orange-100 text-[10px] font-bold uppercase text-orange-700 disabled:opacity-50"
                             title={
                               !permissionService.canReturnWorkForCorrection()
@@ -309,7 +403,7 @@ export const ApprovalQueue: React.FC = () => {
                                 : "Return"
                             }
                           >
-                            Return
+                            {processingRequestId === req.id ? "Returning..." : "Return"}
                           </button>
                           <button
                             onClick={() =>
@@ -318,7 +412,7 @@ export const ApprovalQueue: React.FC = () => {
                                 setActiveModal({ type: "reject", request: req });
                               }
                             }
-                            disabled={!permissionService.canRejectWork()}
+                            disabled={processingRequestId === req.id}
                             className="p-1.5 px-3 bg-red-50 hover:bg-red-100 text-[10px] font-bold uppercase text-red-700 disabled:opacity-50"
                             title={
                               !permissionService.canRejectWork()
@@ -326,7 +420,7 @@ export const ApprovalQueue: React.FC = () => {
                                 : "Reject"
                             }
                           >
-                            Reject
+                            {processingRequestId === req.id ? "Rejecting..." : "Reject"}
                           </button>
                         </>
                       )}
@@ -491,6 +585,7 @@ export const ApprovalQueue: React.FC = () => {
                     setActiveModal(null);
                     setManagerComment("");
                   }}
+                  disabled={processingRequestId === activeModal.request.id}
                   className="flex-1"
                 >
                   Cancel
@@ -498,11 +593,18 @@ export const ApprovalQueue: React.FC = () => {
                 <PrimaryButton
                   onClick={handleAction}
                   disabled={
-                    activeModal.type === "return" && !managerComment.trim()
+                    processingRequestId === activeModal.request.id ||
+                    (activeModal.type === "return" && !managerComment.trim())
                   }
                   className="flex-1"
                 >
-                  Confirm {activeModal.type.toUpperCase()}
+                  {processingRequestId === activeModal.request.id
+                    ? activeModal.type === "approve"
+                      ? "Approving..."
+                      : activeModal.type === "reject"
+                        ? "Rejecting..."
+                        : "Returning..."
+                    : `Confirm ${activeModal.type.toUpperCase()}`}
                 </PrimaryButton>
               </div>
             )}

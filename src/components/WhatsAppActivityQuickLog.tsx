@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useMemo } from "react";
-import { X } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import {
   WhatsAppActivityLog,
   WhatsAppActivityType,

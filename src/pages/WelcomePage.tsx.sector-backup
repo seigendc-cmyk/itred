@@ -20,7 +20,7 @@ interface WelcomePageProps {
 }
 
 const WelcomePage: React.FC<WelcomePageProps> = ({
-  googleEmail = "user@example.com",
+  googleEmail = "seiGEN Commerce",
   onLoginSuccess,
 }) => {
   const [allStaff, setAllStaff] = useState<Staff[]>([]);

@@ -32,10 +32,17 @@ export const StaffAccessLogs: React.FC = () => {
   const [filterModule, setFilterModule] = useState("all");
   const [filterEvent, setFilterEvent] = useState("all");
   const [filterSeverity, setFilterSeverity] = useState("all");
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const pageSize = 100;
 
-  const loadLogs = async () => {
-    const rawLogs = await staffAuditService.getLogs();
-    setLogs(rawLogs);
+  const loadLogs = async (nextPage = 0, append = false) => {
+    const result = await staffAuditService.getPage(nextPage, pageSize);
+    setLogs((current) =>
+      append ? [...current, ...result.items] : result.items,
+    );
+    setHasMore(result.hasMore);
+    setPage(nextPage);
   };
 
   useEffect(() => {
@@ -296,6 +303,17 @@ export const StaffAccessLogs: React.FC = () => {
           </tr>
         )}
       </TablePanel>
+      {hasMore && (
+        <div className="flex justify-center">
+          <button
+            type="button"
+            onClick={() => loadLogs(page + 1, true)}
+            className="border-2 border-brand-orange px-5 py-3 text-xs font-black uppercase text-brand-orange"
+          >
+            Load More Audit Logs
+          </button>
+        </div>
+      )}
     </div>
   );
 };

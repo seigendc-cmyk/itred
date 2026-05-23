@@ -43,6 +43,12 @@ import FinanceDesk from "./pages/FinanceDesk.tsx";
 import CashBankManager from "./pages/CashBankManager.tsx";
 import RPNPaymentsLedger from "./pages/RPNPaymentsLedger.tsx";
 import FinanceReports from "./pages/FinanceReports.tsx";
+import { BiOverviewPage } from "./pages/console/BiOverviewPage.tsx";
+import { AiReportsPage } from "./pages/console/AiReportsPage.tsx";
+import { ProductTrendsPage } from "./pages/console/ProductTrendsPage.tsx";
+import { VendorReportsPage } from "./pages/console/VendorReportsPage.tsx";
+import { RpnPerformancePage } from "./pages/console/RpnPerformancePage.tsx";
+import { ViralGrowthIntelligencePage } from "./pages/console/ViralGrowthIntelligencePage.tsx";
 import { AppRoute, MenuKey, DeskType } from "./types.ts";
 import { ErrorBoundary, PrimaryButton } from "./components/CommonUI.tsx";
 import { permissionService } from "./services/permissionService.ts";
@@ -51,6 +57,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { analyticsService } from "./services/analyticsService.ts";
 import { settingsService } from "./services/settingsService.ts";
 import { staffAuditService } from "./services/staffAuditService.ts";
+import { sessionService } from "./services/sessionService.ts";
+import { staffService } from "./services/staffService.ts";
 
 function RestrictedAccess() {
   const navigate = useNavigate();
@@ -135,6 +143,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     [AppRoute.SYSTEM_SETTINGS]: "System Settings",
     [AppRoute.CONTACT_HUB_SETTINGS]: "Catalogue Contact Hub",
     [AppRoute.HOW_TO]: "How To",
+    [AppRoute.APPROVAL_QUEUE]: "Approval Queue",
     [AppRoute.NOTIFICATIONS]: "Notifications",
     [AppRoute.STAFF_TASKS]: "Staff Tasks",
     [AppRoute.RPN_PERFORMANCE]: "RPN Performance",
@@ -142,6 +151,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     [AppRoute.CASH_BANK_MANAGER]: "Cash & Bank Manager",
     [AppRoute.RPN_PAYMENTS_LEDGER]: "RPN Payments Ledger",
     [AppRoute.FINANCE_REPORTS]: "Finance Reports",
+    [AppRoute.BI_OVERVIEW]: "BI Overview",
+    [AppRoute.AI_REPORTS]: "AI Reports",
+    [AppRoute.PRODUCT_TRENDS]: "Product Trends",
+    [AppRoute.VENDOR_REPORTS]: "Vendor Reports",
+    [AppRoute.RPN_BI_PERFORMANCE]: "RPN BI Performance",
+    [AppRoute.VIRAL_GROWTH]: "Viral Growth Intelligence",
   };
 
   const checkAccess = (route: string) => {
@@ -176,6 +191,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       "cash-bank-manager": "cashBankManager",
       "rpn-payments-ledger": "rpnPaymentsLedger",
       "finance-reports": "financeReports",
+      "console-bi-overview": "biMarketAnalytics",
+      "console-ai-reports": "biMarketAnalytics",
+      "console-product-trends": "biMarketAnalytics",
+      "console-vendor-reports": "biMarketAnalytics",
+      "console-rpn-performance": "rpnPerformance",
+      "console-viral-growth": "biMarketAnalytics",
       "how-to": "howTo",
       dashboard: "dashboard",
       // Add other specific mappings if routes don't directly match MenuKey
@@ -186,6 +207,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   const handleNavigate = (route: AppRoute) => {
     navigate(`/${route}`);
+  };
+
+  const handleShellLogout = () => {
+    onLogout();
+    navigate("/", { replace: true });
   };
 
   const sessionStr = localStorage.getItem("activeStaffSession");
@@ -209,7 +235,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       staffName={staffName}
       staffRole={staffRole}
       staffDesk={staffDesk}
-      onLogout={onLogout}
+      onLogout={handleShellLogout}
     >
       <Routes>
         <Route
@@ -340,6 +366,66 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           path="/bi-market"
           element={
             checkAccess("bi-market") ? <BIMarket /> : <RestrictedAccess />
+          }
+        />
+        <Route
+          path="/console-bi-overview"
+          element={
+            checkAccess("console-bi-overview") ? (
+              <BiOverviewPage />
+            ) : (
+              <RestrictedAccess />
+            )
+          }
+        />
+        <Route
+          path="/console-ai-reports"
+          element={
+            checkAccess("console-ai-reports") ? (
+              <AiReportsPage />
+            ) : (
+              <RestrictedAccess />
+            )
+          }
+        />
+        <Route
+          path="/console-product-trends"
+          element={
+            checkAccess("console-product-trends") ? (
+              <ProductTrendsPage />
+            ) : (
+              <RestrictedAccess />
+            )
+          }
+        />
+        <Route
+          path="/console-vendor-reports"
+          element={
+            checkAccess("console-vendor-reports") ? (
+              <VendorReportsPage />
+            ) : (
+              <RestrictedAccess />
+            )
+          }
+        />
+        <Route
+          path="/console-rpn-performance"
+          element={
+            checkAccess("console-rpn-performance") ? (
+              <RpnPerformancePage />
+            ) : (
+              <RestrictedAccess />
+            )
+          }
+        />
+        <Route
+          path="/console-viral-growth"
+          element={
+            checkAccess("console-viral-growth") ? (
+              <ViralGrowthIntelligencePage />
+            ) : (
+              <RestrictedAccess />
+            )
           }
         />
         <Route
@@ -507,7 +593,21 @@ export default function App() {
   useEffect(() => {
     const storedSession = localStorage.getItem("activeStaffSession");
     if (storedSession) {
-      setIsLoggedIn(true);
+      try {
+        const session = JSON.parse(storedSession);
+        const staffId = session.staffId || session.id;
+        const staff = staffId ? staffService.getStaffById(staffId) : undefined;
+
+        if (staff && staff.status === "active" && !staff.isLocked) {
+          setIsLoggedIn(true);
+          return;
+        }
+      } catch (error) {
+        console.error("Failed to validate stored staff session", error);
+      }
+
+      sessionService.logoutSession();
+      setIsLoggedIn(false);
     }
   }, []);
 
@@ -522,7 +622,32 @@ export default function App() {
   }, [isLoggedIn]);
 
   const handleLogout = useCallback((msg?: string) => {
-    localStorage.removeItem("activeStaffSession");
+    const session = (() => {
+      try {
+        const raw = localStorage.getItem("activeStaffSession");
+        return raw ? JSON.parse(raw) : null;
+      } catch (error) {
+        console.error("Failed to parse activeStaffSession during logout", error);
+        return null;
+      }
+    })();
+
+    if (session?.staffId || session?.staffCode) {
+      try {
+        void staffAuditService.logAction({
+          eventType: "LOGOUT",
+          module: "auth",
+          severity: "info",
+          action: "Staff logged out",
+          recordType: "session",
+          recordId: session.staffId || session.staffCode,
+        });
+      } catch (error) {
+        console.error("Failed to audit logout", error);
+      }
+    }
+
+    sessionService.logoutSession();
     setIsLoggedIn(false);
     setShowWarning(false);
     if (typeof msg === "string") {

@@ -14,6 +14,7 @@ import {
   AlertTriangle,
   Clock,
 } from "lucide-react";
+import { matchesFreeOrderSearch } from "../utils/searchUtils.ts";
 
 interface PrimaryButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   children: React.ReactNode;
@@ -61,7 +62,7 @@ interface StatCardProps {
     isPositive: boolean;
   };
   icon?: LucideIcon;
-  variant?: "neutral" | "warning" | "error" | "success" | "danger";
+  variant?: "neutral" | "warning" | "error" | "success" | "danger" | "info";
 }
 
 export const StatCard: React.FC<StatCardProps> = ({
@@ -77,6 +78,7 @@ export const StatCard: React.FC<StatCardProps> = ({
     error: "border-red-500",
     success: "border-green-500",
     danger: "border-red-500",
+    info: "border-blue-500",
   };
 
   return (
@@ -113,11 +115,12 @@ export const StatCard: React.FC<StatCardProps> = ({
 };
 
 interface DataPanelProps {
-  title: string;
+  title?: string;
   children: React.ReactNode;
   actions?: React.ReactNode;
   subtitle?: string;
   className?: string;
+  headers?: React.ReactNode[];
 }
 
 export const DataPanel: React.FC<DataPanelProps> = ({
@@ -127,21 +130,23 @@ export const DataPanel: React.FC<DataPanelProps> = ({
   subtitle,
   className = "",
 }) => (
-  <div className={`card h-full flex flex-col p-0 overflow-hidden ${className}`}>
-    <div className="px-4 py-3 border-b border-gray-200 flex justify-between items-center bg-white shrink-0">
-      <div className="flex flex-col">
-        <h3 className="text-xs font-bold uppercase tracking-widest text-brand-charcoal">
-          {title}
-        </h3>
+  <div className={`card min-w-0 max-w-full flex flex-col p-0 overflow-hidden ${className}`}>
+    <div className="px-4 py-3 border-b border-gray-200 flex justify-between items-center gap-3 bg-white shrink-0 min-w-0">
+      <div className="flex min-w-0 flex-col">
+        {title && (
+          <h3 className="text-xs font-bold uppercase tracking-widest text-brand-charcoal">
+            {title}
+          </h3>
+        )}
         {subtitle && (
-          <span className="text-[9px] text-gray-400 font-mono mt-0.5">
+          <span className="text-[9px] text-gray-400 font-mono mt-0.5 break-words">
             {subtitle}
           </span>
         )}
       </div>
-      <div className="flex gap-2">{actions}</div>
+      <div className="flex shrink-0 gap-2">{actions}</div>
     </div>
-    <div className="flex-1 overflow-auto">{children}</div>
+    <div className="min-w-0 max-w-full overflow-hidden">{children}</div>
   </div>
 );
 
@@ -198,7 +203,8 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
 export const StatusBadge: React.FC<{
   status: string;
   variant?: "success" | "warning" | "error" | "info" | "neutral";
-}> = ({ status, variant = "neutral" }) => {
+  className?: string;
+}> = ({ status, variant = "neutral", className = "" }) => {
   const styles = {
     success: "bg-green-50 text-green-700 border-green-100",
     warning: "bg-orange-50 text-brand-orange border-orange-100",
@@ -209,7 +215,7 @@ export const StatusBadge: React.FC<{
 
   return (
     <span
-      className={`px-2 py-0.5 text-[9px] uppercase font-bold border ${styles[variant]}`}
+      className={`px-2 py-0.5 text-[9px] uppercase font-bold border ${styles[variant]} ${className}`}
     >
       {status}
     </span>
@@ -228,6 +234,193 @@ export const SearchInput: React.FC<
   </div>
 );
 
+export interface SearchableComboBoxProps<T> {
+  label?: string;
+  value?: string;
+  options: T[];
+  getOptionLabel: (option: T) => string;
+  getOptionValue?: (option: T) => string;
+  getOptionSearchText?: (option: T) => string;
+  onSelect: (option: T | null) => void;
+  placeholder?: string;
+  allowAddNew?: boolean;
+  onAddNew?: (value: string) => void;
+  disabled?: boolean;
+  emptyMessage?: string;
+  className?: string;
+}
+
+export function SearchableComboBox<T>({
+  label,
+  value = "",
+  options,
+  getOptionLabel,
+  getOptionValue,
+  getOptionSearchText,
+  onSelect,
+  placeholder = "Search...",
+  allowAddNew = false,
+  onAddNew,
+  disabled = false,
+  emptyMessage = "No matches found.",
+  className = "",
+}: SearchableComboBoxProps<T>) {
+  const [query, setQuery] = React.useState(value);
+  const [isOpen, setIsOpen] = React.useState(false);
+  const [activeIndex, setActiveIndex] = React.useState(0);
+  const wrapperRef = React.useRef<HTMLDivElement | null>(null);
+
+  React.useEffect(() => {
+    setQuery(value || "");
+  }, [value]);
+
+  React.useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        wrapperRef.current &&
+        !wrapperRef.current.contains(event.target as Node)
+      ) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const filteredOptions = React.useMemo(
+    () =>
+      options
+        .filter((option) =>
+          matchesFreeOrderSearch(
+            getOptionSearchText?.(option) || getOptionLabel(option),
+            query,
+          ),
+        )
+        .slice(0, 80),
+    [getOptionLabel, getOptionSearchText, options, query],
+  );
+
+  const selectOption = (option: T | null) => {
+    if (option) {
+      setQuery(getOptionLabel(option));
+    } else {
+      setQuery("");
+    }
+    onSelect(option);
+    setIsOpen(false);
+  };
+
+  const normalizedQuery = query.trim();
+  const canAdd =
+    allowAddNew &&
+    !!onAddNew &&
+    normalizedQuery.length > 0 &&
+    !options.some(
+      (option) =>
+        getOptionLabel(option).trim().toLowerCase() ===
+        normalizedQuery.toLowerCase(),
+    );
+
+  return (
+    <div ref={wrapperRef} className={`relative space-y-1.5 ${className}`}>
+      {label && (
+        <label className="text-[10px] uppercase font-bold text-stone-400">
+          {label}
+        </label>
+      )}
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 w-3.5 h-3.5 pointer-events-none" />
+        <input
+          type="text"
+          value={query}
+          disabled={disabled}
+          placeholder={placeholder}
+          onFocus={() => !disabled && setIsOpen(true)}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            setIsOpen(true);
+            setActiveIndex(0);
+          }}
+          onKeyDown={(event) => {
+            if (!isOpen && ["ArrowDown", "Enter"].includes(event.key)) {
+              setIsOpen(true);
+              return;
+            }
+            if (event.key === "ArrowDown") {
+              event.preventDefault();
+              setActiveIndex((index) =>
+                Math.min(index + 1, filteredOptions.length - 1),
+              );
+            }
+            if (event.key === "ArrowUp") {
+              event.preventDefault();
+              setActiveIndex((index) => Math.max(index - 1, 0));
+            }
+            if (event.key === "Enter") {
+              event.preventDefault();
+              const option = filteredOptions[activeIndex];
+              if (option) selectOption(option);
+              else if (canAdd) onAddNew?.(normalizedQuery);
+            }
+            if (event.key === "Escape") {
+              setIsOpen(false);
+            }
+          }}
+          className="w-full bg-white border border-stone-200 pl-9 pr-8 py-2 text-xs font-semibold text-brand-charcoal outline-none transition-colors focus:border-brand-orange disabled:bg-stone-100 disabled:text-stone-400"
+        />
+        {query && !disabled && (
+          <button
+            type="button"
+            aria-label="Clear selection"
+            onClick={() => selectOption(null)}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-stone-400 hover:text-brand-orange"
+          >
+            <X size={14} />
+          </button>
+        )}
+      </div>
+      {isOpen && !disabled && (
+        <div className="absolute z-50 mt-1 max-h-64 w-full overflow-y-auto border border-stone-200 bg-white shadow-xl">
+          {filteredOptions.map((option, index) => {
+            const optionValue = getOptionValue?.(option) || getOptionLabel(option);
+            return (
+              <button
+                key={`${optionValue}-${index}`}
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => selectOption(option)}
+                className={`block w-full px-3 py-2 text-left text-xs hover:bg-orange-50 ${
+                  index === activeIndex ? "bg-orange-50 text-brand-orange" : "text-stone-700"
+                }`}
+              >
+                {getOptionLabel(option)}
+              </button>
+            );
+          })}
+          {filteredOptions.length === 0 && (
+            <div className="px-3 py-3 text-xs text-stone-500">
+              {emptyMessage}
+            </div>
+          )}
+          {canAdd && (
+            <button
+              type="button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                onAddNew?.(normalizedQuery);
+                setIsOpen(false);
+              }}
+              className="block w-full border-t border-stone-100 px-3 py-2 text-left text-xs font-bold text-brand-orange hover:bg-orange-50"
+            >
+              + Add New {normalizedQuery}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export const FormSection: React.FC<{
   title: string;
   children: React.ReactNode;
@@ -244,8 +437,9 @@ export const FormField: React.FC<{
   label: string;
   children: React.ReactNode;
   required?: boolean;
-}> = ({ label, children, required }) => (
-  <div className="space-y-1.5">
+  className?: string;
+}> = ({ label, children, required, className = "" }) => (
+  <div className={`space-y-1.5 ${className}`}>
     <label className="text-[10px] uppercase font-bold text-stone-400">
       {label} {required && <span className="text-brand-orange">*</span>}
     </label>

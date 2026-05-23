@@ -18,3 +18,16 @@ View your app in AI Studio: https://ai.studio/apps/f743b1aa-0301-4b4d-be5c-f4702
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
+
+## Firestore Indexes
+
+Catalogue archive cleanup requires this Firestore composite index:
+
+- Collection group: `catalogueGenerations`
+- Fields: `status` ascending, `generatedAt` ascending, `__name__` ascending
+
+Catalogue history sorting/filtering also requires the Firebase console
+suggested composite index for `catalogueGenerations` queries that combine
+`status` with `generatedAt` descending ordering.
+
+These indexes are defined in [firestore.indexes.json](firestore.indexes.json).

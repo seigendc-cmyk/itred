@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from 'react'
 import {
   PageHeader,
   DataPanel,
@@ -14,7 +14,8 @@ import {
   StatusBadge,
   TablePanel,
   EmptyState,
-} from "../components/CommonUI.tsx";
+  BrandedAlertModal
+} from '../components/CommonUI.tsx'
 import {
   Download,
   Copy,
@@ -31,16 +32,37 @@ import {
   Layers,
   MessageSquare,
   RefreshCcw,
-} from "lucide-react";
-import { vendorService } from "../services/vendorService.ts";
-import { productService } from "../services/productService.ts";
-import { cahService } from "../services/cahService.ts";
-import { pricingPlanService } from "../services/pricingPlanService.ts";
-import { permissionService } from "../services/permissionService.ts";
-import { storefrontService } from "../services/storefrontService.ts";
-import { settingsService } from "../services/settingsService.ts";
-import { analyticsService } from "../services/analyticsService.ts";
-import { generateVendorStorefrontHtml } from "../lib/storefrontTemplate.ts";
+  Share2,
+  Loader2
+} from 'lucide-react'
+import {
+  getDoc,
+  getDocs,
+  query,
+  where,
+  collection,
+  doc
+} from 'firebase/firestore'
+import { db } from '../lib/firebase.ts'
+import { getBillableProductsForVendor } from '../utils/planQuotaUtils.ts'
+import { vendorService } from '../services/vendorService.ts'
+import { productService } from '../services/productService.ts'
+import { cahService } from '../services/cahService.ts'
+import { pricingPlanService } from '../services/pricingPlanService.ts'
+import { permissionService } from '../services/permissionService.ts'
+import { storefrontService } from '../services/storefrontService.ts'
+import { settingsService } from '../services/settingsService.ts'
+import { analyticsService } from '../services/analyticsService.ts'
+import { firebaseHealthService } from '../services/firebaseHealthService.ts'
+import { planEntitlementService } from '../services/planEntitlementService.ts'
+import { vendorPlanUsageService } from '../services/vendorPlanUsageService.ts'
+import { generateVendorStorefrontHtml } from '../lib/storefrontTemplate.ts'
+import { planAllowsFeature } from '../services/entitlementEngine.ts'
+import { sanitizeForFirestore } from '../utils/firestoreSanitize.ts'
+import {
+  buildVendorProductExportRows,
+  exportVendorProductRows
+} from '../utils/vendorProductExport.ts'
 import {
   Vendor,
   Product,
@@ -51,217 +73,329 @@ import {
   Staff,
   DeliveryStaff,
   WhatsAppActivityLog,
-  SystemSettings,
-} from "../types.ts";
-import { asArray } from "../utils/safeData.ts";
-import { focusMainContent } from "../utils/uiHelpers.ts";
-import { WhatsAppActivityQuickLog } from "../components/WhatsAppActivityQuickLog.tsx";
+  SystemSettings
+} from '../types.ts'
+import { asArray } from '../utils/safeData.ts'
+import { focusMainContent } from '../utils/uiHelpers.ts'
+import { WhatsAppActivityQuickLog } from '../components/WhatsAppActivityQuickLog.tsx'
+import { masterDataCacheService } from '../services/masterDataCacheService.ts'
+
+const logAnalyticsEvent = (payload: any) => {
+  void analyticsService.logEvent(payload).catch((error: any) => {
+    firebaseHealthService.reportError('analyticsService.logEvent', error)
+  })
+}
 
 const getBase64ImageSize = (dataUrl: string) => {
-  if (!dataUrl) return 0;
-  const matches = dataUrl.match(/base64,(.*)$/);
-  if (!matches) return 0;
-  const length = matches[1].length;
-  return Math.ceil((length * 3) / 4);
-};
+  if (!dataUrl) return 0
+  const matches = dataUrl.match(/base64,(.*)$/)
+  if (!matches) return 0
+  const length = matches[1].length
+  return Math.ceil((length * 3) / 4)
+}
 
-const estimateHtmlSize = (html: string) => new Blob([html]).size;
+const estimateHtmlSize = (html: string) => new Blob([html]).size
 
 export const VendorStorefrontBuilder: React.FC = () => {
-  const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [cahLinks, setCahLinks] = useState<CAHLink[]>([]);
-  const [plans, setPlans] = useState<PricingPlan[]>([]);
-  const [storefronts, setStorefronts] = useState<VendorStorefront[]>([]);
+  const [vendors, setVendors] = useState<Vendor[]>([])
+  const [products, setProducts] = useState<Product[]>([])
+  const [cahLinks, setCahLinks] = useState<CAHLink[]>([])
+  const [plans, setPlans] = useState<PricingPlan[]>([])
+  const [storefronts, setStorefronts] = useState<VendorStorefront[]>([])
   const [systemSettings, setSystemSettings] = useState<SystemSettings | null>(
-    null,
-  );
+    null
+  )
 
-  const [selectedVendorId, setSelectedVendorId] = useState("");
-  const [title, setTitle] = useState("");
-  const [slogan, setSlogan] = useState("");
-  const [expiryDate, setExpiryDate] = useState("");
-  const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
-  const [selectedBranchIds, setSelectedBranchIds] = useState<string[]>([]);
-  const [selectedStaffIds, setSelectedStaffIds] = useState<string[]>([]);
-  const [selectedDeliveryIds, setSelectedDeliveryIds] = useState<string[]>([]);
-  const [selectedCAHLinkIds, setSelectedCAHLinkIds] = useState<string[]>([]);
-  const [storefrontId, setStorefrontId] = useState<string | null>(null);
-  const [generatedHtml, setGeneratedHtml] = useState("");
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [selectedVendorId, setSelectedVendorId] = useState('')
+  const [title, setTitle] = useState('')
+  const [slogan, setSlogan] = useState('')
+  const [expiryDate, setExpiryDate] = useState('')
+  const [selectedProductIds, setSelectedProductIds] = useState<string[]>([])
+  const [selectedBranchIds, setSelectedBranchIds] = useState<string[]>([])
+  const [selectedStaffIds, setSelectedStaffIds] = useState<string[]>([])
+  const [selectedDeliveryIds, setSelectedDeliveryIds] = useState<string[]>([])
+  const [selectedCAHLinkIds, setSelectedCAHLinkIds] = useState<string[]>([])
+  const [storefrontId, setStorefrontId] = useState<string | null>(null)
+  const [generatedHtml, setGeneratedHtml] = useState('')
+  const [isGenerating, setIsGenerating] = useState(false)
   const [activeStorefrontId, setActiveStorefrontId] = useState<string | null>(
-    null,
-  );
+    null
+  )
+  const [isLoadingData, setIsLoadingData] = useState(true)
 
-  const [isQuickLogOpen, setIsQuickLogOpen] = useState(false);
+  const [isQuickLogOpen, setIsQuickLogOpen] = useState(false)
   const [quickLogData, setQuickLogData] = useState<
     Partial<WhatsAppActivityLog>
-  >({});
+  >({})
+  const [alertConfig, setAlertConfig] = useState<{
+    isOpen: boolean
+    title?: string
+    message: string
+    type?: 'success' | 'error' | 'warning' | 'info'
+  }>({
+    isOpen: false,
+    title: 'seiGEN Commerce',
+    message: '',
+    type: 'success'
+  })
+
+  const showAlert = (
+    message: string,
+    type: 'success' | 'error' | 'warning' | 'info' = 'success'
+  ) =>
+    setAlertConfig({
+      isOpen: true,
+      title: 'seiGEN Commerce',
+      message,
+      type
+    })
 
   // Safe array wrappers
-  const safeVendors = asArray<Vendor>(vendors);
-  const safeProducts = asArray<Product>(products);
-  const safeCahLinks = asArray<CAHLink>(cahLinks);
-  const safePlans = asArray<PricingPlan>(plans);
-  const safeStorefronts = asArray<VendorStorefront>(storefronts);
+  const safeVendors = asArray<Vendor>(vendors)
+  const safeProducts = asArray<Product>(products)
+  const safeCahLinks = asArray<CAHLink>(cahLinks)
+  const safePlans = asArray<PricingPlan>(plans)
+  const safeStorefronts = asArray<VendorStorefront>(storefronts)
 
   useEffect(() => {
     const loadData = async () => {
+      setIsLoadingData(true)
+      const startMs = performance.now()
       try {
+        const [cachedVendors, cachedLinks, cachedPlans] = await Promise.all([
+          masterDataCacheService.getVendors(),
+          masterDataCacheService.getWhatsappLinks(),
+          masterDataCacheService.getPlans()
+        ])
+        if (cachedVendors.length > 0) {
+          setVendors(
+            cachedVendors.map(v => ({
+              id: v.vendorId || v.id,
+              systemCode: '',
+              name: v.name || v.vendorName,
+              tradingName: v.tradingName || v.vendorName,
+              ownerFullName: '',
+              sector: v.sector || '',
+              category: v.category,
+              businessType: v.category || '',
+              vendorType: 'other',
+              mainPhone: '',
+              whatsappNumber: '',
+              email: '',
+              country: '',
+              province: '',
+              cityTown: v.cityTown || v.city || '',
+              district: '',
+              suburb: v.suburb || '',
+              streetAddress: '',
+              businessDescription: '',
+              catalogueDisplayName: v.vendorName,
+              catalogueSlogan: '',
+              openingHours: '',
+              status: (v.status as any) || 'active',
+              planId: v.planId || '',
+              subscriptionStatus: (v.subscriptionStatus as any) || 'active',
+              dataSource: 'master_cache',
+              createdBy: '',
+              updatedBy: '',
+              createdAt: '',
+              updatedAt: v.updatedAt || '',
+              branches: [],
+              staff: [],
+              deliveryStaff: []
+            }) as Vendor)
+          )
+        }
+        if (cachedLinks.length > 0) setCahLinks(cachedLinks)
+        if (cachedPlans.length > 0) setPlans(cachedPlans)
+
         const [
           rawVendors,
           rawProducts,
           rawCahLinks,
           rawPlans,
           rawStorefronts,
-          rawSettings,
+          rawSettings
         ] = await Promise.all([
           vendorService.getVendors(),
           productService.getProducts(),
           cahService.getLinks(),
           pricingPlanService.getPlans(),
           storefrontService.getAllStorefronts(),
-          settingsService.getSettings(),
-        ]);
+          settingsService.getSettings()
+        ])
 
-        setVendors(asArray<Vendor>(rawVendors));
-        setProducts(asArray<Product>(rawProducts));
-        setCahLinks(asArray<CAHLink>(rawCahLinks));
-        setPlans(asArray<PricingPlan>(rawPlans));
-        setStorefronts(asArray<VendorStorefront>(rawStorefronts));
-        setSystemSettings(rawSettings);
+        setVendors(asArray<Vendor>(rawVendors))
+        setProducts(asArray<Product>(rawProducts))
+        setCahLinks(asArray<CAHLink>(rawCahLinks))
+        setPlans(asArray<PricingPlan>(rawPlans))
+        setStorefronts(asArray<VendorStorefront>(rawStorefronts))
+        setSystemSettings(rawSettings)
       } catch (error) {
         console.warn(
-          "Vendor Storefront Builder data failed to load. Using empty arrays.",
-          error,
-        );
-        setVendors([]);
-        setProducts([]);
-        setCahLinks([]);
-        setPlans([]);
-        setStorefronts([]);
+          'Vendor Storefront Builder data failed to load. Using empty arrays.',
+          error
+        )
+        setVendors([])
+        setProducts([])
+        setCahLinks([])
+        setPlans([])
+        setStorefronts([])
+      } finally {
+        setIsLoadingData(false)
+        console.info('Data load completed', {
+          page: 'VendorStorefrontBuilder',
+          elapsedMs: Math.round(performance.now() - startMs)
+        })
       }
-    };
-    void loadData();
-  }, []);
+    }
+    void loadData()
+  }, [])
 
   const selectedVendor = useMemo(
-    () => safeVendors.find((v) => v.id === selectedVendorId),
-    [selectedVendorId, safeVendors],
-  );
+    () => safeVendors.find(v => v.id === selectedVendorId),
+    [selectedVendorId, safeVendors]
+  )
   const selectedVendorPlan = useMemo(
     () =>
       selectedVendor
-        ? safePlans.find((p) => p.id === selectedVendor.planId)
+        ? safePlans.find(p => p.id === selectedVendor.planId)
         : undefined,
-    [selectedVendor, safePlans],
-  );
+    [selectedVendor, safePlans]
+  )
   const vendorProducts = useMemo(
     () =>
-      safeProducts.filter(
-        (p) => p.vendorId === selectedVendorId && p.status === "active",
+      getBillableProductsForVendor(safeProducts, selectedVendorId).sort(
+        (a, b) =>
+          (b.productMode === 'branded_product' ? 1 : 0) -
+            (a.productMode === 'branded_product' ? 1 : 0) ||
+          String(a.name || a.productName || '').localeCompare(
+            String(b.name || b.productName || '')
+          )
       ),
-    [safeProducts, selectedVendorId],
-  );
+    [safeProducts, selectedVendorId]
+  )
   const selectedBranches = useMemo(
     () =>
-      asArray<Branch>(selectedVendor?.branches).filter((b) =>
-        selectedBranchIds.includes(b.id),
+      asArray<Branch>(selectedVendor?.branches).filter(b =>
+        selectedBranchIds.includes(b.id)
       ) || [],
-    [selectedBranchIds, selectedVendor],
-  );
+    [selectedBranchIds, selectedVendor]
+  )
   const selectedStaff = useMemo(
     () =>
-      asArray<Staff>(selectedVendor?.staff).filter((s) =>
-        selectedStaffIds.includes(s.id),
+      asArray<Staff>(selectedVendor?.staff).filter(s =>
+        selectedStaffIds.includes(s.id)
       ) || [],
-    [selectedStaffIds, selectedVendor],
-  );
+    [selectedStaffIds, selectedVendor]
+  )
   const selectedDelivery = useMemo(
     () =>
-      asArray<DeliveryStaff>(selectedVendor?.deliveryStaff).filter((d) =>
-        selectedDeliveryIds.includes(d.id),
+      asArray<DeliveryStaff>(selectedVendor?.deliveryStaff).filter(d =>
+        selectedDeliveryIds.includes(d.id)
       ) || [],
-    [selectedDeliveryIds, selectedVendor],
-  );
+    [selectedDeliveryIds, selectedVendor]
+  )
   const selectedCAHLinks = useMemo(
-    () => safeCahLinks.filter((link) => selectedCAHLinkIds.includes(link.id)),
-    [safeCahLinks, selectedCAHLinkIds],
-  );
+    () => safeCahLinks.filter(link => selectedCAHLinkIds.includes(link.id)),
+    [safeCahLinks, selectedCAHLinkIds]
+  )
 
   const selectedProducts = useMemo(
     () =>
-      asArray<Product>(vendorProducts).filter((p) =>
-        selectedProductIds.includes(p.id),
+      asArray<Product>(vendorProducts).filter(p =>
+        selectedProductIds.includes(p.id)
       ),
-    [vendorProducts, selectedProductIds],
-  );
+    [vendorProducts, selectedProductIds]
+  )
+
+  const handleExportStorefrontProducts = (selectedOnly = true) => {
+    const exportProducts = selectedOnly ? selectedProducts : vendorProducts
+    const vendorName = selectedVendor?.tradingName || selectedVendor?.name || 'Vendor'
+    const rows = buildVendorProductExportRows({
+      products: exportProducts,
+      vendorName
+    })
+
+    if (!exportVendorProductRows(rows, vendorName, selectedOnly ? 'Selected-Product-List' : 'Product-List')) {
+      showAlert('No products available to export.', 'info')
+    }
+  }
   const selectedImages = useMemo(
-    () => selectedProducts.filter((p) => !!p.imageUrl),
-    [selectedProducts],
-  );
+    () => selectedProducts.filter(p => !!p.imageUrl),
+    [selectedProducts]
+  )
   const monthlyDeployments = useMemo(() => {
-    if (!selectedVendor) return 0;
-    const now = new Date();
+    if (!selectedVendor) return 0
+    const now = new Date()
     return safeStorefronts.filter(
-      (sf) =>
+      sf =>
         sf.vendorId === selectedVendor.id &&
-        sf.generatedAt.startsWith(now.toISOString().slice(0, 7)),
-    ).length;
-  }, [selectedVendor, safeStorefronts]);
+        sf.generatedAt.startsWith(now.toISOString().slice(0, 7))
+    ).length
+  }, [selectedVendor, safeStorefronts])
 
   const planWarnings = useMemo(() => {
-    const warnings: string[] = [];
-    if (!selectedVendorPlan) return warnings;
+    const warnings: string[] = []
+    if (!selectedVendorPlan) return warnings
 
     if (!selectedVendorPlan.isVendorStorefrontEnabled) {
-      warnings.push("Storefront features are not enabled for this plan.");
+      warnings.push('Storefront features are not enabled for this plan.')
     }
 
     if (selectedImages.length > selectedVendorPlan.maxStorefrontImages) {
       warnings.push(
-        `Selected images exceed plan maximum (${selectedImages.length}/${selectedVendorPlan.maxStorefrontImages}).`,
-      );
+        `Selected images exceed plan maximum (${selectedImages.length}/${selectedVendorPlan.maxStorefrontImages}).`
+      )
     }
 
     if (selectedImages.length > 500) {
       warnings.push(
-        `Maximum supported images is 500. Reduce selection or split into multiple storefronts.`,
-      );
+        `Maximum supported images is 500. Reduce selection or split into multiple storefronts.`
+      )
     }
 
     if (
       monthlyDeployments >= selectedVendorPlan.maxStorefrontDeploymentsPerMonth
     ) {
       warnings.push(
-        `Monthly deployment limit reached (${monthlyDeployments}/${selectedVendorPlan.maxStorefrontDeploymentsPerMonth}). Upgrade recommended.`,
-      );
+        `Monthly deployment limit reached (${monthlyDeployments}/${selectedVendorPlan.maxStorefrontDeploymentsPerMonth}). Upgrade recommended.`
+      )
     }
 
-    return warnings;
-  }, [selectedImages, selectedVendorPlan, monthlyDeployments]);
+    return warnings
+  }, [selectedImages, selectedVendorPlan, monthlyDeployments])
 
-  const selectedBranchLimit = selectedVendorPlan?.maxBranchesPerVendor ?? 0;
-  const selectedStaffLimit = selectedVendorPlan?.maxStaffPerVendor ?? 0;
+  const selectedBranchLimit = selectedVendorPlan?.maxBranchesPerVendor ?? 0
+  const selectedStaffLimit = selectedVendorPlan?.maxStaffPerVendor ?? 0
   const selectedDeliveryLimit =
-    selectedVendorPlan?.maxDeliveryContactsPerVendor ?? 0;
-
+    selectedVendorPlan?.maxDeliveryContactsPerVendor ?? 0
 
   const readinessScore = useMemo(() => {
-    let score = 0;
+    let score = 0
 
-    if (selectedVendor) score += 15;
-    if (selectedVendor?.logoAssetUrl || selectedVendor?.logoUrl || selectedVendor?.businessLogoUrl) score += 10;
-    if (selectedVendor?.bannerAssetUrl || selectedVendor?.bannerUrl || selectedVendor?.businessBannerUrl) score += 10;
-    if (selectedProducts.length > 0) score += 20;
-    if (selectedImages.length > 0) score += 10;
-    if (selectedVendor?.whatsappNumber || selectedVendor?.whatsapp) score += 10;
-    if (selectedBranches.length > 0) score += 10;
-    if (selectedStaff.length > 0) score += 5;
-    if (selectedDelivery.length > 0) score += 5;
-    if (selectedCAHLinks.length > 0) score += 5;
+    if (selectedVendor) score += 15
+    if (
+      selectedVendor?.logoAssetUrl ||
+      selectedVendor?.logoUrl ||
+      selectedVendor?.businessLogoUrl
+    )
+      score += 10
+    if (
+      selectedVendor?.bannerAssetUrl ||
+      selectedVendor?.bannerUrl ||
+      selectedVendor?.businessBannerUrl
+    )
+      score += 10
+    if (selectedProducts.length > 0) score += 20
+    if (selectedImages.length > 0) score += 10
+    if (selectedVendor?.whatsappNumber || selectedVendor?.whatsapp) score += 10
+    if (selectedBranches.length > 0) score += 10
+    if (selectedStaff.length > 0) score += 5
+    if (selectedDelivery.length > 0) score += 5
+    if (selectedCAHLinks.length > 0) score += 5
 
-    return Math.min(100, score);
+    return Math.min(100, score)
   }, [
     selectedVendor,
     selectedProducts.length,
@@ -269,58 +403,87 @@ export const VendorStorefrontBuilder: React.FC = () => {
     selectedBranches.length,
     selectedStaff.length,
     selectedDelivery.length,
-    selectedCAHLinks.length,
-  ]);
+    selectedCAHLinks.length
+  ])
 
   const generatedStorefront = useMemo(
-    () => safeStorefronts.find((sf) => sf.id === activeStorefrontId) || null,
-    [activeStorefrontId, safeStorefronts],
-  );
-  const selectedHtml = generatedStorefront?.htmlContent || generatedHtml;
-  const currentStorefrontId = generatedStorefront?.id || storefrontId;
+    () => safeStorefronts.find(sf => sf.id === activeStorefrontId) || null,
+    [activeStorefrontId, safeStorefronts]
+  )
+  const selectedHtml = generatedStorefront?.htmlContent || generatedHtml
+  const currentStorefrontId = generatedStorefront?.id || storefrontId
+  const hostedStorefrontUrl =
+    (generatedStorefront as (VendorStorefront & { hostedUrl?: string }) | null)
+      ?.hostedUrl ||
+    (generatedStorefront as (VendorStorefront & { publicUrl?: string }) | null)
+      ?.publicUrl ||
+    ''
+  const generatedStorefrontUrl =
+    (
+      generatedStorefront as
+        | (VendorStorefront & { storefrontUrl?: string })
+        | null
+    )?.storefrontUrl ||
+    (generatedStorefront as (VendorStorefront & { url?: string }) | null)
+      ?.url ||
+    ''
+  const vendorStorefrontUrl =
+    (selectedVendor as (Vendor & { storefrontUrl?: string }) | null)
+      ?.storefrontUrl ||
+    (selectedVendor as (Vendor & { storefrontLink?: string }) | null)
+      ?.storefrontLink ||
+    (selectedVendor as (Vendor & { hostedStorefrontUrl?: string }) | null)
+      ?.hostedStorefrontUrl ||
+    ''
+  const shareableStorefrontUrl =
+    hostedStorefrontUrl || generatedStorefrontUrl || vendorStorefrontUrl
 
-  let defaultFilename = "Vendor_Storefront.html";
+  let defaultFilename = 'Vendor_Storefront.html'
   if (selectedVendor && selectedVendor.name) {
-    const yyyyMmDd = new Date().toISOString().split("T")[0];
-    const safeFileName = `Vendor_${selectedVendor.name}_${selectedVendor.sector || "General"}_${yyyyMmDd}`;
+    const yyyyMmDd = new Date().toISOString().split('T')[0]
+    const safeFileName = `Vendor_${selectedVendor.name}_${
+      selectedVendor.sector || 'General'
+    }_${yyyyMmDd}`
     defaultFilename = `${safeFileName
-      .replace(/\s+/g, "_")
-      .replace(/[^a-zA-Z0-9_-]/g, "")
-      .replace(/_+/g, "_")}.html`;
+      .replace(/\s+/g, '_')
+      .replace(/[^a-zA-Z0-9_-]/g, '')
+      .replace(/_+/g, '_')}.html`
   }
-  const selectedFileName = generatedStorefront?.htmlFileName || defaultFilename;
+  const selectedFileName = generatedStorefront?.htmlFileName || defaultFilename
 
   const handleSelectProduct = (productId: string) => {
-    setSelectedProductIds((prev) =>
+    setSelectedProductIds(prev =>
       prev.includes(productId)
-        ? prev.filter((id) => id !== productId)
-        : [...prev, productId],
-    );
-  };
+        ? prev.filter(id => id !== productId)
+        : [...prev, productId]
+    )
+  }
 
   const handleSelectMany = (
     ids: string[],
-    setter: React.Dispatch<React.SetStateAction<string[]>>,
+    setter: React.Dispatch<React.SetStateAction<string[]>>
   ) => {
-    setter((prev) => {
-      const missing = ids.filter((id) => !prev.includes(id));
-      return [...prev, ...missing];
-    });
-  };
+    setter(prev => {
+      const missing = ids.filter(id => !prev.includes(id))
+      return [...prev, ...missing]
+    })
+  }
 
-  const getStorefrontRecord = (html: string) => {
-    if (!selectedVendor) return null;
-    const storefrontId = `SF-${Date.now().toString().slice(-8)}`;
-    const now = new Date().toISOString();
-    const yyyyMmDd = now.split("T")[0];
+  const getStorefrontRecord = (html: string, specificId?: string) => {
+    if (!selectedVendor) return null
+    const storefrontId = specificId || `SF-${Date.now().toString().slice(-8)}`
+    const now = new Date().toISOString()
+    const yyyyMmDd = now.split('T')[0]
 
-    let safeFileName = "Vendor_Storefront";
+    let safeFileName = 'Vendor_Storefront'
     if (selectedVendor.name) {
-      safeFileName = `Vendor_${selectedVendor.name}_${selectedVendor.sector || "General"}_${yyyyMmDd}`;
+      safeFileName = `Vendor_${selectedVendor.name}_${
+        selectedVendor.sector || 'General'
+      }_${yyyyMmDd}`
       safeFileName = safeFileName
-        .replace(/\s+/g, "_")
-        .replace(/[^a-zA-Z0-9_-]/g, "")
-        .replace(/_+/g, "_");
+        .replace(/\s+/g, '_')
+        .replace(/[^a-zA-Z0-9_-]/g, '')
+        .replace(/_+/g, '_')
     }
 
     return {
@@ -330,337 +493,571 @@ export const VendorStorefrontBuilder: React.FC = () => {
       vendorSystemCode: selectedVendor.systemCode,
       vendorName: selectedVendor.name,
       title: title || `${selectedVendor.name} Storefront`,
-      slogan: slogan || selectedVendor.catalogueSlogan || "",
+      slogan: slogan || selectedVendor.catalogueSlogan || '',
       selectedProductIds,
       selectedBranchIds,
       selectedStaffIds,
       selectedDeliveryContactIds: selectedDeliveryIds,
       selectedCAHLinkIds,
-      generatedBy: "Backend Staff",
+      generatedBy: 'Backend Staff',
       generatedAt: now,
       deployedAt: undefined,
       expiryDate: expiryDate || undefined,
-      status: "generated" as const,
+      status: 'generated' as const,
       estimatedHtmlSize: estimateHtmlSize(html),
       productCount: selectedProducts.length,
       imageCount: selectedImages.length,
       htmlFileName: `${safeFileName}.html`,
       fileName: `${safeFileName}.html`,
-      htmlContent: html,
-    };
-  };
+      htmlContent: html
+    }
+  }
 
-  const generateHtml = () => {
+  const generateHtml = async () => {
     if (!selectedVendor) {
-      alert("Select a vendor before creating the storefront.");
-      return;
+      showAlert('Select a vendor before creating the storefront.', 'warning')
+      return
     }
     if (selectedProducts.length === 0) {
-      alert("Select at least one active product.");
-      return;
-    }
-    if (
-      planWarnings.some(
-        (w) => w.includes("not enabled") || w.includes("exceed"),
-      )
-    ) {
-      if (
-        !confirm(
-          "Storefront creation contains warnings or plan violations. Continue anyway?",
-        )
-      ) {
-        return;
-      }
+      showAlert('Select at least one active product.', 'warning')
+      return
     }
 
-    setIsGenerating(true);
-    focusMainContent();
-    setTimeout(() => {
+    const violations: string[] = [...planWarnings]
+    if (selectedBranches.length > selectedBranchLimit) {
+      violations.push(
+        `Selected branches exceed plan maximum (${selectedBranches.length}/${selectedBranchLimit}).`
+      )
+    }
+    if (selectedStaff.length > selectedStaffLimit) {
+      violations.push(
+        `Selected staff exceed plan maximum (${selectedStaff.length}/${selectedStaffLimit}).`
+      )
+    }
+    if (selectedDelivery.length > selectedDeliveryLimit) {
+      violations.push(
+        `Selected delivery contacts exceed plan maximum (${selectedDelivery.length}/${selectedDeliveryLimit}).`
+      )
+    }
+
+    const overrideAllowed =
+      permissionService.canEdit('pricing') ||
+      permissionService.canApprove('pricing')
+
+    await Promise.allSettled([
+      masterDataCacheService.refreshPlans(),
+      masterDataCacheService.refreshSubscriptions(),
+      selectedVendor.id
+        ? masterDataCacheService.invalidateVendor(selectedVendor.id)
+        : Promise.resolve()
+    ])
+    if (violations.length > 0 && !overrideAllowed) {
+      showAlert(
+        `Storefront generation blocked: ${violations.join(' ')}`,
+        'warning'
+      )
+      return
+    }
+
+    setIsGenerating(true)
+    focusMainContent()
+
+    try {
+      let freshVendor = selectedVendor
+      let freshPlan = selectedVendorPlan
+      let freshDeployments = monthlyDeployments
+
+      const vendorSnap = await getDoc(doc(db, 'vendors', selectedVendor.id))
+      if (vendorSnap.exists()) {
+        freshVendor = { id: vendorSnap.id, ...vendorSnap.data() } as Vendor
+      }
+
+      const subSnap = await getDocs(
+        query(
+          collection(db, 'subscriptions'),
+          where('vendorId', '==', selectedVendor.id)
+        )
+      )
+
+      let activePlanId = freshVendor.planId
+      if (!subSnap.empty) {
+        const activeSubs = subSnap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter((s: any) =>
+            ['active', 'trial', 'past_due', 'grace_period'].includes(s.status)
+          )
+          .sort(
+            (a: any, b: any) =>
+              new Date(b.createdAt || 0).getTime() -
+              new Date(a.createdAt || 0).getTime()
+          )
+
+        if (activeSubs.length > 0 && activeSubs[0].planId) {
+          activePlanId = activeSubs[0].planId
+        }
+      }
+
+      if (activePlanId) {
+        let planSnap = await getDoc(doc(db, 'pricing_plans', activePlanId))
+        if (!planSnap.exists()) {
+          planSnap = await getDoc(doc(db, 'pricingPlans', activePlanId))
+        }
+        if (planSnap.exists()) {
+          freshPlan = { id: planSnap.id, ...planSnap.data() } as PricingPlan
+        }
+      }
+
+      const nowPrefix = new Date().toISOString().slice(0, 7)
+      const usageSnap = await getDocs(
+        query(
+          collection(db, 'vendor_plan_usage_ledger'),
+          where('vendorId', '==', selectedVendor.id),
+          where('usageType', '==', 'storefront_generated')
+        )
+      )
+      freshDeployments = usageSnap.docs.filter(
+        d =>
+          d.data().monthKey === nowPrefix ||
+          String(d.data().createdAt || '').startsWith(nowPrefix)
+      ).length
+
+      const isFeatureAllowed = planAllowsFeature(
+        freshPlan,
+        'generate_storefront'
+      )
+
+      if (!isFeatureAllowed && !overrideAllowed) {
+        setIsGenerating(false)
+        showAlert(
+          `Storefront generation blocked. Current Plan: ${
+            freshPlan?.name || 'Unassigned'
+          }. Usage: 0/0. Reason: Storefront feature is not enabled on this plan.`,
+          'warning'
+        )
+        return
+      }
+
+      const limit = freshPlan?.maxStorefrontDeploymentsPerMonth ?? 0
+      const isUnlimited =
+        limit === -1 ||
+        limit === null ||
+        String(limit).toLowerCase() === 'unlimited'
+
+      if (!isUnlimited && freshDeployments >= limit && !overrideAllowed) {
+        setIsGenerating(false)
+        showAlert(
+          `Storefront generation blocked. Current Plan: ${
+            freshPlan?.name || 'Unassigned'
+          }. Usage: ${freshDeployments}/${limit}. Reason: Monthly deployment limit reached.`,
+          'warning'
+        )
+        return
+      }
+
       const resolveFeedbackNumber = () => {
         const routes = (systemSettings?.feedbackWhatsAppRoutes || [])
-          .filter((r) => r.isActive)
-          .sort((a, b) => b.priority - a.priority);
-        let match = routes.find((r) => r.sector === selectedVendor.sector);
-        if (match) return match.whatsappNumber;
-        match = routes.find((r) => r.purpose === "DEFAULT");
-        if (match) return match.whatsappNumber;
-        return systemSettings?.defaultFeedbackWhatsAppNumber || "";
-      };
+          .filter(r => r.isActive)
+          .sort((a, b) => b.priority - a.priority)
+        let match = routes.find(r => r.sector === freshVendor.sector)
+        if (match) return match.whatsappNumber
+        match = routes.find(r => r.purpose === 'DEFAULT')
+        if (match) return match.whatsappNumber
+        return systemSettings?.defaultFeedbackWhatsAppNumber || ''
+      }
 
-      const newStorefrontId = `SF-${Date.now().toString().slice(-8)}`;
-      setStorefrontId(newStorefrontId);
+      const newStorefrontId = `SF-${Date.now().toString().slice(-8)}`
+      setStorefrontId(newStorefrontId)
 
       const html = generateVendorStorefrontHtml(
-        selectedVendor,
+        freshVendor,
         selectedProducts,
         selectedBranchIds.length ? selectedBranches : [],
         selectedStaff,
         selectedDelivery,
-        selectedCAHLinks,
-        title || `${selectedVendor.name} Storefront`,
-        slogan || selectedVendor.catalogueSlogan || "",
+        safeCahLinks,
+        title || `${freshVendor.name} Storefront`,
+        slogan || freshVendor.catalogueSlogan || '',
         new Date().toISOString(),
         newStorefrontId,
         expiryDate || undefined,
-        selectedVendorPlan?.isVendorStorefrontWhatsAppButtonEnabled ?? false,
-        selectedVendorPlan?.isVendorStorefrontDirectCallButtonEnabled ?? false,
-        selectedVendor.id,
+        freshPlan?.isVendorStorefrontWhatsAppButtonEnabled ?? false,
+        freshPlan?.isVendorStorefrontDirectCallButtonEnabled ?? false,
+        !!freshPlan?.enableStorefrontCart,
+        !!freshPlan?.enableWhatsappOrders,
+        freshVendor.id,
         resolveFeedbackNumber(),
-        systemSettings?.syncEndpointUrl || "",
-      );
+        systemSettings?.syncEndpointUrl || '',
+        (systemSettings as any)?.defaultCAHLink ||
+          (systemSettings as any)?.defaultCahLink ||
+          (systemSettings as any)?.defaultAccessHubLink ||
+          (systemSettings as any)?.commerceAccessHubLink ||
+          ''
+      )
 
-      setGeneratedHtml(html);
-      const storefront = getStorefrontRecord(html, newStorefrontId);
+      setGeneratedHtml(html)
+      const storefront = getStorefrontRecord(html, newStorefrontId)
       if (storefront) {
-        storefrontService.saveStorefront(storefront);
-        const updatedStorefronts = storefrontService.getAllStorefronts();
-        setStorefronts(asArray<VendorStorefront>(updatedStorefronts));
-        setActiveStorefrontId(storefront.id);
-        analyticsService.logEvent({
-          eventType: "STOREFRONT_GENERATED",
-          actorType: "backend_staff",
-          actorName: "Backend Staff",
-          vendorId: selectedVendor.id,
-          vendorName: selectedVendor.name,
-          details: {
-            storefrontId: storefront.storefrontId,
-            productCount: storefront.productCount,
-            imageCount: storefront.imageCount,
-            estimatedHtmlSize: storefront.estimatedHtmlSize,
-          },
-        });
+        storefrontService.saveStorefront(sanitizeForFirestore(storefront))
+        vendorPlanUsageService.recordUsage(
+          sanitizeForFirestore({
+            vendorId: freshVendor.id,
+            usageType: 'storefront_generated',
+            quantity: 1,
+            sourceId: storefront.id,
+            description: 'Vendor storefront generated'
+          })
+        )
+        const updatedStorefronts = storefrontService.getAllStorefronts()
+        setStorefronts(asArray<VendorStorefront>(updatedStorefronts))
+        setActiveStorefrontId(storefront.id)
+        logAnalyticsEvent(
+          sanitizeForFirestore({
+            eventType: 'STOREFRONT_GENERATED',
+            actorType: 'backend_staff',
+            actorName: 'Backend Staff',
+            vendorId: freshVendor.id,
+            vendorName: freshVendor.name,
+            details: {
+              storefrontId: storefront.storefrontId,
+              productCount: storefront.productCount,
+              imageCount: storefront.imageCount,
+              estimatedHtmlSize: storefront.estimatedHtmlSize
+            }
+          })
+        )
       }
-      setIsGenerating(false);
-    }, 250);
-  };
+      setIsGenerating(false)
+    } catch (error: any) {
+      console.error('Storefront generation error:', error)
+      setIsGenerating(false)
+      showAlert(
+        error.message || 'An error occurred during generation.',
+        'error'
+      )
+    }
+  }
 
   const downloadHtml = (html: string, filename: string) => {
-    const blob = new Blob([html], { type: "text/html" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = filename;
-    anchor.click();
-    URL.revokeObjectURL(url);
-    analyticsService.logEvent({
-      eventType: "STOREFRONT_DOWNLOADED",
-      actorType: "backend_staff",
-      actorName: "Backend Staff",
-      vendorId: selectedVendor?.id,
-      vendorName: selectedVendor?.name,
-      details: { filename },
-    });
-  };
+    const blob = new Blob([html], { type: 'text/html' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = filename
+    anchor.click()
+    URL.revokeObjectURL(url)
+    logAnalyticsEvent({
+      eventType: 'STOREFRONT_DOWNLOADED',
+      actorType: 'backend_staff',
+      actorName: 'Backend Staff',
+      vendorId: selectedVendor?.id ?? null,
+      vendorName: selectedVendor?.name ?? null,
+      details: { filename }
+    })
+  }
 
   const copyHtml = async (html: string) => {
-    await navigator.clipboard.writeText(html);
-    analyticsService.logEvent({
-      eventType: "HTML_COPIED",
-      actorType: "backend_staff",
-      actorName: "Backend Staff",
-      vendorId: selectedVendor?.id,
-      vendorName: selectedVendor?.name,
-      details: { target: "vendor_storefront" },
-    });
-    alert("Storefront HTML copied to clipboard.");
-  };
+    await navigator.clipboard.writeText(html)
+    logAnalyticsEvent({
+      eventType: 'HTML_COPIED',
+      actorType: 'backend_staff',
+      actorName: 'Backend Staff',
+      vendorId: selectedVendor?.id ?? null,
+      vendorName: selectedVendor?.name ?? null,
+      details: { target: 'vendor_storefront' }
+    })
+    showAlert('Storefront HTML copied to clipboard.')
+  }
+
+  const handleShareStorefront = async () => {
+    if (!shareableStorefrontUrl) {
+      showAlert('Generate or deploy the storefront before sharing.', 'warning')
+      return
+    }
+
+    try {
+      if (hostedStorefrontUrl) {
+        await navigator.clipboard.writeText(hostedStorefrontUrl)
+        showAlert('Storefront link copied.')
+        return
+      }
+
+      if (navigator.share) {
+        await navigator.share({
+          title: 'iTred Storefront',
+          text: 'View this vendor storefront on iTred.',
+          url: shareableStorefrontUrl
+        })
+        return
+      }
+
+      await navigator.clipboard.writeText(shareableStorefrontUrl)
+      showAlert('Storefront link copied.')
+    } catch (error) {
+      showAlert(
+        error instanceof Error
+          ? error.message
+          : 'Storefront link could not be shared.',
+        'error'
+      )
+    }
+  }
+
+  const handleShareStorefrontWhatsApp = () => {
+    if (!shareableStorefrontUrl) {
+      showAlert('Generate or deploy the storefront before sharing.', 'warning')
+      return
+    }
+    const text = encodeURIComponent(
+      `View this iTred storefront powered by seiGEN Commerce: ${shareableStorefrontUrl}`
+    )
+    window.open(`https://wa.me/?text=${text}`, '_blank', 'noopener,noreferrer')
+  }
 
   const handleDeploy = async (storefront: VendorStorefront) => {
-    storefrontService.markAsDeployed(storefront.id);
-    const updatedStorefronts = storefrontService.getAllStorefronts();
-    setStorefronts(asArray<VendorStorefront>(updatedStorefronts));
-    analyticsService.logEvent({
-      eventType: "STOREFRONT_DEPLOYED",
-      actorType: "backend_staff",
-      actorName: "Backend Staff",
+    storefrontService.markAsDeployed(storefront.id)
+    const updatedStorefronts = storefrontService.getAllStorefronts()
+    setStorefronts(asArray<VendorStorefront>(updatedStorefronts))
+    logAnalyticsEvent({
+      eventType: 'STOREFRONT_DEPLOYED',
+      actorType: 'backend_staff',
+      actorName: 'Backend Staff',
       vendorId: storefront.vendorId,
-      details: { storefrontId: storefront.storefrontId },
-    });
-  };
+      details: { storefrontId: storefront.storefrontId }
+    })
+  }
 
   const handleArchive = async (storefront: VendorStorefront) => {
-    storefrontService.archiveStorefront(storefront.id);
-    const updatedStorefronts = storefrontService.getAllStorefronts();
-    setStorefronts(asArray<VendorStorefront>(updatedStorefronts));
-    analyticsService.logEvent({
-      eventType: "STOREFRONT_ARCHIVED",
-      actorType: "backend_staff",
-      actorName: "Backend Staff",
+    storefrontService.archiveStorefront(storefront.id)
+    const updatedStorefronts = storefrontService.getAllStorefronts()
+    setStorefronts(asArray<VendorStorefront>(updatedStorefronts))
+    logAnalyticsEvent({
+      eventType: 'STOREFRONT_ARCHIVED',
+      actorType: 'backend_staff',
+      actorName: 'Backend Staff',
       vendorId: storefront.vendorId,
-      details: { storefrontId: storefront.storefrontId },
-    });
-  };
+      details: { storefrontId: storefront.storefrontId }
+    })
+  }
 
   useEffect(() => {
     if (selectedVendor) {
-      const now = new Date();
+      const now = new Date()
       const monthNames = [
-        "Jan",
-        "Feb",
-        "Mar",
-        "Apr",
-        "May",
-        "Jun",
-        "Jul",
-        "Aug",
-        "Sep",
-        "Oct",
-        "Nov",
-        "Dec",
-      ];
-      const dateStr = `${now.getDate()} ${monthNames[now.getMonth()]} ${now.getFullYear()}`;
+        'Jan',
+        'Feb',
+        'Mar',
+        'Apr',
+        'May',
+        'Jun',
+        'Jul',
+        'Aug',
+        'Sep',
+        'Oct',
+        'Nov',
+        'Dec'
+      ]
+      const dateStr = `${now.getDate()} ${
+        monthNames[now.getMonth()]
+      } ${now.getFullYear()}`
       setTitle(
-        `${selectedVendor.name} | ${selectedVendor.sector || "General"} | iTred Storefront | ${dateStr}`,
-      );
-      setSlogan(
-        selectedVendor.catalogueSlogan || "A complete vendor showcase.",
-      );
-      setSelectedProductIds(vendorProducts.slice(0, 20).map((p) => p.id));
+        `${selectedVendor.name} | ${
+          selectedVendor.sector || 'General'
+        } | iTred Storefront | ${dateStr}`
+      )
+      setSlogan(selectedVendor.catalogueSlogan || 'A complete vendor showcase.')
+      setSelectedProductIds(vendorProducts.slice(0, 20).map(p => p.id))
       setSelectedBranchIds(
-        selectedVendor.branches?.slice(0, 2).map((b) => b.id) || [],
-      );
+        selectedVendor.branches?.slice(0, 2).map(b => b.id) || []
+      )
       setSelectedStaffIds(
-        selectedVendor.staff?.slice(0, 2).map((s) => s.id) || [],
-      );
-      setStorefrontId(null);
+        selectedVendor.staff?.slice(0, 2).map(s => s.id) || []
+      )
+      setStorefrontId(null)
       setSelectedDeliveryIds(
-        selectedVendor.deliveryStaff?.slice(0, 2).map((d) => d.id) || [],
-      );
-      setSelectedCAHLinkIds(cahLinks.slice(0, 3).map((l) => l.id));
+        selectedVendor.deliveryStaff?.slice(0, 2).map(d => d.id) || []
+      )
+      setSelectedCAHLinkIds(cahLinks.slice(0, 3).map(l => l.id))
     } else {
-      setSelectedProductIds([]);
-      setSelectedBranchIds([]);
-      setSelectedStaffIds([]);
-      setSelectedDeliveryIds([]);
-      setStorefrontId(null);
-      setSelectedCAHLinkIds([]);
+      setSelectedProductIds([])
+      setSelectedBranchIds([])
+      setSelectedStaffIds([])
+      setSelectedDeliveryIds([])
+      setStorefrontId(null)
+      setSelectedCAHLinkIds([])
     }
-  }, [selectedVendorId]);
+  }, [selectedVendorId])
+
+  if (isLoadingData) {
+    return (
+      <div className='pb-20 min-w-0 max-w-full flex items-center justify-center pt-20'>
+        <div className='text-center text-stone-400'>
+          <Loader2 className='w-8 h-8 animate-spin mx-auto mb-4' />
+          <p className='text-xs font-bold uppercase tracking-widest'>
+            Loading Storefront Builder...
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   return (
-    <div className="pb-20">
+    <div className='pb-20'>
       <PageHeader
-        title="Create Storefront"
-        subtitle="Create standalone mobile-ready websites for vendors. Plan limits apply."
+        title='Create Storefront'
+        subtitle='Create standalone mobile-ready websites for vendors. Plan limits apply.'
         actions={
-          permissionService.canCreate("createStorefront") ? (
-            <PrimaryButton
-              onClick={generateHtml}
-              disabled={
-                !selectedVendor ||
-                selectedProducts.length === 0 ||
-                isGenerating ||
-                !permissionService.canCreate("createStorefront")
-              }
-              className={`${isGenerating ? "opacity-60 cursor-not-allowed" : ""} ${!permissionService.canCreate("createStorefront") ? "opacity-50 cursor-not-allowed" : ""}`}
-            >
-              {isGenerating ? (
-                "Generating..."
-              ) : (
-                <>
-                  <FileCode className="w-4 h-4" /> Create Storefront
-                </>
-              )}
-            </PrimaryButton>
-          ) : null
+          <div className='flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end'>
+            {selectedVendor && (
+              <>
+                <SecondaryButton onClick={() => void handleShareStorefront()}>
+                  <Share2 className='w-4 h-4 mr-2' /> Share Storefront
+                </SecondaryButton>
+                <SecondaryButton
+                  onClick={handleShareStorefrontWhatsApp}
+                  className='border border-green-600 bg-white text-green-700 hover:bg-green-50'
+                >
+                  <MessageCircle className='w-4 h-4 mr-2' /> Share via WhatsApp
+                </SecondaryButton>
+              </>
+            )}
+            {permissionService.canCreate('createStorefront') ? (
+              <PrimaryButton
+                onClick={generateHtml}
+                disabled={
+                  !selectedVendor ||
+                  selectedProducts.length === 0 ||
+                  isGenerating ||
+                  !permissionService.canCreate('createStorefront')
+                }
+                className={`${
+                  isGenerating ? 'opacity-60 cursor-not-allowed' : ''
+                } ${
+                  !permissionService.canCreate('createStorefront')
+                    ? 'opacity-50 cursor-not-allowed'
+                    : ''
+                }`}
+              >
+                {isGenerating ? (
+                  'Generating...'
+                ) : (
+                  <>
+                    <FileCode className='w-4 h-4 mr-2' /> Create Storefront
+                  </>
+                )}
+              </PrimaryButton>
+            ) : null}
+          </div>
         }
       />
 
-      <div className="space-y-8">
+      <div className='space-y-8'>
         {/* Top Control Panel */}
-        <div className="bg-white shadow-sm border border-stone-200 rounded-none p-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <FormField label="Select Vendor" required>
+        <div className='bg-white shadow-sm border border-stone-200 rounded-none p-6'>
+          <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6'>
+            <FormField label='Select Vendor' required>
               <select
-                className="form-input w-full"
+                className='form-input w-full'
                 value={selectedVendorId}
-                onChange={(e) => setSelectedVendorId(e.target.value)}
+                onChange={e => setSelectedVendorId(e.target.value)}
               >
-                <option value="">Choose vendor...</option>
-                {safeVendors.map((v) => (
+                <option value=''>Choose vendor...</option>
+                {safeVendors.map(v => (
                   <option key={v.id} value={v.id}>
                     {v.name} · {v.systemCode}
                   </option>
                 ))}
               </select>
             </FormField>
-            <FormField label="Storefront Title" required>
+            <FormField label='Storefront Title' required>
               <input
-                type="text"
-                className="form-input w-full"
+                type='text'
+                className='form-input w-full'
                 value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Vendor storefront title"
+                onChange={e => setTitle(e.target.value)}
+                placeholder='Vendor storefront title'
               />
             </FormField>
-            <FormField label="Storefront Slogan">
+            <FormField label='Storefront Slogan'>
               <input
-                type="text"
-                className="form-input w-full"
+                type='text'
+                className='form-input w-full'
                 value={slogan}
-                onChange={(e) => setSlogan(e.target.value)}
-                placeholder="Vendor slogan or call to action"
+                onChange={e => setSlogan(e.target.value)}
+                placeholder='Vendor slogan or call to action'
               />
             </FormField>
-            <FormField label="Expiry Date">
+            <FormField label='Expiry Date'>
               <input
-                type="date"
-                className="form-input w-full"
+                type='date'
+                className='form-input w-full'
                 value={expiryDate}
-                onChange={(e) => setExpiryDate(e.target.value)}
+                onChange={e => setExpiryDate(e.target.value)}
               />
             </FormField>
           </div>
         </div>
 
         {/* Main Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-8 items-start">
+        <div className='grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-8 items-start'>
           {/* Left Column */}
-          <div className="space-y-8">
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 items-start">
+          <div className='space-y-8'>
+            <div className='grid grid-cols-1 xl:grid-cols-2 gap-8 items-start'>
               <DataPanel
-                title="Select Products"
-                subtitle="Pick up to 500 optimized product images for the storefront."
-                className="shadow-sm border border-stone-200 rounded-none bg-white"
+                title='Select Products'
+                subtitle='Pick up to 500 optimized product images for the storefront.'
+                className='shadow-sm border border-stone-200 rounded-none bg-white'
               >
                 {vendorProducts.length === 0 ? (
                   <EmptyState
-                    title="No products found"
-                    description="This vendor has no active products to include."
+                    title='No products found'
+                    description='This vendor has no active products to include.'
                   />
                 ) : (
-                  <div className="space-y-3 p-4">
-                    <div className="flex flex-wrap gap-2 mb-4">
+                  <div className='space-y-3 p-4'>
+                    <div className='flex flex-wrap gap-2 mb-4'>
                       <SecondaryButton
-                        size="sm"
+                        size='sm'
                         onClick={() =>
-                          setSelectedProductIds(vendorProducts.map((p) => p.id))
+                          setSelectedProductIds(vendorProducts.map(p => p.id))
                         }
                       >
                         Select all
                       </SecondaryButton>
                       <SecondaryButton
-                        size="sm"
+                        size='sm'
                         onClick={() => setSelectedProductIds([])}
                       >
                         Clear
                       </SecondaryButton>
-                      <span className="text-[11px] font-bold uppercase tracking-widest text-stone-500 mt-2">
+                      <SecondaryButton
+                        size='sm'
+                        disabled={selectedProducts.length === 0}
+                        onClick={() => handleExportStorefrontProducts(true)}
+                      >
+                        <Download className='w-3 h-3 mr-1 inline' /> Export
+                        Products to Excel
+                      </SecondaryButton>
+                      <span className='text-[11px] font-bold uppercase tracking-widest text-stone-500 mt-2'>
                         {selectedProductIds.length} selected
                       </span>
                     </div>
-                    <div className="space-y-2 max-h-[420px] overflow-y-auto pr-2 custom-scrollbar">
-                      {vendorProducts.map((product) => (
+                    <div className='space-y-2 max-h-[420px] overflow-y-auto pr-2 custom-scrollbar'>
+                      {vendorProducts.map(product => (
                         <label
                           key={product.id}
-                          className="flex items-center justify-between gap-3 p-3 border border-stone-200 rounded-none hover:bg-stone-50 cursor-pointer transition-colors"
+                          className='flex items-center justify-between gap-3 p-3 border border-stone-200 rounded-none hover:bg-stone-50 cursor-pointer transition-colors'
                         >
-                          <span className="text-sm font-medium">
+                          <span className='text-sm font-medium'>
                             {product.name}
+                            <span className='ml-2 border border-stone-200 px-2 py-0.5 text-[8px] font-black uppercase text-stone-500'>
+                              {product.productMode === 'branded_product'
+                                ? 'Branded'
+                                : 'Linked'}
+                            </span>
                           </span>
                           <input
-                            type="checkbox"
-                            className="accent-brand-orange w-4 h-4"
+                            type='checkbox'
+                            className='accent-brand-orange w-4 h-4'
                             checked={selectedProductIds.includes(product.id)}
                             onChange={() => handleSelectProduct(product.id)}
                           />
@@ -671,84 +1068,84 @@ export const VendorStorefrontBuilder: React.FC = () => {
                 )}
               </DataPanel>
 
-              <div className="space-y-8">
+              <div className='space-y-8'>
                 <DataPanel
-                  title="Vendor Profile"
-                  subtitle="Vendor and plan entitlement summary."
-                  className="shadow-sm border border-stone-200 rounded-none bg-white"
+                  title='Vendor Profile'
+                  subtitle='Vendor and plan entitlement summary.'
+                  className='shadow-sm border border-stone-200 rounded-none bg-white'
                 >
-                  <div className="p-4 space-y-4">
+                  <div className='p-4 space-y-4'>
                     {selectedVendor ? (
                       <>
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className='grid grid-cols-2 gap-4'>
                           <div>
-                            <p className="text-[9px] uppercase font-bold tracking-widest text-stone-400">
+                            <p className='text-[9px] uppercase font-bold tracking-widest text-stone-400'>
                               Vendor
                             </p>
-                            <p className="font-bold text-sm text-brand-charcoal mt-1">
+                            <p className='font-bold text-sm text-brand-charcoal mt-1'>
                               {selectedVendor.name}
                             </p>
                           </div>
                           <div>
-                            <p className="text-[9px] uppercase font-bold tracking-widest text-stone-400">
+                            <p className='text-[9px] uppercase font-bold tracking-widest text-stone-400'>
                               Plan
                             </p>
-                            <p className="font-bold text-sm text-brand-charcoal mt-1">
-                              {selectedVendorPlan?.name || "Unassigned"}
+                            <p className='font-bold text-sm text-brand-charcoal mt-1'>
+                              {selectedVendorPlan?.name || 'Unassigned'}
                             </p>
                           </div>
                         </div>
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className='grid grid-cols-2 gap-4'>
                           <div>
-                            <p className="text-[9px] uppercase font-bold tracking-widest text-stone-400">
+                            <p className='text-[9px] uppercase font-bold tracking-widest text-stone-400'>
                               Product count
                             </p>
-                            <p className="font-bold text-sm text-brand-charcoal mt-1">
-                              {selectedProducts.length} /{" "}
-                              {selectedVendorPlan?.maxProducts ?? "—"}
+                            <p className='font-bold text-sm text-brand-charcoal mt-1'>
+                              {selectedProducts.length} /{' '}
+                              {selectedVendorPlan?.maxProducts ?? '—'}
                             </p>
                           </div>
                           <div>
-                            <p className="text-[9px] uppercase font-bold tracking-widest text-stone-400">
+                            <p className='text-[9px] uppercase font-bold tracking-widest text-stone-400'>
                               Image count
                             </p>
-                            <p className="font-bold text-sm text-brand-charcoal mt-1">
-                              {selectedImages.length} /{" "}
-                              {selectedVendorPlan?.maxStorefrontImages ?? "—"}
+                            <p className='font-bold text-sm text-brand-charcoal mt-1'>
+                              {selectedImages.length} /{' '}
+                              {selectedVendorPlan?.maxStorefrontImages ?? '—'}
                             </p>
                           </div>
                         </div>
-                        <div className="flex flex-wrap gap-2 pt-4 border-t border-stone-100">
+                        <div className='flex flex-wrap gap-2 pt-4 border-t border-stone-100'>
                           <StatusBadge
                             status={
-                              selectedVendor?.subscriptionStatus || "trial"
+                              selectedVendor?.subscriptionStatus || 'trial'
                             }
                             variant={
-                              selectedVendor?.subscriptionStatus === "active"
-                                ? "success"
+                              selectedVendor?.subscriptionStatus === 'active'
+                                ? 'success'
                                 : selectedVendor?.subscriptionStatus ===
-                                    "overdue"
-                                  ? "error"
-                                  : "warning"
+                                  'overdue'
+                                ? 'error'
+                                : 'warning'
                             }
                           />
                           <StatusBadge
                             status={
                               selectedVendorPlan?.isVendorStorefrontEnabled
-                                ? "active"
-                                : "inactive"
+                                ? 'active'
+                                : 'inactive'
                             }
                             variant={
                               selectedVendorPlan?.isVendorStorefrontEnabled
-                                ? "success"
-                                : "warning"
+                                ? 'success'
+                                : 'warning'
                             }
                           />
                         </div>
                       </>
                     ) : (
-                      <div className="py-6 text-center">
-                        <p className="text-xs font-bold uppercase tracking-widest text-stone-400">
+                      <div className='py-6 text-center'>
+                        <p className='text-xs font-bold uppercase tracking-widest text-stone-400'>
                           Select a vendor to view profile.
                         </p>
                       </div>
@@ -756,141 +1153,141 @@ export const VendorStorefrontBuilder: React.FC = () => {
                   </div>
                 </DataPanel>
                 <DataPanel
-                  title="Selected Sections"
-                  subtitle="Choose storefront sections to include."
-                  className="shadow-sm border border-stone-200 rounded-none bg-white"
+                  title='Selected Sections'
+                  subtitle='Choose storefront sections to include.'
+                  className='shadow-sm border border-stone-200 rounded-none bg-white'
                 >
-                  <div className="p-4 space-y-5">
-                    <FormField label="Branches">
-                      <div className="flex flex-wrap gap-2">
+                  <div className='p-4 space-y-5'>
+                    <FormField label='Branches'>
+                      <div className='flex flex-wrap gap-2'>
                         <SecondaryButton
-                          size="sm"
+                          size='sm'
                           onClick={() =>
                             selectedVendor?.branches &&
                             handleSelectMany(
                               asArray<Branch>(selectedVendor.branches).map(
-                                (b) => b.id,
+                                b => b.id
                               ),
-                              setSelectedBranchIds,
+                              setSelectedBranchIds
                             )
                           }
                         >
                           Select all
                         </SecondaryButton>
                         <SecondaryButton
-                          size="sm"
+                          size='sm'
                           onClick={() => setSelectedBranchIds([])}
                         >
                           Clear
                         </SecondaryButton>
-                        <span className="text-[10px] font-bold text-stone-400 ml-2 mt-2">
+                        <span className='text-[10px] font-bold text-stone-400 ml-2 mt-2'>
                           {selectedBranchIds.length} Selected
                         </span>
                       </div>
                     </FormField>
-                    <FormField label="Staff">
-                      <div className="flex flex-wrap gap-2">
+                    <FormField label='Staff'>
+                      <div className='flex flex-wrap gap-2'>
                         <SecondaryButton
-                          size="sm"
+                          size='sm'
                           onClick={() =>
                             selectedVendor?.staff &&
                             handleSelectMany(
                               asArray<Staff>(selectedVendor.staff).map(
-                                (s) => s.id,
+                                s => s.id
                               ),
-                              setSelectedStaffIds,
+                              setSelectedStaffIds
                             )
                           }
                         >
                           Select all
                         </SecondaryButton>
                         <SecondaryButton
-                          size="sm"
+                          size='sm'
                           onClick={() => setSelectedStaffIds([])}
                         >
                           Clear
                         </SecondaryButton>
-                        <span className="text-[10px] font-bold text-stone-400 ml-2 mt-2">
+                        <span className='text-[10px] font-bold text-stone-400 ml-2 mt-2'>
                           {selectedStaffIds.length} Selected
                         </span>
                       </div>
                     </FormField>
-                    <FormField label="Delivery Contacts">
-                      <div className="flex flex-wrap gap-2">
+                    <FormField label='Delivery Contacts'>
+                      <div className='flex flex-wrap gap-2'>
                         <SecondaryButton
-                          size="sm"
+                          size='sm'
                           onClick={() =>
                             selectedVendor?.deliveryStaff &&
                             handleSelectMany(
                               asArray<DeliveryStaff>(
-                                selectedVendor.deliveryStaff,
-                              ).map((d) => d.id),
-                              setSelectedDeliveryIds,
+                                selectedVendor.deliveryStaff
+                              ).map(d => d.id),
+                              setSelectedDeliveryIds
                             )
                           }
                         >
                           Select all
                         </SecondaryButton>
                         <SecondaryButton
-                          size="sm"
+                          size='sm'
                           onClick={() => setSelectedDeliveryIds([])}
                         >
                           Clear
                         </SecondaryButton>
-                        <span className="text-[10px] font-bold text-stone-400 ml-2 mt-2">
+                        <span className='text-[10px] font-bold text-stone-400 ml-2 mt-2'>
                           {selectedDeliveryIds.length} Selected
                         </span>
                       </div>
                     </FormField>
-                    <FormField label="CAH Footer Links">
-                      <div className="space-y-3">
-                        <div className="flex flex-wrap gap-2">
+                    <FormField label='CAH Footer Links'>
+                      <div className='space-y-3'>
+                        <div className='flex flex-wrap gap-2'>
                           <SecondaryButton
-                            size="sm"
+                            size='sm'
                             onClick={() =>
                               handleSelectMany(
-                                safeCahLinks.map((link) => link.id),
-                                setSelectedCAHLinkIds,
+                                safeCahLinks.map(link => link.id),
+                                setSelectedCAHLinkIds
                               )
                             }
                           >
                             Select all
                           </SecondaryButton>
                           <SecondaryButton
-                            size="sm"
+                            size='sm'
                             onClick={() => setSelectedCAHLinkIds([])}
                           >
                             Clear
                           </SecondaryButton>
-                          <span className="text-[10px] font-bold text-stone-400 ml-2 mt-2">
+                          <span className='text-[10px] font-bold text-stone-400 ml-2 mt-2'>
                             {selectedCAHLinkIds.length} Selected
                           </span>
                         </div>
-                        <div className="space-y-2 max-h-[200px] overflow-y-auto pr-2 custom-scrollbar border-t border-stone-100 pt-3">
+                        <div className='space-y-2 max-h-[200px] overflow-y-auto pr-2 custom-scrollbar border-t border-stone-100 pt-3'>
                           {safeCahLinks
-                            .filter((link) => link.status === "active")
-                            .map((link) => (
+                            .filter(link => link.status === 'active')
+                            .map(link => (
                               <label
                                 key={link.id}
-                                className="flex items-center justify-between gap-3 p-3 border border-stone-200 rounded-none cursor-pointer hover:bg-stone-50 transition-colors"
+                                className='flex items-center justify-between gap-3 p-3 border border-stone-200 rounded-none cursor-pointer hover:bg-stone-50 transition-colors'
                               >
-                                <div className="flex-1">
-                                  <span className="text-sm font-bold block text-brand-charcoal">
+                                <div className='flex-1'>
+                                  <span className='text-sm font-bold block text-brand-charcoal'>
                                     {link.name}
                                   </span>
-                                  <span className="text-[9px] font-bold text-stone-400 uppercase tracking-widest mt-0.5 block">
-                                    {link.type} · {link.sector || "General"}
+                                  <span className='text-[9px] font-bold text-stone-400 uppercase tracking-widest mt-0.5 block'>
+                                    {link.type} · {link.sector || 'General'}
                                   </span>
                                 </div>
                                 <input
-                                  type="checkbox"
-                                  className="accent-brand-orange w-4 h-4"
+                                  type='checkbox'
+                                  className='accent-brand-orange w-4 h-4'
                                   checked={selectedCAHLinkIds.includes(link.id)}
                                   onChange={() =>
-                                    setSelectedCAHLinkIds((prev) =>
+                                    setSelectedCAHLinkIds(prev =>
                                       prev.includes(link.id)
-                                        ? prev.filter((id) => id !== link.id)
-                                        : [...prev, link.id],
+                                        ? prev.filter(id => id !== link.id)
+                                        : [...prev, link.id]
                                     )
                                   }
                                 />
@@ -906,72 +1303,78 @@ export const VendorStorefrontBuilder: React.FC = () => {
           </div>
 
           {/* Right Sidebar */}
-          <div className="space-y-8">
+          <div className='space-y-8'>
             <DataPanel
-              title="Build Diagnostics"
-              subtitle="Limits, warnings and status."
-              className="shadow-sm border border-stone-200 rounded-none bg-white"
+              title='Build Diagnostics'
+              subtitle='Limits, warnings and status.'
+              className='shadow-sm border border-stone-200 rounded-none bg-white'
             >
-              <div className="p-5 space-y-6">
+              <div className='p-5 space-y-6'>
                 <div>
-                  <h4 className="text-[10px] uppercase font-bold text-brand-orange tracking-widest border-b border-orange-100 pb-2 mb-3">
+                  <h4 className='text-[10px] uppercase font-bold text-brand-orange tracking-widest border-b border-orange-100 pb-2 mb-3'>
                     Storefront Readiness Score
                   </h4>
-                  <div className="flex items-center gap-4">
-                    <div className="text-2xl font-black text-brand-charcoal">
+                  <div className='flex items-center gap-4'>
+                    <div className='text-2xl font-black text-brand-charcoal'>
                       {readinessScore}%
                     </div>
-                    <div className="flex-1 h-2 bg-stone-100 w-full overflow-hidden">
+                    <div className='flex-1 h-2 bg-stone-100 w-full overflow-hidden'>
                       <div
-                        className={`h-full ${readinessScore === 100 ? "bg-emerald-500" : readinessScore >= 70 ? "bg-brand-orange" : "bg-red-500"}`}
+                        className={`h-full ${
+                          readinessScore === 100
+                            ? 'bg-emerald-500'
+                            : readinessScore >= 70
+                            ? 'bg-brand-orange'
+                            : 'bg-red-500'
+                        }`}
                         style={{ width: `${readinessScore}%` }}
                       />
                     </div>
                   </div>
-                  <p className="text-[10px] text-stone-500 mt-2 font-bold uppercase">
+                  <p className='text-[10px] text-stone-500 mt-2 font-bold uppercase'>
                     {readinessScore === 100
-                      ? "Ready for deployment"
-                      : "Missing key assets or data"}
+                      ? 'Ready for deployment'
+                      : 'Missing key assets or data'}
                   </p>
                 </div>
                 <div>
-                  <h4 className="text-[10px] uppercase font-bold text-brand-orange tracking-widest border-b border-orange-100 pb-2 mb-3">
+                  <h4 className='text-[10px] uppercase font-bold text-brand-orange tracking-widest border-b border-orange-100 pb-2 mb-3'>
                     Storefront Limits
                   </h4>
-                  <ul className="space-y-2 text-xs font-medium text-stone-600">
-                    <li className="flex justify-between">
-                      <span className="text-stone-400 font-bold uppercase text-[10px]">
+                  <ul className='space-y-2 text-xs font-medium text-stone-600'>
+                    <li className='flex justify-between'>
+                      <span className='text-stone-400 font-bold uppercase text-[10px]'>
                         Max images:
                       </span>
                       <span>
-                        {selectedVendorPlan?.maxStorefrontImages ?? "N/A"}
+                        {selectedVendorPlan?.maxStorefrontImages ?? 'N/A'}
                       </span>
                     </li>
-                    <li className="flex justify-between">
-                      <span className="text-stone-400 font-bold uppercase text-[10px]">
+                    <li className='flex justify-between'>
+                      <span className='text-stone-400 font-bold uppercase text-[10px]'>
                         Max deployments / month:
                       </span>
                       <span>
                         {selectedVendorPlan?.maxStorefrontDeploymentsPerMonth ??
-                          "N/A"}
+                          'N/A'}
                       </span>
                     </li>
-                    <li className="flex justify-between">
-                      <span className="text-stone-400 font-bold uppercase text-[10px]">
+                    <li className='flex justify-between'>
+                      <span className='text-stone-400 font-bold uppercase text-[10px]'>
                         Current month deployments:
                       </span>
                       <span>{monthlyDeployments}</span>
                     </li>
-                    <li className="flex justify-between">
-                      <span className="text-stone-400 font-bold uppercase text-[10px]">
+                    <li className='flex justify-between'>
+                      <span className='text-stone-400 font-bold uppercase text-[10px]'>
                         Selected images:
                       </span>
                       <span
                         className={
                           selectedImages.length >
                           (selectedVendorPlan?.maxStorefrontImages || 0)
-                            ? "text-red-500 font-bold"
-                            : ""
+                            ? 'text-red-500 font-bold'
+                            : ''
                         }
                       >
                         {selectedImages.length}
@@ -981,23 +1384,23 @@ export const VendorStorefrontBuilder: React.FC = () => {
                 </div>
 
                 <div>
-                  <h4 className="text-[10px] uppercase font-bold text-red-500 tracking-widest border-b border-red-100 pb-2 mb-3">
+                  <h4 className='text-[10px] uppercase font-bold text-red-500 tracking-widest border-b border-red-100 pb-2 mb-3'>
                     System Warnings
                   </h4>
-                  <ul className="space-y-2 text-xs font-medium">
+                  <ul className='space-y-2 text-xs font-medium'>
                     {planWarnings.length === 0 ? (
-                      <li className="text-emerald-600 flex items-center gap-2">
+                      <li className='text-emerald-600 flex items-center gap-2'>
                         <CheckCircle2 size={14} /> No plan warnings detected.
                       </li>
                     ) : (
                       planWarnings.map((warning, idx) => (
                         <li
                           key={idx}
-                          className="text-red-500 flex items-start gap-2 leading-relaxed"
+                          className='text-red-500 flex items-start gap-2 leading-relaxed'
                         >
                           <AlertTriangle
                             size={14}
-                            className="shrink-0 mt-0.5"
+                            className='shrink-0 mt-0.5'
                           />
                           {warning}
                         </li>
@@ -1007,10 +1410,10 @@ export const VendorStorefrontBuilder: React.FC = () => {
                 </div>
 
                 <div>
-                  <h4 className="text-[10px] uppercase font-bold text-brand-charcoal tracking-widest border-b border-stone-200 pb-2 mb-3">
+                  <h4 className='text-[10px] uppercase font-bold text-brand-charcoal tracking-widest border-b border-stone-200 pb-2 mb-3'>
                     Quick Notes
                   </h4>
-                  <p className="text-xs font-medium text-stone-500 leading-relaxed bg-stone-50 p-3 border border-stone-100">
+                  <p className='text-xs font-medium text-stone-500 leading-relaxed bg-stone-50 p-3 border border-stone-100'>
                     Storefronts export as a single offline HTML file with
                     embedded CSS, JS, and WebP images. No React, Firebase or
                     internet connectivity is required.
@@ -1020,56 +1423,56 @@ export const VendorStorefrontBuilder: React.FC = () => {
             </DataPanel>
 
             <DataPanel
-              title="Storefront Preview & Actions"
-              subtitle="Generate, review, download or copy the standalone HTML file."
-              className="shadow-sm border border-stone-200 rounded-none bg-white"
+              title='Storefront Preview & Actions'
+              subtitle='Generate, review, download or copy the standalone HTML file.'
+              className='shadow-sm border border-stone-200 rounded-none bg-white'
             >
-              <div className="p-5 space-y-6">
-                <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+              <div className='p-5 space-y-6'>
+                <div className='grid grid-cols-2 lg:grid-cols-3 gap-3'>
                   <SecondaryButton
                     onClick={() => {
-                      const newWin = window.open("", "_blank");
+                      const newWin = window.open('', '_blank')
                       if (newWin && selectedHtml) {
-                        newWin.document.open();
-                        newWin.document.write(selectedHtml);
-                        newWin.document.close();
+                        newWin.document.open()
+                        newWin.document.write(selectedHtml)
+                        newWin.document.close()
                       }
                     }}
                     disabled={!selectedHtml}
                   >
-                    <Eye className="w-4 h-4 mr-2" /> Preview
+                    <Eye className='w-4 h-4 mr-2' /> Preview
                   </SecondaryButton>
                   <PrimaryButton
                     onClick={() => {
-                      if (permissionService.canExport("createStorefront")) {
+                      if (permissionService.canExport('createStorefront')) {
                         if (selectedHtml) {
-                          downloadHtml(selectedHtml, selectedFileName);
+                          downloadHtml(selectedHtml, selectedFileName)
                         }
                       } else {
-                        alert("Permission denied to export storefronts.");
+                        alert('Permission denied to export storefronts.')
                       }
                     }}
                     disabled={
                       !selectedHtml ||
-                      !permissionService.canExport("createStorefront")
+                      !permissionService.canExport('createStorefront')
                     }
                   >
-                    <Download className="w-4 h-4 mr-2" /> Download HTML
+                    <Download className='w-4 h-4 mr-2' /> Download HTML
                   </PrimaryButton>
                   <SecondaryButton
                     onClick={() => {
-                      if (permissionService.canExport("createStorefront")) {
-                        if (selectedHtml) copyHtml(selectedHtml);
+                      if (permissionService.canExport('createStorefront')) {
+                        if (selectedHtml) copyHtml(selectedHtml)
                       } else {
-                        alert("Permission denied to copy storefront HTML.");
+                        alert('Permission denied to copy storefront HTML.')
                       }
                     }}
                     disabled={
                       !selectedHtml ||
-                      !permissionService.canExport("createStorefront")
+                      !permissionService.canExport('createStorefront')
                     }
                   >
-                    <Copy className="w-4 h-4 mr-2" /> Copy HTML
+                    <Copy className='w-4 h-4 mr-2' /> Copy HTML
                   </SecondaryButton>
                   <SecondaryButton
                     onClick={() =>
@@ -1077,11 +1480,11 @@ export const VendorStorefrontBuilder: React.FC = () => {
                     }
                     disabled={
                       !generatedStorefront ||
-                      generatedStorefront.status === "deployed" ||
-                      !permissionService.canApprove("createStorefront")
+                      generatedStorefront.status === 'deployed' ||
+                      !permissionService.canApprove('createStorefront')
                     }
                   >
-                    <CheckCircle2 className="w-4 h-4 mr-2" /> Mark Deployed
+                    <CheckCircle2 className='w-4 h-4 mr-2' /> Mark Deployed
                   </SecondaryButton>
                   <SecondaryButton
                     onClick={generateHtml}
@@ -1089,10 +1492,10 @@ export const VendorStorefrontBuilder: React.FC = () => {
                       !selectedVendor ||
                       selectedProducts.length === 0 ||
                       isGenerating ||
-                      !permissionService.canCreate("createStorefront")
+                      !permissionService.canCreate('createStorefront')
                     }
                   >
-                    <RefreshCcw className="w-4 h-4 mr-2" /> Regenerate
+                    <RefreshCcw className='w-4 h-4 mr-2' /> Regenerate
                   </SecondaryButton>
                   <SecondaryButton
                     onClick={() =>
@@ -1100,60 +1503,62 @@ export const VendorStorefrontBuilder: React.FC = () => {
                     }
                     disabled={
                       !generatedStorefront ||
-                      generatedStorefront.status === "archived" ||
-                      !permissionService.canDelete("createStorefront")
+                      generatedStorefront.status === 'archived' ||
+                      !permissionService.canDelete('createStorefront')
                     }
-                    className="text-red-500 hover:bg-red-50 hover:text-red-600 hover:border-red-200"
+                    className='text-red-500 hover:bg-red-50 hover:text-red-600 hover:border-red-200'
                   >
-                    <Archive className="w-4 h-4 mr-2" /> Archive
+                    <Archive className='w-4 h-4 mr-2' /> Archive
                   </SecondaryButton>
                 </div>
 
-                <div className="pt-4 border-t border-stone-100">
+                <div className='pt-4 border-t border-stone-100'>
                   <SecondaryButton
                     onClick={() => {
                       setQuickLogData({
-                        activityType: "STOREFRONT_SHARED",
+                        activityType: 'STOREFRONT_SHARED',
                         storefrontId: generatedStorefront?.id,
-                        vendorId: selectedVendor?.id,
-                        vendorName: selectedVendor?.name,
-                        sector: selectedVendor?.sector,
-                        leadStatus: "NOT_APPLICABLE",
-                        priority: "MEDIUM",
-                      });
-                      setIsQuickLogOpen(true);
+                        vendorId: selectedVendor?.id ?? null,
+                        vendorName: selectedVendor?.name ?? null,
+                        sector: selectedVendor?.sector ?? null,
+                        leadStatus: 'NOT_APPLICABLE',
+                        priority: 'MEDIUM'
+                      })
+                      setIsQuickLogOpen(true)
                     }}
                     disabled={!generatedStorefront}
-                    className="w-full"
+                    className='w-full'
                   >
-                    <MessageSquare className="w-4 h-4 mr-2" /> Log WhatsApp
+                    <MessageSquare className='w-4 h-4 mr-2' /> Log WhatsApp
                     Share
                   </SecondaryButton>
                 </div>
-                <div className="pt-4 border-t border-stone-100 space-y-3">
-                  <p className="text-[9px] uppercase font-bold tracking-widest text-stone-400">
+                <div className='pt-4 border-t border-stone-100 space-y-3'>
+                  <p className='text-[9px] uppercase font-bold tracking-widest text-stone-400'>
                     Metadata Stream
                   </p>
-                  <div className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs font-medium text-stone-600">
-                    <span className="truncate">
-                      Vendor: {selectedVendor?.name || "N/A"}
+                  <div className='grid grid-cols-2 gap-x-3 gap-y-2 text-xs font-medium text-stone-600'>
+                    <span className='truncate'>
+                      Vendor: {selectedVendor?.name || 'N/A'}
                     </span>
-                    <span className="flex items-center gap-1">
-                      Status:{" "}
+                    <span className='flex items-center gap-1'>
+                      Status:{' '}
                       <StatusBadge
-                        status={generatedStorefront?.status || "draft"}
+                        status={generatedStorefront?.status || 'draft'}
                         variant={
-                          generatedStorefront?.status === "deployed"
-                            ? "success"
-                            : "neutral"
+                          generatedStorefront?.status === 'deployed'
+                            ? 'success'
+                            : 'neutral'
                         }
                       />
                     </span>
                     <span>
-                      Size:{" "}
+                      Size:{' '}
                       {selectedHtml
-                        ? `${(estimateHtmlSize(selectedHtml) / 1024).toFixed(1)} KB`
-                        : "N/A"}
+                        ? `${(estimateHtmlSize(selectedHtml) / 1024).toFixed(
+                            1
+                          )} KB`
+                        : 'N/A'}
                     </span>
                     <span>Products: {selectedProducts.length}</span>
                     <span>Images: {selectedImages.length}</span>
@@ -1165,57 +1570,57 @@ export const VendorStorefrontBuilder: React.FC = () => {
         </div>
 
         {/* Bottom Full-Width Panels */}
-        <div className="space-y-8">
+        <div className='space-y-8'>
           <DataPanel
-            title="Generated Storefront History"
-            subtitle="Track generated storefront assets and lifecycle state."
-            className="shadow-sm border border-stone-200 rounded-none bg-white"
+            title='Generated Storefront History'
+            subtitle='Track generated storefront assets and lifecycle state.'
+            className='shadow-sm border border-stone-200 rounded-none bg-white'
           >
-            <div className="p-0 overflow-x-auto">
+            <div className='p-0 overflow-x-auto'>
               {safeStorefronts.length === 0 ? (
                 <EmptyState
-                  title="No storefronts yet"
-                  description="Create a storefront to see history records appear here."
+                  title='No storefronts yet'
+                  description='Create a storefront to see history records appear here.'
                 />
               ) : (
-                <table className="w-full text-left text-sm border-collapse">
+                <table className='w-full text-left text-sm border-collapse'>
                   <thead>
-                    <tr className="bg-stone-50 border-b border-stone-200 text-[9px] font-bold uppercase tracking-widest text-stone-400">
-                      <th className="px-6 py-3">Storefront</th>
-                      <th className="px-6 py-3">Vendor</th>
-                      <th className="px-6 py-3">Products</th>
-                      <th className="px-6 py-3">Images</th>
-                      <th className="px-6 py-3">Status</th>
-                      <th className="px-6 py-3">Generated</th>
+                    <tr className='bg-stone-50 border-b border-stone-200 text-[9px] font-bold uppercase tracking-widest text-stone-400'>
+                      <th className='px-6 py-3'>Storefront</th>
+                      <th className='px-6 py-3'>Vendor</th>
+                      <th className='px-6 py-3'>Products</th>
+                      <th className='px-6 py-3'>Images</th>
+                      <th className='px-6 py-3'>Status</th>
+                      <th className='px-6 py-3'>Generated</th>
                     </tr>
                   </thead>
-                  <tbody className="text-sm font-medium text-stone-600 divide-y divide-stone-100">
-                    {safeStorefronts.map((sf) => (
+                  <tbody className='text-sm font-medium text-stone-600 divide-y divide-stone-100'>
+                    {safeStorefronts.map(sf => (
                       <tr
                         key={sf.id}
-                        className="hover:bg-stone-50 transition-colors"
+                        className='hover:bg-stone-50 transition-colors'
                       >
-                        <td className="px-6 py-4 font-bold text-brand-charcoal">
+                        <td className='px-6 py-4 font-bold text-brand-charcoal'>
                           {sf.title}
                         </td>
-                        <td className="px-6 py-4">{sf.vendorName}</td>
-                        <td className="px-6 py-4 font-mono">
+                        <td className='px-6 py-4'>{sf.vendorName}</td>
+                        <td className='px-6 py-4 font-mono'>
                           {sf.productCount}
                         </td>
-                        <td className="px-6 py-4 font-mono">{sf.imageCount}</td>
-                        <td className="px-6 py-4">
+                        <td className='px-6 py-4 font-mono'>{sf.imageCount}</td>
+                        <td className='px-6 py-4'>
                           <StatusBadge
                             status={sf.status}
                             variant={
-                              sf.status === "deployed"
-                                ? "success"
-                                : sf.status === "archived"
-                                  ? "error"
-                                  : "warning"
+                              sf.status === 'deployed'
+                                ? 'success'
+                                : sf.status === 'archived'
+                                ? 'error'
+                                : 'warning'
                             }
                           />
                         </td>
-                        <td className="px-6 py-4 font-mono">
+                        <td className='px-6 py-4 font-mono'>
                           {new Date(sf.generatedAt).toLocaleDateString()}
                         </td>
                       </tr>
@@ -1227,16 +1632,16 @@ export const VendorStorefrontBuilder: React.FC = () => {
           </DataPanel>
 
           <DataPanel
-            title="Storefront HTML Preview"
-            subtitle="Review the generated offline HTML content before download."
-            className="shadow-sm border border-stone-200 rounded-none bg-white"
+            title='Storefront HTML Preview'
+            subtitle='Review the generated offline HTML content before download.'
+            className='shadow-sm border border-stone-200 rounded-none bg-white'
           >
-            <div className="p-6 bg-stone-50 border-t border-stone-100">
+            <div className='p-6 bg-stone-50 border-t border-stone-100'>
               <textarea
-                className="w-full min-h-[400px] border-2 border-stone-200 bg-white p-4 text-[11px] font-mono text-stone-600 leading-relaxed outline-none focus:border-brand-orange transition-colors custom-scrollbar"
+                className='w-full min-h-[400px] border-2 border-stone-200 bg-white p-4 text-[11px] font-mono text-stone-600 leading-relaxed outline-none focus:border-brand-orange transition-colors custom-scrollbar'
                 readOnly
                 value={selectedHtml}
-                placeholder="Generated HTML code will appear here..."
+                placeholder='Generated HTML code will appear here...'
               />
             </div>
           </DataPanel>
@@ -1248,6 +1653,10 @@ export const VendorStorefrontBuilder: React.FC = () => {
         onClose={() => setIsQuickLogOpen(false)}
         initialData={quickLogData}
       />
+      <BrandedAlertModal
+        {...alertConfig}
+        onClose={() => setAlertConfig({ ...alertConfig, isOpen: false })}
+      />
     </div>
-  );
-};
+  )
+}

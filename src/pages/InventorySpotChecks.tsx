@@ -40,11 +40,15 @@ import {
   EmptyState,
   PrimaryButton,
   SearchInput,
+  SearchableComboBox,
   SecondaryButton,
   StatCard,
   StatusBadge,
   TablePanel,
 } from "../components/CommonUI.tsx";
+import { buildSearchText } from "../utils/searchUtils.ts";
+import { useFormDraft } from "../hooks/useFormDraft.ts";
+import { offlineSyncService } from "../services/offlineSyncService.ts";
 
 type SpotCheckTab =
   | "dashboard"
@@ -57,6 +61,7 @@ type SpotCheckTab =
 
 type AuditRecommendation = {
   id: string;
+  alertKey: string;
   vendorId: string;
   vendorName: string;
   productId: string;
@@ -121,6 +126,38 @@ const calculateLeadPressure = (
   searchHits = 0,
   complaintCount = 0,
 ) => whatsappHits * 4 + callHits * 5 + searchHits * 2 + complaintCount * 6;
+
+const ACKNOWLEDGED_ALERTS_KEY = "sci_acknowledged_alerts";
+
+function getAcknowledgedAlertKeys(): string[] {
+  try {
+    const raw = localStorage.getItem(ACKNOWLEDGED_ALERTS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveAcknowledgedAlertKey(alertKey: string) {
+  if (!alertKey) return;
+  const existing = getAcknowledgedAlertKeys();
+  const next = Array.from(new Set([...existing, alertKey]));
+  localStorage.setItem(ACKNOWLEDGED_ALERTS_KEY, JSON.stringify(next));
+}
+
+function isAlertAcknowledged(alertKey: string) {
+  return getAcknowledgedAlertKeys().includes(alertKey);
+}
+
+const getStockMismatchAlertKey = (
+  vendorId: string,
+  productId: string,
+  branchId?: string,
+) =>
+  branchId
+    ? `stock-mismatch-${vendorId}-${branchId}-${productId}`
+    : `stock-mismatch-${vendorId}-${productId}`;
 
 const classifyVariance = (
   listedQty: number,
@@ -187,6 +224,9 @@ export const InventorySpotChecks: React.FC = () => {
   const [selectedCheckId, setSelectedCheckId] = useState("");
   const [formData, setFormData] =
     useState<Partial<InventorySpotCheck>>(createBlankCheck());
+  const [showSpotCheckDraftPrompt, setShowSpotCheckDraftPrompt] = useState(false);
+  const [hasCheckedDraftRecovery, setHasCheckedDraftRecovery] = useState(false);
+  const [draftDecisionMade, setDraftDecisionMade] = useState(false);
   const [showPopupFeed, setShowPopupFeed] = useState(true);
 
   const canCreate =
@@ -201,6 +241,36 @@ export const InventorySpotChecks: React.FC = () => {
   const canViewAnalytics =
     permissionService.hasActionPermission("inventory.spotChecks.viewAnalytics") ||
     permissionService.canView("inventorySpotChecks");
+
+  const spotCheckDraft = useFormDraft<Partial<InventorySpotCheck>>({
+    draftKey: `inventory-spot-check:${formData.id || "new"}`,
+    formData,
+    setFormData,
+    enabled: activeTab === "create" || activeTab === "count",
+    saveDelayMs: 900,
+  });
+
+  useEffect(() => {
+    const isDraftFormOpen = activeTab === "create" || activeTab === "count";
+    if (!isDraftFormOpen) {
+      setHasCheckedDraftRecovery(false);
+      setDraftDecisionMade(false);
+      setShowSpotCheckDraftPrompt(false);
+      return;
+    }
+
+    if (hasCheckedDraftRecovery || draftDecisionMade) return;
+
+    if (spotCheckDraft.getDraftValue()) {
+      setShowSpotCheckDraftPrompt(true);
+    }
+    setHasCheckedDraftRecovery(true);
+  }, [
+    activeTab,
+    hasCheckedDraftRecovery,
+    draftDecisionMade,
+    spotCheckDraft.getDraftValue,
+  ]);
 
   const loadData = async () => {
     const [
@@ -242,6 +312,65 @@ export const InventorySpotChecks: React.FC = () => {
     () => new Map(vendors.map((vendor) => [vendor.id, vendor])),
     [vendors],
   );
+  const activeStaff = useMemo(
+    () =>
+      staffList.filter(
+        (staff) =>
+          (staff.status || "").toLowerCase() === "active" &&
+          staff.isLocked !== true,
+      ),
+    [staffList],
+  );
+  const inactiveAssignedStaff = useMemo(() => {
+    const assignedId = formData.assignedToStaffId;
+    if (!assignedId) return null;
+    const staff = staffList.find((item) => item.id === assignedId);
+    if (
+      staff &&
+      ((staff.status || "").toLowerCase() !== "active" ||
+        staff.isLocked === true)
+    ) {
+      return staff;
+    }
+    return null;
+  }, [formData.assignedToStaffId, staffList]);
+  const getVendorSearchText = (vendor: Vendor) =>
+    buildSearchText([
+      vendor.name,
+      vendor.tradingName,
+      vendor.phone,
+      vendor.whatsapp,
+      vendor.suburb,
+      vendor.cityTown,
+      vendor.district,
+      vendor.province,
+      vendor.sector,
+      vendor.systemCode,
+      vendor.id,
+    ]);
+  const getProductSearchText = (product: Product) =>
+    buildSearchText([
+      product.name,
+      product.productName,
+      product.brand,
+      product.sku,
+      product.productCode,
+      product.barcode,
+      product.category,
+      product.sector,
+      product.vendorName,
+      vendorById.get(product.vendorId)?.name,
+      vendorById.get(product.vendorId)?.tradingName,
+    ]);
+  const getStaffSearchText = (staff: Staff) =>
+    buildSearchText([
+      staff.fullName,
+      staff.displayName,
+      staff.email,
+      staff.staffCode,
+      staff.role,
+      staff.desk,
+    ]);
 
   const demandRecommendations = useMemo<AuditRecommendation[]>(() => {
     const rows = products.map((product) => {
@@ -317,6 +446,11 @@ export const InventorySpotChecks: React.FC = () => {
 
       return {
         id: `${product.vendorId}:${product.productId || product.id}`,
+        alertKey: getStockMismatchAlertKey(
+          product.vendorId,
+          product.productId || product.id,
+          product.branchId,
+        ),
         vendorId: product.vendorId,
         vendorName: product.vendorName || vendor?.name || "Unknown Vendor",
         productId: product.productId || product.id,
@@ -448,6 +582,47 @@ export const InventorySpotChecks: React.FC = () => {
       ).length,
     };
   }, [checks, demandRecommendations]);
+
+  const visiblePopupAlerts = useMemo(
+    () =>
+      demandRecommendations.filter(
+        (alert) =>
+          alert.leadPressureScore >= 51 &&
+          !isAlertAcknowledged(alert.alertKey || alert.id),
+      ),
+    [demandRecommendations],
+  );
+
+  const activePopupAlert = visiblePopupAlerts[0] || null;
+
+  const handleAcknowledgePopupAlert = (alert: AuditRecommendation | null) => {
+    if (!alert) return;
+    const key = alert.alertKey || alert.id;
+    if (key) {
+      saveAcknowledgedAlertKey(key);
+    }
+
+    setShowPopupFeed(false);
+
+    void notificationService
+      .getAll()
+      .then((notifications) => {
+        const relatedNotification = notifications.find(
+          (notification) =>
+            notification.type === "system_alert" &&
+            notification.recordType === "inventory_spot_check" &&
+            notification.recordId === alert.id &&
+            notification.status === "unread",
+        );
+        if (relatedNotification) {
+          return notificationService.markRead(relatedNotification.id);
+        }
+        return undefined;
+      })
+      .catch((error) => {
+        console.warn("Failed to mark popup alert notification as read", error);
+      });
+  };
 
   const populateFromProduct = (productId: string) => {
     const product = productById.get(productId);
@@ -618,6 +793,16 @@ export const InventorySpotChecks: React.FC = () => {
     check.estimatedSalesQty = undefined;
     check.stockAccuracyScore = undefined;
     inventorySpotCheckService.saveSpotCheck(check);
+    if (!navigator.onLine) {
+      offlineSyncService.enqueue({
+        module: "inventory",
+        operation: "schedule_spot_check",
+        recordId: check.id,
+        payload: { productName: check.productName, vendorName: check.vendorName },
+      });
+      alert("Saved to this device. It will sync when internet returns.");
+    }
+    spotCheckDraft.clearDraft();
     void staffAuditService.logAction({
       eventType: "SPOT_CHECK_SCHEDULED" as any,
       module: "product",
@@ -637,6 +822,16 @@ export const InventorySpotChecks: React.FC = () => {
     const base = selectedCheck || formData;
     const check = buildCompletedCheck({ ...base, ...formData }, "completed");
     inventorySpotCheckService.saveSpotCheck(check);
+    if (!navigator.onLine) {
+      offlineSyncService.enqueue({
+        module: "inventory",
+        operation: "complete_spot_check",
+        recordId: check.id,
+        payload: { productName: check.productName, vendorName: check.vendorName },
+      });
+      alert("Saved to this device. It will sync when internet returns.");
+    }
+    spotCheckDraft.clearDraft();
     void staffAuditService.logAction({
       eventType: "SPOT_CHECK_COMPLETED" as any,
       module: "product",
@@ -756,59 +951,65 @@ export const InventorySpotChecks: React.FC = () => {
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <label className="space-y-2">
-            <span className="text-[10px] font-black uppercase text-stone-400">
-              Vendor
-            </span>
-            <select
-              className={inputClass}
-              value={formData.vendorId || ""}
-              onChange={(event) =>
+          <SearchableComboBox
+            label="Vendor"
+            value={formData.vendorName || formData.vendorNameSnapshot || ""}
+            options={vendors}
+            getOptionLabel={(vendor) =>
+              [vendor.name, vendor.tradingName, vendor.cityTown, vendor.sector]
+                .filter(Boolean)
+                .join(" / ")
+            }
+            getOptionValue={(vendor) => vendor.id}
+            getOptionSearchText={getVendorSearchText}
+            placeholder="Search vendor name, phone, location, sector..."
+            emptyMessage="No vendors found."
+            onSelect={(vendor) =>
+              setFormData({
+                ...formData,
+                vendorId: vendor?.id || "",
+                vendorName: vendor?.name || "",
+                vendorNameSnapshot: vendor?.name || "",
+                vendorSystemCode: vendor?.systemCode || "",
+                productId: vendor ? formData.productId : "",
+                productName: vendor ? formData.productName : "",
+              })
+            }
+          />
+          <SearchableComboBox
+            label="Product"
+            value={formData.productName || ""}
+            options={products.filter(
+              (product) =>
+                !formData.vendorId || product.vendorId === formData.vendorId,
+            )}
+            getOptionLabel={(product) =>
+              [
+                product.name || product.productName,
+                product.brand,
+                product.vendorName,
+                `${product.stockQuantity || 0} units`,
+              ]
+                .filter(Boolean)
+                .join(" / ")
+            }
+            getOptionValue={(product) => product.id}
+            getOptionSearchText={getProductSearchText}
+            placeholder="Search product, brand, SKU, barcode, vendor..."
+            emptyMessage="No product offers found."
+            className="md:col-span-2"
+            onSelect={(product) => {
+              if (product) {
+                populateFromProduct(product.id);
+              } else {
                 setFormData({
                   ...formData,
-                  vendorId: event.target.value,
-                  vendorName: vendorById.get(event.target.value)?.name,
-                  vendorNameSnapshot: vendorById.get(event.target.value)?.name,
-                  vendorSystemCode: vendorById.get(event.target.value)?.systemCode,
-                })
+                  productId: "",
+                  productName: "",
+                });
               }
-            >
-              <option value="">Select vendor...</option>
-              {vendors.map((vendor) => (
-                <option key={vendor.id} value={vendor.id}>
-                  {vendor.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="space-y-2 md:col-span-2">
-            <span className="text-[10px] font-black uppercase text-stone-400">
-              Product
-            </span>
-            <select
-              className={inputClass}
-              value={
-                products.find(
-                  (p) =>
-                    p.vendorId === formData.vendorId &&
-                    (p.productId === formData.productId || p.id === formData.productId),
-                )?.id || ""
-              }
-              onChange={(event) => populateFromProduct(event.target.value)}
-            >
-              <option value="">Select product offer...</option>
-              {products
-                .filter(
-                  (product) =>
-                    !formData.vendorId || product.vendorId === formData.vendorId,
-                )
-                .map((product) => (
-                  <option key={product.id} value={product.id}>
-                    {product.name} / {product.vendorName} / {product.stockQuantity} units
-                  </option>
-                ))}
-            </select>
-          </label>
+            }}
+          />
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -868,30 +1069,43 @@ export const InventorySpotChecks: React.FC = () => {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <label className="space-y-2">
-            <span className="text-[10px] font-black uppercase text-stone-400">
-              Assigned Staff
-            </span>
-            <select
-              className={inputClass}
-              value={formData.assignedToStaffId || ""}
-              onChange={(event) => {
-                const staff = staffList.find((item) => item.id === event.target.value);
+          <div className="space-y-2">
+            {inactiveAssignedStaff && (
+              <div className="border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-800">
+                Previously assigned staff is no longer active. Please reassign
+                to an active staff member.
+              </div>
+            )}
+            <SearchableComboBox
+              label="Assigned Staff"
+              value={formData.assignedToStaffName || ""}
+              options={activeStaff}
+              getOptionLabel={(staff) =>
+                [
+                  staff.displayName || staff.fullName,
+                  staff.role,
+                  staff.desk,
+                  staff.staffCode,
+                ]
+                  .filter(Boolean)
+                  .join(" / ")
+              }
+              getOptionValue={(staff) => staff.id}
+              getOptionSearchText={getStaffSearchText}
+              placeholder="Search active staff..."
+              emptyMessage="No active staff members available."
+              onSelect={(staff) =>
                 setFormData({
                   ...formData,
-                  assignedToStaffId: staff?.id,
-                  assignedToStaffName: staff?.displayName || staff?.fullName,
-                });
-              }}
-            >
-              <option value="">Unassigned</option>
-              {staffList.map((staff) => (
-                <option key={staff.id} value={staff.id}>
-                  {staff.displayName || staff.fullName}
-                </option>
-              ))}
-            </select>
-          </label>
+                  assignedToStaffId: staff?.id || "",
+                  assignedToStaffName:
+                    staff?.displayName || staff?.fullName || "",
+                  assignedToStaffRole: staff?.role || "",
+                  assignedToStaffDesk: staff?.desk || "",
+                } as Partial<InventorySpotCheck>)
+              }
+            />
+          </div>
           <label className="space-y-2">
             <span className="text-[10px] font-black uppercase text-stone-400">
               Action Required
@@ -955,11 +1169,11 @@ export const InventorySpotChecks: React.FC = () => {
           </SecondaryButton>
           {mode === "create" ? (
             <PrimaryButton className="flex-1" onClick={saveScheduledCheck}>
-              Schedule Audit
+              {navigator.onLine ? "Schedule Audit" : "Save Locally"}
             </PrimaryButton>
           ) : (
             <PrimaryButton className="flex-1" onClick={submitPhysicalCount}>
-              Submit Physical Count
+              {navigator.onLine ? "Submit Physical Count" : "Save Locally"}
             </PrimaryButton>
           )}
         </div>
@@ -969,6 +1183,42 @@ export const InventorySpotChecks: React.FC = () => {
 
   return (
     <div className="space-y-6 pb-20">
+      {showSpotCheckDraftPrompt && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-md border-2 border-brand-orange bg-white p-5 shadow-2xl">
+            <h3 className="text-sm font-black uppercase text-brand-charcoal">
+              Unsaved draft found
+            </h3>
+            <p className="mt-2 text-xs font-bold text-stone-600">
+              Resume or discard the inventory spot check draft saved on this device?
+            </p>
+            <div className="mt-5 flex gap-3">
+              <PrimaryButton
+                type="button"
+                className="flex-1"
+                onClick={() => {
+                  spotCheckDraft.restoreDraft();
+                  setDraftDecisionMade(true);
+                  setShowSpotCheckDraftPrompt(false);
+                }}
+              >
+                Resume
+              </PrimaryButton>
+              <SecondaryButton
+                type="button"
+                className="flex-1"
+                onClick={() => {
+                  spotCheckDraft.discardDraft();
+                  setDraftDecisionMade(true);
+                  setShowSpotCheckDraftPrompt(false);
+                }}
+              >
+                Discard
+              </SecondaryButton>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-black uppercase tracking-tight text-brand-charcoal">
@@ -1011,7 +1261,7 @@ export const InventorySpotChecks: React.FC = () => {
         <StatCard label="Mismatches" value={stats.mismatches} icon={ShieldAlert} variant={stats.mismatches ? "error" : "neutral"} />
       </div>
 
-      {showPopupFeed && demandRecommendations[0]?.leadPressureScore >= 51 && (
+      {showPopupFeed && activePopupAlert && (
         <div className="fixed bottom-6 right-6 z-40 w-[min(390px,calc(100vw-2rem))] border-2 border-brand-charcoal bg-white p-4 shadow-2xl">
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -1019,10 +1269,14 @@ export const InventorySpotChecks: React.FC = () => {
                 SCI Stock Intelligence Feed
               </p>
               <p className="mt-1 text-sm font-bold text-brand-orange">
-                Stock Audit Recommended
+                {activePopupAlert.recommendedAction ===
+                "Flag vendor stock mismatch"
+                  ? "Stock Mismatch"
+                  : "Stock Audit Recommended"}
               </p>
             </div>
             <button
+              type="button"
               className="text-[10px] font-black uppercase text-stone-400"
               onClick={() => setShowPopupFeed(false)}
             >
@@ -1030,10 +1284,19 @@ export const InventorySpotChecks: React.FC = () => {
             </button>
           </div>
           <p className="mt-2 text-xs font-semibold text-stone-600">
-            {demandRecommendations[0].productName} has{" "}
-            {demandRecommendations[0].whatsappHits} WhatsApp hits and only{" "}
-            {demandRecommendations[0].listedQtyBeforeAudit} listed units.
+            {activePopupAlert.productName} has {activePopupAlert.whatsappHits}{" "}
+            WhatsApp hits and only {activePopupAlert.listedQtyBeforeAudit}{" "}
+            listed units.
           </p>
+          <div className="mt-4 flex justify-end">
+            <button
+              type="button"
+              className="border-2 border-brand-charcoal bg-brand-charcoal px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-brand-orange"
+              onClick={() => handleAcknowledgePopupAlert(activePopupAlert)}
+            >
+              Acknowledge
+            </button>
+          </div>
         </div>
       )}
 

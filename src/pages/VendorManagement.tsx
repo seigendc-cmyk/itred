@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo } from 'react'
 import {
   Store,
   Plus,
@@ -31,7 +31,9 @@ import {
   Upload,
   CheckCircle2,
   AlertTriangle,
-} from "lucide-react";
+  Loader2,
+  Download
+} from 'lucide-react'
 import {
   TablePanel,
   StatusBadge,
@@ -39,23 +41,25 @@ import {
   SecondaryButton,
   EmptyState,
   SearchInput,
+  SearchableComboBox,
   ConfirmDialog,
   DataPanel,
-  BrandedAlertModal,
-} from "../components/CommonUI.tsx";
-import { vendorService } from "../services/vendorService.ts";
-import { rpnService } from "../services/rpnService.ts";
-import { productService } from "../services/productService.ts";
-import { catalogueService } from "../services/catalogueService.ts";
-import { logService } from "../services/logService.ts";
-import { analyticsService } from "../services/analyticsService.ts";
-import { pricingPlanService } from "../services/pricingPlanService.ts";
-import { pdfService } from "../services/pdfService.ts";
-import { permissionService } from "../services/permissionService.ts";
-import { staffService } from "../services/staffService.ts";
-import { staffAuditService } from "../services/staffAuditService.ts";
-import { settingsService } from "../services/settingsService.ts";
-import { vendorReadinessService } from "../services/vendorReadinessService.ts";
+  BrandedAlertModal
+} from '../components/CommonUI.tsx'
+import { vendorService } from '../services/vendorService.ts'
+import { masterDataCacheService } from '../services/masterDataCacheService.ts'
+import { rpnService } from '../services/rpnService.ts'
+import { catalogueService } from '../services/catalogueService.ts'
+import { logService } from '../services/logService.ts'
+import { analyticsService } from '../services/analyticsService.ts'
+import { pricingPlanService } from '../services/pricingPlanService.ts'
+import { pdfService } from '../services/pdfService.ts'
+import { permissionService } from '../services/permissionService.ts'
+import { staffService } from '../services/staffService.ts'
+import { staffAuditService } from '../services/staffAuditService.ts'
+import { settingsService } from '../services/settingsService.ts'
+import { taxonomyService } from '../services/taxonomyService.ts'
+import { vendorReadinessService } from '../services/vendorReadinessService.ts'
 import {
   Vendor,
   RPN,
@@ -65,459 +69,644 @@ import {
   FieldDataSource,
   Branch,
   PricingPlan,
-  Product,
-  MasterProduct,
-  VendorProductOffer,
   CatalogueGeneration,
   Staff,
   MarketingCampaign,
-} from "../types.ts";
-import { asArray } from "../utils/safeData.ts";
-import { optimizeImageToWebP } from "../utils/imageUtils.ts";
-import { findSimilarVendors } from "../utils/duplicateDetection.ts";
-import { approvalService } from "../services/approvalService.ts";
+  IDeliverProvider,
+  SystemSettings
+} from '../types.ts'
+import { asArray } from '../utils/safeData.ts'
+import { optimizeImageToWebP } from '../utils/imageUtils.ts'
+import { findSimilarVendors } from '../utils/duplicateDetection.ts'
+import {
+  DEFAULT_BUSINESS_TYPES,
+  DEFAULT_SECTORS
+} from '../utils/classificationOptions.ts'
+import { approvalService } from '../services/approvalService.ts'
+import { generateEntityId } from '../utils/idGenerator.ts'
+import { exportVendorProductRows } from '../utils/vendorProductExport.ts'
+import { buildSearchText } from '../utils/searchUtils.ts'
+import { useFormDraft } from '../hooks/useFormDraft.ts'
+import { offlineSyncService } from '../services/offlineSyncService.ts'
+import {
+  clearDraft as clearLocalDraft,
+  getDraft,
+  hasMeaningfulDraft
+} from '../utils/localDraftStorage.ts'
+import {
+  getSession,
+  getSessionRole,
+  getSessionStaffId,
+  getSessionStaffName,
+  hasValidSession
+} from '../utils/session.ts'
 
-const SECTORS = [
-  "General Retail",
-  "Motor Spares / Automotive",
-  "Industrial Parts",
-  "Hardware & Tools",
-  "Construction",
-  "Agriculture",
-  "Food & Beverage",
-  "Grocery",
-  "Health / Medical",
-  "Personal Care",
-  "Pharmacy",
-  "Clothing & Fashion",
-  "Phones & Computers",
-  "Education",
-  "Tourism & Hospitality",
-  "Leisure & Resorts",
-  "Property",
-  "Transport & Logistics",
-  "Warehousing",
-  "Engineering",
-  "Plumbing",
-  "Professional Services",
-  "Jobbing Services",
-  "Jewellery",
-  "Perfumes & Cosmetics",
-  "Spices",
-  "Vehicle Dealer",
-  "General Dealer",
-  "Other",
-];
-const BUSINESS_TYPES = [
-  "Wholesaler",
-  "Retailer",
-  "Manufacturer",
-  "Distributor",
-  "Digital Provider",
-];
+const SECTORS = DEFAULT_SECTORS
+const BUSINESS_TYPES = DEFAULT_BUSINESS_TYPES
 const DATA_SOURCES: FieldDataSource[] = [
-  "RPN collected",
-  "vendor submitted",
-  "backend entered",
-  "imported",
-];
+  'RPN collected',
+  'vendor submitted',
+  'backend entered',
+  'imported'
+]
 const VENDOR_STATUSES: VendorStatus[] = [
-  "lead",
-  "active",
-  "suspended",
-  "dormant",
-  "cancelled",
-  "pending_review",
-];
+  'lead',
+  'active',
+  'suspended',
+  'dormant',
+  'cancelled',
+  'pending_review'
+]
 const WORLD_COUNTRIES = [
-  "Afghanistan",
-  "Albania",
-  "Algeria",
-  "Andorra",
-  "Angola",
-  "Antigua and Barbuda",
-  "Argentina",
-  "Armenia",
-  "Australia",
-  "Austria",
-  "Azerbaijan",
-  "Bahamas",
-  "Bahrain",
-  "Bangladesh",
-  "Barbados",
-  "Belarus",
-  "Belgium",
-  "Belize",
-  "Benin",
-  "Bhutan",
-  "Bolivia",
-  "Bosnia and Herzegovina",
-  "Botswana",
-  "Brazil",
-  "Brunei",
-  "Bulgaria",
-  "Burkina Faso",
-  "Burundi",
-  "Cabo Verde",
-  "Cambodia",
-  "Cameroon",
-  "Canada",
-  "Central African Republic",
-  "Chad",
-  "Chile",
-  "China",
-  "Colombia",
-  "Comoros",
-  "Congo",
-  "Costa Rica",
+  'Afghanistan',
+  'Albania',
+  'Algeria',
+  'Andorra',
+  'Angola',
+  'Antigua and Barbuda',
+  'Argentina',
+  'Armenia',
+  'Australia',
+  'Austria',
+  'Azerbaijan',
+  'Bahamas',
+  'Bahrain',
+  'Bangladesh',
+  'Barbados',
+  'Belarus',
+  'Belgium',
+  'Belize',
+  'Benin',
+  'Bhutan',
+  'Bolivia',
+  'Bosnia and Herzegovina',
+  'Botswana',
+  'Brazil',
+  'Brunei',
+  'Bulgaria',
+  'Burkina Faso',
+  'Burundi',
+  'Cabo Verde',
+  'Cambodia',
+  'Cameroon',
+  'Canada',
+  'Central African Republic',
+  'Chad',
+  'Chile',
+  'China',
+  'Colombia',
+  'Comoros',
+  'Congo',
+  'Costa Rica',
   "Cote d'Ivoire",
-  "Croatia",
-  "Cuba",
-  "Cyprus",
-  "Czechia",
-  "Democratic Republic of the Congo",
-  "Denmark",
-  "Djibouti",
-  "Dominica",
-  "Dominican Republic",
-  "Ecuador",
-  "Egypt",
-  "El Salvador",
-  "Equatorial Guinea",
-  "Eritrea",
-  "Estonia",
-  "Eswatini",
-  "Ethiopia",
-  "Fiji",
-  "Finland",
-  "France",
-  "Gabon",
-  "Gambia",
-  "Georgia",
-  "Germany",
-  "Ghana",
-  "Greece",
-  "Grenada",
-  "Guatemala",
-  "Guinea",
-  "Guinea-Bissau",
-  "Guyana",
-  "Haiti",
-  "Honduras",
-  "Hungary",
-  "Iceland",
-  "India",
-  "Indonesia",
-  "Iran",
-  "Iraq",
-  "Ireland",
-  "Israel",
-  "Italy",
-  "Jamaica",
-  "Japan",
-  "Jordan",
-  "Kazakhstan",
-  "Kenya",
-  "Kiribati",
-  "Kuwait",
-  "Kyrgyzstan",
-  "Laos",
-  "Latvia",
-  "Lebanon",
-  "Lesotho",
-  "Liberia",
-  "Libya",
-  "Liechtenstein",
-  "Lithuania",
-  "Luxembourg",
-  "Madagascar",
-  "Malawi",
-  "Malaysia",
-  "Maldives",
-  "Mali",
-  "Malta",
-  "Marshall Islands",
-  "Mauritania",
-  "Mauritius",
-  "Mexico",
-  "Micronesia",
-  "Moldova",
-  "Monaco",
-  "Mongolia",
-  "Montenegro",
-  "Morocco",
-  "Mozambique",
-  "Myanmar",
-  "Namibia",
-  "Nauru",
-  "Nepal",
-  "Netherlands",
-  "New Zealand",
-  "Nicaragua",
-  "Niger",
-  "Nigeria",
-  "North Korea",
-  "North Macedonia",
-  "Norway",
-  "Oman",
-  "Pakistan",
-  "Palau",
-  "Palestine",
-  "Panama",
-  "Papua New Guinea",
-  "Paraguay",
-  "Peru",
-  "Philippines",
-  "Poland",
-  "Portugal",
-  "Qatar",
-  "Romania",
-  "Russia",
-  "Rwanda",
-  "Saint Kitts and Nevis",
-  "Saint Lucia",
-  "Saint Vincent and the Grenadines",
-  "Samoa",
-  "San Marino",
-  "Sao Tome and Principe",
-  "Saudi Arabia",
-  "Senegal",
-  "Serbia",
-  "Seychelles",
-  "Sierra Leone",
-  "Singapore",
-  "Slovakia",
-  "Slovenia",
-  "Solomon Islands",
-  "Somalia",
-  "South Africa",
-  "South Korea",
-  "South Sudan",
-  "Spain",
-  "Sri Lanka",
-  "Sudan",
-  "Suriname",
-  "Sweden",
-  "Switzerland",
-  "Syria",
-  "Taiwan",
-  "Tajikistan",
-  "Tanzania",
-  "Thailand",
-  "Timor-Leste",
-  "Togo",
-  "Tonga",
-  "Trinidad and Tobago",
-  "Tunisia",
-  "Turkey",
-  "Turkmenistan",
-  "Tuvalu",
-  "Uganda",
-  "Ukraine",
-  "United Arab Emirates",
-  "United Kingdom",
-  "United States",
-  "Uruguay",
-  "Uzbekistan",
-  "Vanuatu",
-  "Vatican City",
-  "Venezuela",
-  "Vietnam",
-  "Yemen",
-  "Zambia",
-  "Zimbabwe",
-];
-const DEFAULT_COUNTRY = "Zimbabwe";
+  'Croatia',
+  'Cuba',
+  'Cyprus',
+  'Czechia',
+  'Democratic Republic of the Congo',
+  'Denmark',
+  'Djibouti',
+  'Dominica',
+  'Dominican Republic',
+  'Ecuador',
+  'Egypt',
+  'El Salvador',
+  'Equatorial Guinea',
+  'Eritrea',
+  'Estonia',
+  'Eswatini',
+  'Ethiopia',
+  'Fiji',
+  'Finland',
+  'France',
+  'Gabon',
+  'Gambia',
+  'Georgia',
+  'Germany',
+  'Ghana',
+  'Greece',
+  'Grenada',
+  'Guatemala',
+  'Guinea',
+  'Guinea-Bissau',
+  'Guyana',
+  'Haiti',
+  'Honduras',
+  'Hungary',
+  'Iceland',
+  'India',
+  'Indonesia',
+  'Iran',
+  'Iraq',
+  'Ireland',
+  'Israel',
+  'Italy',
+  'Jamaica',
+  'Japan',
+  'Jordan',
+  'Kazakhstan',
+  'Kenya',
+  'Kiribati',
+  'Kuwait',
+  'Kyrgyzstan',
+  'Laos',
+  'Latvia',
+  'Lebanon',
+  'Lesotho',
+  'Liberia',
+  'Libya',
+  'Liechtenstein',
+  'Lithuania',
+  'Luxembourg',
+  'Madagascar',
+  'Malawi',
+  'Malaysia',
+  'Maldives',
+  'Mali',
+  'Malta',
+  'Marshall Islands',
+  'Mauritania',
+  'Mauritius',
+  'Mexico',
+  'Micronesia',
+  'Moldova',
+  'Monaco',
+  'Mongolia',
+  'Montenegro',
+  'Morocco',
+  'Mozambique',
+  'Myanmar',
+  'Namibia',
+  'Nauru',
+  'Nepal',
+  'Netherlands',
+  'New Zealand',
+  'Nicaragua',
+  'Niger',
+  'Nigeria',
+  'North Korea',
+  'North Macedonia',
+  'Norway',
+  'Oman',
+  'Pakistan',
+  'Palau',
+  'Palestine',
+  'Panama',
+  'Papua New Guinea',
+  'Paraguay',
+  'Peru',
+  'Philippines',
+  'Poland',
+  'Portugal',
+  'Qatar',
+  'Romania',
+  'Russia',
+  'Rwanda',
+  'Saint Kitts and Nevis',
+  'Saint Lucia',
+  'Saint Vincent and the Grenadines',
+  'Samoa',
+  'San Marino',
+  'Sao Tome and Principe',
+  'Saudi Arabia',
+  'Senegal',
+  'Serbia',
+  'Seychelles',
+  'Sierra Leone',
+  'Singapore',
+  'Slovakia',
+  'Slovenia',
+  'Solomon Islands',
+  'Somalia',
+  'South Africa',
+  'South Korea',
+  'South Sudan',
+  'Spain',
+  'Sri Lanka',
+  'Sudan',
+  'Suriname',
+  'Sweden',
+  'Switzerland',
+  'Syria',
+  'Taiwan',
+  'Tajikistan',
+  'Tanzania',
+  'Thailand',
+  'Timor-Leste',
+  'Togo',
+  'Tonga',
+  'Trinidad and Tobago',
+  'Tunisia',
+  'Turkey',
+  'Turkmenistan',
+  'Tuvalu',
+  'Uganda',
+  'Ukraine',
+  'United Arab Emirates',
+  'United Kingdom',
+  'United States',
+  'Uruguay',
+  'Uzbekistan',
+  'Vanuatu',
+  'Vatican City',
+  'Venezuela',
+  'Vietnam',
+  'Yemen',
+  'Zambia',
+  'Zimbabwe'
+]
+const DEFAULT_COUNTRY = 'Zimbabwe'
 
 const SearchableCountrySelect: React.FC<{
-  value?: string;
-  onChange: (value: string) => void;
-  className?: string;
+  value?: string
+  onChange: (value: string) => void
+  className?: string
 }> = ({ value, onChange, className }) => {
-  const listId = React.useId();
+  const listId = React.useId()
   return (
     <>
       <input
         list={listId}
         value={value || DEFAULT_COUNTRY}
-        onChange={(e) => onChange(e.target.value)}
-        onBlur={(e) => {
-          if (!e.target.value.trim()) onChange(DEFAULT_COUNTRY);
+        onChange={e => onChange(e.target.value)}
+        onBlur={e => {
+          if (!e.target.value.trim()) onChange(DEFAULT_COUNTRY)
         }}
         className={className}
       />
       <datalist id={listId}>
-        {WORLD_COUNTRIES.map((country) => (
+        {WORLD_COUNTRIES.map(country => (
           <option key={country} value={country} />
         ))}
       </datalist>
     </>
-  );
-};
+  )
+}
 const SUB_STATUSES: SubscriptionStatus[] = [
-  "trial",
-  "active",
-  "due",
-  "overdue",
-  "suspended",
-];
+  'trial',
+  'active',
+  'due',
+  'overdue',
+  'suspended'
+]
 
 export const VendorManagement: React.FC = () => {
   // Navigation & View State
-  const [view, setView] = useState<"list" | "form">("list");
-  const [selectedVendor, setSelectedVendor] = useState<Vendor | null>(null);
+  const [view, setView] = useState<'list' | 'form'>('list')
+  const [selectedVendor, setSelectedVendor] = useState<Vendor | null>(null)
 
   // Data State
-  const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [rpns, setRpns] = useState<RPN[]>([]);
-  const [staffList, setStaffList] = useState<Staff[]>([]);
-  const [plans, setPlans] = useState<PricingPlan[]>([]);
-  const [campaigns, setCampaigns] = useState<MarketingCampaign[]>([]);
-  const [masterProducts, setMasterProducts] = useState<MasterProduct[]>([]);
-  const [vendorOffers, setVendorOffers] = useState<VendorProductOffer[]>([]);
-  const [productPickerSearch, setProductPickerSearch] = useState("");
-  const [offerDraft, setOfferDraft] = useState<Partial<VendorProductOffer>>({
-    sellingPrice: 0,
-    stockQuantity: 0,
-    stockStatus: "in_stock",
-    publishToCatalogue: true,
-    deliveryAvailable: true,
-    featured: false,
-    active: true,
-  });
+  const [vendors, setVendors] = useState<Vendor[]>([])
+  const [rpns, setRpns] = useState<RPN[]>([])
+  const [staffList, setStaffList] = useState<Staff[]>([])
+  const [plans, setPlans] = useState<PricingPlan[]>([])
+  const [campaigns, setCampaigns] = useState<MarketingCampaign[]>([])
+  const [systemSettings, setSystemSettings] = useState<SystemSettings>({})
+  const [sharedSectors, setSharedSectors] = useState<string[]>([])
+  const [newBusinessType, setNewBusinessType] = useState('')
+  const [newSector, setNewSector] = useState('')
+  const [providerUploadStatus, setProviderUploadStatus] = useState<
+    Record<string, string>
+  >({})
 
   // Lists stats (counts)
-  const [productCounts, setProductCounts] = useState<Record<string, number>>(
-    {},
-  );
+  const [productCounts, setProductCounts] = useState<Record<string, number>>({})
   const [catalogueCounts, setCatalogueCounts] = useState<
     Record<string, number>
-  >({});
+  >({})
 
   // Filter State
-  const [search, setSearch] = useState("");
-  const [filterSector, setFilterSector] = useState("All");
-  const [filterRPN, setFilterRPN] = useState("All");
-  const [filterSubStatus, setFilterSubStatus] = useState("All");
-  const [filterVendorStatus, setFilterVendorStatus] = useState("All");
+  const [search, setSearch] = useState('')
+  const [filterSector, setFilterSector] = useState('All')
+  const [filterRPN, setFilterRPN] = useState('All')
+  const [filterSubStatus, setFilterSubStatus] = useState('All')
+  const [filterVendorStatus, setFilterVendorStatus] = useState('All')
 
   // Deletion State
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  const [vendorToDelete, setVendorToDelete] = useState<string | null>(null);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
+  const [vendorToDelete, setVendorToDelete] = useState<string | null>(null)
 
   // Form State
   const [formData, setFormData] = useState<Partial<Vendor>>({
     branches: [],
     staff: [],
     deliveryStaff: [],
-  });
-  const [isManagerOverride, setIsManagerOverride] = useState(false);
+    deliveryProviders: []
+  })
+  const [isManagerOverride, setIsManagerOverride] = useState(false)
 
   // Asset Upload State
-  const [logoStatus, setLogoStatus] = useState<string>("");
-  const [bannerStatus, setBannerStatus] = useState<string>("");
-  const [showManualUrls, setShowManualUrls] = useState<boolean>(false);
+  const [logoStatus, setLogoStatus] = useState<string>('')
+  const [bannerStatus, setBannerStatus] = useState<string>('')
+  const [showManualUrls, setShowManualUrls] = useState<boolean>(false)
 
-  const [isSaving, setIsSaving] = useState(false);
-  const [formError, setFormError] = useState("");
-  const [formSuccess, setFormSuccess] = useState("");
+  const [isSaving, setIsSaving] = useState(false)
+  const [formError, setFormError] = useState('')
+  const [formSuccess, setFormSuccess] = useState('')
+  const [showDraftPrompt, setShowDraftPrompt] = useState(false)
+  const [hasCheckedDraftRecovery, setHasCheckedDraftRecovery] = useState(false)
+  const [draftDecisionMade, setDraftDecisionMade] = useState(false)
+  const [isLoadingData, setIsLoadingData] = useState(true)
 
   const [alertConfig, setAlertConfig] = useState<{
-    isOpen: boolean;
-    title?: string;
-    message: string;
-    type?: "success" | "error" | "warning" | "info";
-  }>({ isOpen: false, title: "seiGEN Commerce", message: "", type: "success" });
+    isOpen: boolean
+    title?: string
+    message: string
+    type?: 'success' | 'error' | 'warning' | 'info'
+  }>({ isOpen: false, title: 'seiGEN Commerce', message: '', type: 'success' })
 
   const showBrandedAlert = (config: {
-    title?: string;
-    message: string;
-    type?: "success" | "error" | "warning" | "info";
+    title?: string
+    message: string
+    type?: 'success' | 'error' | 'warning' | 'info'
   }) => {
-    setAlertConfig({ ...config, isOpen: true });
-  };
+    setAlertConfig({ ...config, isOpen: true })
+  }
+
+  const vendorDraft = useFormDraft<Partial<Vendor>>({
+    draftKey: `vendor:${formData.id || selectedVendor?.id || 'new'}`,
+    formData,
+    setFormData,
+    enabled: view === 'form',
+    saveDelayMs: 900
+  })
 
   useEffect(() => {
-    vendorService.migrateVendors();
-    loadData();
-  }, []);
+    if (view !== 'form') {
+      setHasCheckedDraftRecovery(false)
+      setDraftDecisionMade(false)
+      setShowDraftPrompt(false)
+      return
+    }
+
+    if (hasCheckedDraftRecovery || draftDecisionMade) return
+
+    const draftKey = `itred_form_draft:vendor:${
+      formData.id || selectedVendor?.id || 'new'
+    }`
+    const draft = getDraft<Partial<Vendor>>(draftKey)
+
+    if (draft) {
+      const hasUsefulVendorDraft =
+        !!draft.name ||
+        !!draft.tradingName ||
+        !!draft.sector ||
+        !!draft.businessType ||
+        !!draft.mainPhone ||
+        (draft.branches && draft.branches.length > 0) ||
+        hasMeaningfulDraft(draft)
+
+      if (hasUsefulVendorDraft) {
+        setShowDraftPrompt(true)
+      } else {
+        clearLocalDraft(draftKey)
+      }
+    }
+    setHasCheckedDraftRecovery(true)
+  }, [view, hasCheckedDraftRecovery, draftDecisionMade])
+
+  const requireActiveSession = () => {
+    const session = getSession()
+    if (!hasValidSession(session)) {
+      showBrandedAlert({
+        title: 'seiGEN Commerce',
+        message:
+          'Session expired. Please login again before saving operational changes.',
+        type: 'warning'
+      })
+      return null
+    }
+    return session
+  }
+
+  useEffect(() => {
+    vendorService.migrateVendors()
+    loadData()
+  }, [])
 
   const loadData = async () => {
-    const v = asArray<Vendor>(
-      await Promise.resolve(vendorService.getVendors()),
-    );
-    const r = asArray<RPN>(await Promise.resolve(rpnService.getAll()));
-    const p = asArray<Product>(
-      await Promise.resolve(productService.getProducts()),
-    );
-    const mp = asArray<MasterProduct>(
-      await Promise.resolve(productService.getMasterProducts()),
-    );
-    const offers = asArray<VendorProductOffer>(
-      await Promise.resolve(productService.getVendorProductOffers()),
-    );
+    setIsLoadingData(true)
+    const startMs = performance.now()
+    try {
+    masterDataCacheService.getVendors().then(cachedVendors => {
+      if (cachedVendors.length > 0) {
+        setVendors(
+          cachedVendors.map(v => ({
+            id: v.vendorId || v.id,
+            systemCode: '',
+            name: v.name || v.vendorName,
+            tradingName: v.tradingName || v.vendorName,
+            ownerFullName: '',
+            sector: v.sector || '',
+            category: v.category,
+            businessType: v.category || '',
+            vendorType: 'other',
+            mainPhone: '',
+            whatsappNumber: '',
+            email: '',
+            country: '',
+            province: '',
+            cityTown: v.cityTown || v.city || '',
+            district: '',
+            suburb: v.suburb || '',
+            streetAddress: '',
+            businessDescription: '',
+            catalogueDisplayName: v.vendorName,
+            catalogueSlogan: '',
+            openingHours: '',
+            status: (v.status as any) || 'active',
+            planId: v.planId || '',
+            subscriptionStatus: (v.subscriptionStatus as any) || 'active',
+            dataSource: 'master_cache',
+            createdBy: '',
+            updatedBy: '',
+            createdAt: '',
+            updatedAt: v.updatedAt || '',
+            branches: [],
+            staff: [],
+            deliveryStaff: []
+          }) as Vendor)
+        )
+      }
+    })
+    const v = asArray<Vendor>(await Promise.resolve(vendorService.getVendors()))
+    const r = asArray<RPN>(await Promise.resolve(rpnService.getAll()))
     const c = asArray<CatalogueGeneration>(
-      await Promise.resolve(catalogueService.getHistory()),
-    );
+      await Promise.resolve(catalogueService.getHistory())
+    )
     const pl = asArray<PricingPlan>(
-      await Promise.resolve(pricingPlanService.getPlans()),
-    );
-    const st = asArray<Staff>(
-      await Promise.resolve(staffService.getAllStaff()),
-    );
+      await Promise.resolve(pricingPlanService.getPlans())
+    )
+    const st = asArray<Staff>(await Promise.resolve(staffService.getAllStaff()))
     const cm = asArray<MarketingCampaign>(
-      await Promise.resolve(rpnService.getCampaigns()),
-    );
+      await Promise.resolve(rpnService.getCampaigns())
+    )
+    const settings = await settingsService.getSettings()
 
-    setVendors(v);
-    setRpns(r);
-    setPlans(pl);
-    setStaffList(st);
-    setCampaigns(cm);
-    setMasterProducts(mp);
-    setVendorOffers(offers);
+    setVendors(v)
+    setRpns(r)
+    setPlans(pl)
+    setStaffList(st)
+    setCampaigns(cm)
+    setSystemSettings(settings)
+    setSharedSectors(await taxonomyService.getSectors())
 
     // Calculate counts
-    const pCounts: Record<string, number> = {};
-    offers.forEach((offer) => {
-      if (!offer.active) return;
-      pCounts[offer.vendorId] = (pCounts[offer.vendorId] || 0) + 1;
-    });
-    setProductCounts(pCounts);
+    const pCounts: Record<string, number> = {}
+    setProductCounts(pCounts)
 
-    const cCounts: Record<string, number> = {};
-    c.forEach((gen) => {
-      (gen.vendorIds || []).forEach((vid) => {
-        cCounts[vid] = (cCounts[vid] || 0) + 1;
-      });
-    });
-    setCatalogueCounts(cCounts);
-  };
+    const cCounts: Record<string, number> = {}
+    c.forEach(gen => {
+      ;(gen.vendorIds || []).forEach(vid => {
+        cCounts[vid] = (cCounts[vid] || 0) + 1
+      })
+    })
+    setCatalogueCounts(cCounts)
+    } catch (error) {
+      console.warn("Error loading vendor management data", error)
+    } finally {
+      setIsLoadingData(false)
+      console.info("Data load completed", { page: "VendorManagement", elapsedMs: Math.round(performance.now() - startMs) })
+    }
+  }
 
   const filteredStaffRPNs = useMemo(() => {
-    return staffList.filter((s) => {
-      const role = (s.role || "").toLowerCase();
+    return staffList.filter(s => {
+      const role = (s.role || '').toLowerCase()
       return (
-        role.includes("rpn") ||
-        role.includes("agent") ||
-        role.includes("field") ||
-        role.includes("sales")
-      );
-    });
-  }, [staffList]);
+        role.includes('rpn') ||
+        role.includes('agent') ||
+        role.includes('field') ||
+        role.includes('sales')
+      )
+    })
+  }, [staffList])
 
-  const filtered = vendors.filter((v) => {
+  const sectorOptions = useMemo(() => {
+    return Array.from(
+      new Set(
+        [
+          ...sharedSectors,
+          ...vendors.map(vendor => vendor.sector),
+          formData.sector
+        ]
+          .map(value => (value || '').trim())
+          .filter(Boolean)
+      )
+    ).sort((a, b) => a.localeCompare(b))
+  }, [formData.sector, sharedSectors, vendors])
+
+  const businessTypeOptions = useMemo(() => {
+    return Array.from(
+      new Set(
+        [
+          ...BUSINESS_TYPES,
+          ...asArray<string>(systemSettings.customBusinessTypes),
+          ...vendors.map(vendor => vendor.businessType),
+          formData.businessType
+        ]
+          .map(value => (value || '').trim())
+          .filter(Boolean)
+      )
+    ).sort((a, b) => a.localeCompare(b))
+  }, [formData.businessType, systemSettings.customBusinessTypes, vendors])
+
+  const activeStaff = useMemo(
+    () =>
+      staffList
+        .filter(
+          staff =>
+            (staff.status || '').toLowerCase() === 'active' && !staff.isLocked
+        )
+        .sort((a, b) => (a.fullName || '').localeCompare(b.fullName || '')),
+    [staffList]
+  )
+
+  const searchableStaff = activeStaff
+
+  const currentAssignedStaff = useMemo(() => {
+    const id = formData.assignedStaffId || formData.assignedMemberId
+    if (!id) return null
+    return staffList.find(staff => staff.id === id) || null
+  }, [formData.assignedMemberId, formData.assignedStaffId, staffList])
+
+  const currentAssignedStaffIsInactive =
+    !!currentAssignedStaff &&
+    ((currentAssignedStaff.status || '').toLowerCase() !== 'active' ||
+      !!currentAssignedStaff.isLocked)
+
+  const addCustomBusinessType = async () => {
+    const value = newBusinessType.trim()
+    if (!value) return
+    if (
+      businessTypeOptions.some(
+        item => item.toLowerCase() === value.toLowerCase()
+      )
+    ) {
+      showBrandedAlert({
+        message: 'Business type already exists.',
+        type: 'warning'
+      })
+      return
+    }
+    const nextSettings = {
+      ...systemSettings,
+      customBusinessTypes: [
+        ...asArray<string>(systemSettings.customBusinessTypes),
+        value
+      ]
+    }
+    await settingsService.saveSettings(nextSettings)
+    setSystemSettings(nextSettings)
+    setFormData(prev => ({ ...prev, businessType: value }))
+    setNewBusinessType('')
+    void staffAuditService.logAction({
+      eventType: 'RECORD_CREATED',
+      module: 'settings',
+      severity: 'info',
+      action: `Custom business type added: ${value}`,
+      recordType: 'business_type',
+      recordId: value
+    })
+  }
+
+  const addCustomSector = async () => {
+    const value = newSector.trim()
+    if (!value) return
+    if (
+      sectorOptions.some(item => item.toLowerCase() === value.toLowerCase())
+    ) {
+      showBrandedAlert({ message: 'Sector already exists.', type: 'warning' })
+      return
+    }
+    const sectors = await taxonomyService.addSector(value)
+    const nextSettings = await settingsService.getSettings()
+    setSharedSectors(sectors)
+    setSystemSettings(nextSettings)
+    setFormData(prev => ({ ...prev, sector: value }))
+    setNewSector('')
+    void staffAuditService.logAction({
+      eventType: 'RECORD_CREATED',
+      module: 'settings',
+      severity: 'info',
+      action: `Custom sector added: ${value}`,
+      recordType: 'sector',
+      recordId: value
+    })
+  }
+
+  const filtered = vendors.filter(v => {
     const matchesSearch =
       v.name.toLowerCase().includes(search.toLowerCase()) ||
       (v.systemCode &&
         v.systemCode.toLowerCase().includes(search.toLowerCase())) ||
-      v.id.toLowerCase().includes(search.toLowerCase());
-    const matchesSector = filterSector === "All" || v.sector === filterSector;
-    const matchesRPN = filterRPN === "All" || v.assignedRPNId === filterRPN;
+      v.id.toLowerCase().includes(search.toLowerCase())
+    const matchesSector = filterSector === 'All' || v.sector === filterSector
+    const matchesRPN = filterRPN === 'All' || v.assignedRPNId === filterRPN
     const matchesSub =
-      filterSubStatus === "All" || v.subscriptionStatus === filterSubStatus;
+      filterSubStatus === 'All' || v.subscriptionStatus === filterSubStatus
     const matchesStatus =
-      filterVendorStatus === "All" || v.status === filterVendorStatus;
+      filterVendorStatus === 'All' || v.status === filterVendorStatus
 
     return (
       matchesSearch &&
@@ -525,211 +714,271 @@ export const VendorManagement: React.FC = () => {
       matchesRPN &&
       matchesSub &&
       matchesStatus
-    );
-  });
+    )
+  })
 
   const handleDelete = () => {
     if (vendorToDelete) {
+      const session = requireActiveSession()
+      if (!session) return
       try {
-        vendorService.deleteVendor(vendorToDelete);
+        vendorService.deleteVendor(vendorToDelete)
         analyticsService.logEvent({
-          eventType: "VENDOR_DELETED",
-          actorType: "admin",
-          actorName: "System Admin",
+          eventType: 'VENDOR_DELETED',
+          actorType: getSessionRole(session),
+          actorName: getSessionStaffName(session),
           vendorId: vendorToDelete,
-          details: { action: "purged" },
-        });
-        loadData();
-        setIsDeleteDialogOpen(false);
-        setVendorToDelete(null);
+          details: { action: 'purged' }
+        })
+        loadData()
+        setIsDeleteDialogOpen(false)
+        setVendorToDelete(null)
         showBrandedAlert({
-          title: "seiGEN Commerce",
-          message: "Deleted successfully.",
-          type: "success",
-        });
+          title: 'seiGEN Commerce',
+          message: 'Deleted successfully.',
+          type: 'success'
+        })
 
         // Non-blocking staff audit logging
         try {
-          const vendor = vendors.find((v) => v.id === vendorToDelete);
+          const vendor = vendors.find(v => v.id === vendorToDelete)
           void staffAuditService.logDelete(
-            "vendor",
-            "vendor",
+            'vendor',
+            'vendor',
             vendorToDelete,
-            vendor?.name || "Unknown",
-            vendor,
-          );
+            vendor?.name || 'Unknown',
+            vendor
+          )
         } catch (e) {
-          console.error("Audit log failed", e);
+          console.error('Audit log failed', e)
         }
       } catch (error: any) {
-        console.error(error);
+        console.error(error)
         showBrandedAlert({
-          title: "seiGEN Commerce",
-          message: error.message || "Delete failed",
-          type: "error",
-        });
+          title: 'seiGEN Commerce',
+          message: error.message || 'Delete failed',
+          type: 'error'
+        })
       }
     }
-  };
+  }
 
   const downloadOnboardingForm = () => {
-    pdfService.generateOnboardingForm(vendors, rpns, plans);
-  };
+    pdfService.generateOnboardingForm(vendors, rpns, plans)
+  }
 
   const previewOnboardingForm = () => {
-    pdfService.previewOnboardingForm(vendors, rpns, plans);
-  };
+    pdfService.previewOnboardingForm(vendors, rpns, plans)
+  }
 
   const startNewVendor = () => {
-    const now = new Date().toISOString();
-    setLogoStatus("");
-    setBannerStatus("");
-    setShowManualUrls(false);
-    setIsManagerOverride(false);
-    setFormError("");
-    setFormSuccess("");
+    const now = new Date().toISOString()
+    const rawProspectPrefill = localStorage.getItem(
+      'itred_vendor_prefill_from_prospect'
+    )
+    const prospectPrefill = rawProspectPrefill
+      ? JSON.parse(rawProspectPrefill)
+      : {}
+    if (rawProspectPrefill) {
+      localStorage.removeItem('itred_vendor_prefill_from_prospect')
+    }
+    setLogoStatus('')
+    setBannerStatus('')
+    setShowManualUrls(false)
+    setIsManagerOverride(false)
+    setFormError('')
+    setFormSuccess('')
+    setHasCheckedDraftRecovery(false)
+    setDraftDecisionMade(false)
     setFormData({
-      id: `VEND-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
-      status: "lead",
-      subscriptionStatus: "trial",
-      planId: "standard",
-      dataSource: "backend entered",
+      id: generateEntityId('VEND'),
+      status: 'lead',
+      subscriptionStatus: 'trial',
+      planId: 'standard',
+      dataSource: 'backend entered',
       branches: [],
       staff: [],
       deliveryStaff: [],
+      deliveryProviders: [],
       createdAt: now,
       updatedAt: now,
-      createdBy: "STAFF-ADM",
-      displayName: "", // Initialize displayName
-      updatedBy: "STAFF-ADM",
+      createdBy: '',
+      displayName: '', // Initialize displayName
+      updatedBy: '',
       country: DEFAULT_COUNTRY,
-    });
-    setSelectedVendor(null);
-    setView("form");
-  };
+      ...prospectPrefill
+    })
+    setSelectedVendor(null)
+    setView('form')
+  }
+
+  useEffect(() => {
+    if (localStorage.getItem('itred_vendor_prefill_from_prospect')) {
+      startNewVendor()
+    }
+  }, [])
 
   const startEditVendor = (vendor: Vendor) => {
-    setLogoStatus("");
-    setBannerStatus("");
-    setShowManualUrls(false);
-    setIsManagerOverride(false);
-    setFormError("");
-    setFormSuccess("");
-    setFormData({ ...vendor });
-    setFormData((prev) => ({
+    setLogoStatus('')
+    setBannerStatus('')
+    setShowManualUrls(false)
+    setIsManagerOverride(false)
+    setFormError('')
+    setFormSuccess('')
+    setHasCheckedDraftRecovery(false)
+    setDraftDecisionMade(false)
+    setFormData({ ...vendor })
+    setFormData(prev => ({
       ...prev,
       branches: vendor.branches || [],
       staff: vendor.staff || [],
       deliveryStaff: vendor.deliveryStaff || [],
-    }));
-    setSelectedVendor(vendor);
-    setView("form");
-  };
+      deliveryProviders: vendor.deliveryProviders || []
+    }))
+    setSelectedVendor(vendor)
+    setView('form')
+  }
 
   const saveVendor = async () => {
-    setFormError("");
-    setFormSuccess("");
+    setFormError('')
+    setFormSuccess('')
+
+    const session = requireActiveSession()
+    if (!session) return
+    const staffId = getSessionStaffId(session)
+    const staffName = getSessionStaffName(session)
 
     if (!formData.name || !formData.sector) {
-      setFormError("Name and Sector are required for terminal deployment.");
-      return;
+      setFormError('Name and Sector are required for terminal deployment.')
+      return
+    }
+    if (formData.assignedStaffId) {
+      const selectedAssignment = activeStaff.find(
+        staff => staff.id === formData.assignedStaffId
+      )
+      if (!selectedAssignment) {
+        setFormError(
+          'Assigned Staff Member must be active and unlocked. Please reassign to an active staff member.'
+        )
+        return
+      }
+    }
+    const providerWarnings = (formData.deliveryProviders || []).flatMap(
+      provider =>
+        providerReadinessWarnings(provider).map(
+          warning =>
+            `${provider.providerName || 'iDeliver provider'}: ${warning}`
+        )
+    )
+    if (providerWarnings.length > 0) {
+      setFormError(
+        `iDeliver readiness: ${providerWarnings.slice(0, 3).join('; ')}`
+      )
+      if (
+        (formData.deliveryProviders || []).some(
+          provider => provider.status === 'verified'
+        )
+      ) {
+        return
+      }
     }
 
-    const sessionStr = localStorage.getItem("activeStaffSession");
-    const session = sessionStr
-      ? JSON.parse(sessionStr)
-      : { staffId: "STAFF-ADM", staffName: "System Admin" };
-    const canApprove = permissionService.canApprove("vendor");
-    const isNew = !selectedVendor;
-    const needsApproval = !canApprove;
+    const canApprove = permissionService.canApprove('vendor')
+    const isNew = !selectedVendor
+    const needsApproval = !canApprove
 
-    setIsSaving(true);
+    setIsSaving(true)
     const oldVendor = vendors.find(
-      (v) => v.id === (selectedVendor?.id || formData.id),
-    );
+      v => v.id === (selectedVendor?.id || formData.id)
+    )
     try {
-      const now = new Date().toISOString();
+      const now = new Date().toISOString()
       const vendorToSave = {
         ...selectedVendor, // Preserve existing fields if not in formData
         ...formData,
         country: formData.country || DEFAULT_COUNTRY,
         updatedAt: now,
-        updatedBy: session.staffId,
-      } as Vendor;
+        updatedBy: staffId,
+        updatedByName: staffName,
+        createdBy: formData.createdBy || staffId,
+        createdByName: (formData as any).createdByName || staffName
+      } as Vendor
 
       if (needsApproval) {
-        vendorToSave.status = "pending_review";
+        vendorToSave.status = 'pending_review'
       }
 
-      await vendorService.updateVendor(vendorToSave);
+      await vendorService.updateVendor(vendorToSave)
 
       if (needsApproval) {
         await approvalService.submitApprovalRequest({
-          requestType: isNew ? "vendor_create" : "vendor_update",
-          recordType: "vendor",
+          requestType: isNew ? 'vendor_create' : 'vendor_update',
+          recordType: 'vendor',
           recordId: vendorToSave.id,
           recordName: vendorToSave.name,
-          submittedByStaffId: session.staffId,
-          submittedByName: session.staffName,
-          riskLevel: "medium",
+          submittedByStaffId: staffId,
+          submittedByName: staffName,
+          riskLevel: 'medium',
           beforeSnapshot: oldVendor || null,
-          afterSnapshot: vendorToSave,
-        });
+          afterSnapshot: vendorToSave
+        })
 
         void staffAuditService.logAction({
-          eventType: "APPROVAL_SUBMITTED",
-          module: "vendor",
-          action: `Submitted vendor ${isNew ? "creation" : "update"} for approval`,
-          severity: "info",
-          recordType: "vendor",
+          eventType: 'APPROVAL_SUBMITTED',
+          module: 'vendor',
+          action: `Submitted vendor ${
+            isNew ? 'creation' : 'update'
+          } for approval`,
+          severity: 'info',
+          recordType: 'vendor',
           recordId: vendorToSave.id,
-          recordName: vendorToSave.name,
-        });
+          recordName: vendorToSave.name
+        })
 
         showBrandedAlert({
-          title: "seiGEN Commerce",
-          message: "Vendor submitted for approval.",
-          type: "info",
-        });
+          title: 'seiGEN Commerce',
+          message: 'Vendor submitted for approval.',
+          type: 'info'
+        })
       } else {
         analyticsService.logEvent({
-          eventType: isNew ? "VENDOR_CREATED" : "VENDOR_UPDATED",
-          actorType: "admin",
-          actorName: session.staffName,
+          eventType: isNew ? 'VENDOR_CREATED' : 'VENDOR_UPDATED',
+          actorType: getSessionRole(session),
+          actorName: staffName,
           vendorId: vendorToSave.id,
           vendorName: vendorToSave.name,
-          details: { action: isNew ? "creation" : "update" },
-        });
+          details: { action: isNew ? 'creation' : 'update' }
+        })
 
         try {
           if (oldVendor) {
             await staffAuditService.logUpdate(
-              "vendor",
-              "vendor",
+              'vendor',
+              'vendor',
               vendorToSave.id,
               vendorToSave.name,
               oldVendor,
-              vendorToSave,
-            );
+              vendorToSave
+            )
             if (oldVendor.status !== vendorToSave.status) {
               await staffAuditService.logAction({
-                eventType: "RECORD_UPDATED",
-                module: "vendor",
+                eventType: 'RECORD_UPDATED',
+                module: 'vendor',
                 action: `Vendor status changed from ${oldVendor.status} to ${vendorToSave.status}`,
-                severity: "warning",
-                recordType: "vendor",
+                severity: 'warning',
+                recordType: 'vendor',
                 recordId: vendorToSave.id,
-                recordName: vendorToSave.name,
-              });
+                recordName: vendorToSave.name
+              })
             }
           } else {
             await staffAuditService.logCreate(
-              "vendor",
-              "vendor",
+              'vendor',
+              'vendor',
               vendorToSave.id,
               vendorToSave.name,
-              vendorToSave,
-            );
+              vendorToSave
+            )
           }
           if (
             oldVendor &&
@@ -737,454 +986,689 @@ export const VendorManagement: React.FC = () => {
               oldVendor.assignedRPNId !== vendorToSave.assignedRPNId)
           ) {
             await staffAuditService.logAction({
-              eventType: "RECORD_UPDATED",
-              module: "vendor",
-              action: "Assigned/Reassigned vendor to RPN",
-              severity: "high",
-              recordType: "vendor",
+              eventType: 'RECORD_UPDATED',
+              module: 'vendor',
+              action: 'Assigned/Reassigned vendor to RPN',
+              severity: 'high',
+              recordType: 'vendor',
+              recordId: vendorToSave.id,
+              recordName: vendorToSave.name
+            })
+          }
+          if (
+            oldVendor &&
+            oldVendor.assignedStaffId !== vendorToSave.assignedStaffId
+          ) {
+            await staffAuditService.logAction({
+              eventType: 'RECORD_UPDATED',
+              module: 'vendor',
+              action: 'Personnel assignment changed',
+              severity: 'info',
+              recordType: 'vendor_assignment',
               recordId: vendorToSave.id,
               recordName: vendorToSave.name,
-            });
+              afterSnapshot: {
+                assignedStaffId: vendorToSave.assignedStaffId,
+                assignedStaffName: vendorToSave.assignedStaffName,
+                assignedMemberStaffCode: vendorToSave.assignedMemberStaffCode,
+                assignedMemberRole: vendorToSave.assignedMemberRole,
+                assignedMemberDesk: vendorToSave.assignedMemberDesk
+              }
+            })
           }
           if (
             vendorToSave.campaignCode &&
             (!oldVendor || oldVendor.campaignCode !== vendorToSave.campaignCode)
           ) {
             await staffAuditService.logAction({
-              eventType: "RECORD_UPDATED",
-              module: "analytics",
+              eventType: 'RECORD_UPDATED',
+              module: 'analytics',
               action: `Attributed vendor to campaign ${vendorToSave.campaignCode}`,
-              severity: "info",
-              recordType: "vendor_campaign_attribution",
+              severity: 'info',
+              recordType: 'vendor_campaign_attribution',
               recordId: vendorToSave.id,
               recordName: vendorToSave.name,
               afterSnapshot: {
                 campaignCode: vendorToSave.campaignCode,
                 campaignSource: vendorToSave.campaignSource,
-                heardAboutUsVia: vendorToSave.heardAboutUsVia,
-              },
-            });
+                heardAboutUsVia: vendorToSave.heardAboutUsVia
+              }
+            })
           }
         } catch (auditErr) {
-          console.error("Audit log failed", auditErr);
+          console.error('Audit log failed', auditErr)
         }
 
         try {
-          const [allProducts, readinessSettings] = await Promise.all([
-            productService.getProducts(),
-            settingsService.getSettings(),
-          ]);
+          const readinessSettings = await settingsService.getSettings()
           await vendorReadinessService.ensureReadinessTask(
             vendorToSave,
-            allProducts,
+            [],
             readinessSettings,
-            "Vendor was saved and readiness was re-evaluated.",
-          );
+            'Vendor was saved. Product upload is handled separately through Excel and product workflows.'
+          )
         } catch (readinessErr) {
-          console.warn("Vendor readiness automation failed", readinessErr);
+          console.warn('Vendor readiness automation failed', readinessErr)
         }
       }
 
-      await loadData();
+      if ((vendorToSave as any).prospectId) {
+        const prospectId = (vendorToSave as any).prospectId
+        const prospects = rpnService.getProspects()
+        const prospect = prospects.find(p => p.id === prospectId)
+
+        if (prospect && prospect.pipelineStage !== 'Onboarded') {
+          const updatedProspect: any = {
+            ...prospect,
+            pipelineStage: 'Onboarded',
+            status: 'Converted',
+            conversionDate: now,
+            stageUpdatedAt: now,
+            stageUpdatedBy: staffName,
+            lastActivityDate: now,
+            lastActivityNote: `Converted to Vendor ${
+              vendorToSave.systemCode || vendorToSave.name
+            }`,
+            updatedAt: now,
+            stageHistory: [
+              ...(prospect.stageHistory || []),
+              {
+                stage: 'Onboarded',
+                enteredAt: now,
+                enteredByStaffId: staffId,
+                enteredByStaffName: staffName,
+                notes: `Converted to Vendor ${
+                  vendorToSave.systemCode || vendorToSave.name
+                }`,
+                fromStage: prospect.pipelineStage
+              }
+            ],
+            activityHistory: [
+              ...(prospect.activityHistory || []),
+              {
+                id: `PA-${Date.now()}-${Math.random()
+                  .toString(36)
+                  .substr(2, 5)}`,
+                prospectId: prospect.id,
+                actionType: 'CONVERTED',
+                actionLabel: 'Converted to Vendor',
+                note: `Vendor System Code: ${
+                  vendorToSave.systemCode || vendorToSave.name
+                }`,
+                createdBy: staffName,
+                createdByRole: getSessionRole(session),
+                createdAt: now
+              }
+            ]
+          }
+          rpnService.saveProspect(updatedProspect)
+
+          void staffAuditService.logAction({
+            eventType: 'RPN_PIPELINE_UPDATED',
+            module: 'rpn',
+            severity: 'high',
+            action: `Converted prospect ${prospect.id} to Vendor`,
+            recordId: prospect.id,
+            afterSnapshot: { newStage: 'Onboarded', vendorId: vendorToSave.id }
+          })
+        }
+      }
+
+      await loadData()
+      vendorDraft.clearDraft()
+      setHasCheckedDraftRecovery(false)
+      setDraftDecisionMade(false)
       if (!needsApproval) {
         showBrandedAlert({
-          title: "seiGEN Commerce",
-          message: "Vendor saved successfully.",
-          type: "success",
-        });
+          title: 'seiGEN Commerce',
+          message: navigator.onLine
+            ? 'Vendor saved successfully. Products can be uploaded later using Excel.'
+            : 'Saved to this device. It will sync when internet returns. Products can be uploaded later using Excel.',
+          type: 'success'
+        })
       }
-      setView("list");
+      if (!navigator.onLine) {
+        offlineSyncService.enqueue({
+          module: 'vendor',
+          operation: isNew ? 'create_vendor' : 'update_vendor',
+          recordId: vendorToSave.id,
+          payload: { name: vendorToSave.name }
+        })
+      }
+      setView('list')
     } catch (error) {
-      console.error("Save vendor error:", error);
+      console.error('Save vendor error:', error)
       showBrandedAlert({
-        title: "seiGEN Commerce",
-        message: error instanceof Error ? error.message : "Save failed",
-        type: "error",
-      });
+        title: 'seiGEN Commerce',
+        message: error instanceof Error ? error.message : 'Save failed',
+        type: 'error'
+      })
     } finally {
-      setIsSaving(false);
+      setIsSaving(false)
     }
-  };
+  }
 
   const handleBranchAdd = () => {
     const newBranch: Branch = {
-      id: `BR-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
-      name: "New Branch Location",
-      phone: "",
-      whatsapp: "", // Default to empty string
+      id: generateEntityId('BR'),
+      name: 'New Branch Location',
+      phone: '',
+      whatsapp: '', // Default to empty string
       country: formData.country || DEFAULT_COUNTRY,
-      province: formData.province || "",
-      cityTown: formData.cityTown || "",
-      district: "",
-      suburb: "",
-      streetAddress: "",
-      address: "",
-      landmark: "",
-      managerName: "",
-      openingHours: "08:00 - 17:00",
+      province: formData.province || '',
+      cityTown: formData.cityTown || '',
+      district: '',
+      suburb: '',
+      streetAddress: '',
+      address: '',
+      landmark: '',
+      managerName: '',
+      openingHours: '08:00 - 17:00',
       isDefault: formData.branches?.length === 0,
-      status: "active",
-    };
+      status: 'active'
+    }
     setFormData({
       ...formData,
-      branches: [...(formData.branches || []), newBranch],
-    });
-  };
+      branches: [...(formData.branches || []), newBranch]
+    })
+  }
 
   const handleBranchUpdate = (branchId: string, updates: Partial<Branch>) => {
-    const updatedBranches = (formData.branches || []).map((b) =>
-      b.id === branchId ? { ...b, ...updates } : b,
-    );
-    setFormData({ ...formData, branches: updatedBranches });
-  };
+    const updatedBranches = (formData.branches || []).map(b =>
+      b.id === branchId ? { ...b, ...updates } : b
+    )
+    setFormData({ ...formData, branches: updatedBranches })
+  }
 
   const handleBranchDelete = (branchId: string) => {
     setFormData({
       ...formData,
-      branches: (formData.branches || []).filter((b) => b.id !== branchId),
-    });
-  };
+      branches: (formData.branches || []).filter(b => b.id !== branchId)
+    })
+  }
 
   const handleLogoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
       showBrandedAlert({
-        title: "seiGEN Commerce",
-        message: "Only image files are allowed.",
-        type: "warning",
-      });
-      return;
+        title: 'seiGEN Commerce',
+        message: 'Only image files are allowed.',
+        type: 'warning'
+      })
+      return
     }
     if (file.size > 8 * 1024 * 1024) {
       showBrandedAlert({
-        title: "seiGEN Commerce",
-        message: "File exceeds 8MB limit.",
-        type: "warning",
-      });
-      return;
+        title: 'seiGEN Commerce',
+        message: 'File exceeds 8MB limit.',
+        type: 'warning'
+      })
+      return
     }
 
-    setLogoStatus("Optimizing...");
+    setLogoStatus('Optimizing...')
     try {
       const optimizedBlob = await optimizeImageToWebP(file, {
         maxWidth: 800,
         maxHeight: 800,
-        quality: 0.86,
-      });
+        quality: 0.86
+      })
       if (optimizedBlob.size > 200 * 1024) {
         console.warn(
-          `Optimized logo is still quite large: ${(optimizedBlob.size / 1024).toFixed(1)}KB`,
-        );
+          `Optimized logo is still quite large: ${(
+            optimizedBlob.size / 1024
+          ).toFixed(1)}KB`
+        )
       }
-      setLogoStatus("Uploading...");
-      const vendorId =
-        formData.id ||
-        `VEND-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
-      if (!formData.id) setFormData((prev) => ({ ...prev, id: vendorId }));
-      const url = await vendorService.uploadVendorLogo(vendorId, optimizedBlob);
-      setFormData((prev) => ({ ...prev, logoAssetUrl: url }));
-      setLogoStatus("Uploaded");
-      setTimeout(() => setLogoStatus(""), 3000);
+      setLogoStatus('Uploading...')
+      const vendorId = formData.id || generateEntityId('VEND')
+      if (!formData.id) setFormData(prev => ({ ...prev, id: vendorId }))
+      const url = await vendorService.uploadVendorLogo(vendorId, optimizedBlob)
+      setFormData(prev => ({ ...prev, logoAssetUrl: url }))
+      setLogoStatus('Uploaded')
+      setTimeout(() => setLogoStatus(''), 3000)
 
       try {
         void staffAuditService.logAction({
-          eventType: "RECORD_UPDATED",
-          module: "vendor",
-          severity: "high",
-          action: "Updated vendor identity assets",
-          recordType: "vendor",
+          eventType: 'RECORD_UPDATED',
+          module: 'vendor',
+          severity: 'high',
+          action: 'Updated vendor identity assets',
+          recordType: 'vendor',
           recordId: vendorId,
-          recordName: formData.name,
-        });
+          recordName: formData.name
+        })
       } catch (e) {}
     } catch (error) {
-      console.error("Logo upload failed", error);
-      setLogoStatus("Failed");
+      console.error('Logo upload failed', error)
+      setLogoStatus('Failed')
     }
-  };
+  }
 
   const handleBannerSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
       showBrandedAlert({
-        title: "seiGEN Commerce",
-        message: "Only image files are allowed.",
-        type: "warning",
-      });
-      return;
+        title: 'seiGEN Commerce',
+        message: 'Only image files are allowed.',
+        type: 'warning'
+      })
+      return
     }
     if (file.size > 8 * 1024 * 1024) {
       showBrandedAlert({
-        title: "seiGEN Commerce",
-        message: "File exceeds 8MB limit.",
-        type: "warning",
-      });
-      return;
+        title: 'seiGEN Commerce',
+        message: 'File exceeds 8MB limit.',
+        type: 'warning'
+      })
+      return
     }
 
-    setBannerStatus("Optimizing...");
+    setBannerStatus('Optimizing...')
     try {
       const optimizedBlob = await optimizeImageToWebP(file, {
         maxWidth: 1600,
         maxHeight: 700,
-        quality: 0.86,
-      });
+        quality: 0.86
+      })
       if (optimizedBlob.size > 500 * 1024) {
         console.warn(
-          `Optimized banner is still quite large: ${(optimizedBlob.size / 1024).toFixed(1)}KB`,
-        );
+          `Optimized banner is still quite large: ${(
+            optimizedBlob.size / 1024
+          ).toFixed(1)}KB`
+        )
       }
-      setBannerStatus("Uploading...");
-      const vendorId =
-        formData.id ||
-        `VEND-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
-      if (!formData.id) setFormData((prev) => ({ ...prev, id: vendorId }));
+      setBannerStatus('Uploading...')
+      const vendorId = formData.id || generateEntityId('VEND')
+      if (!formData.id) setFormData(prev => ({ ...prev, id: vendorId }))
       const url = await vendorService.uploadVendorBanner(
         vendorId,
-        optimizedBlob,
-      );
-      setFormData((prev) => ({ ...prev, bannerAssetUrl: url }));
-      setBannerStatus("Uploaded");
-      setTimeout(() => setBannerStatus(""), 3000);
+        optimizedBlob
+      )
+      setFormData(prev => ({ ...prev, bannerAssetUrl: url }))
+      setBannerStatus('Uploaded')
+      setTimeout(() => setBannerStatus(''), 3000)
 
       try {
         void staffAuditService.logAction({
-          eventType: "RECORD_UPDATED",
-          module: "vendor",
-          severity: "high",
-          action: "Updated vendor identity assets",
-          recordType: "vendor",
+          eventType: 'RECORD_UPDATED',
+          module: 'vendor',
+          severity: 'high',
+          action: 'Updated vendor identity assets',
+          recordType: 'vendor',
           recordId: vendorId,
-          recordName: formData.name,
-        });
+          recordName: formData.name
+        })
       } catch (e) {}
     } catch (error) {
-      console.error("Banner upload failed", error);
-      setBannerStatus("Failed");
+      console.error('Banner upload failed', error)
+      setBannerStatus('Failed')
     }
-  };
+  }
+
+  const providerReadinessWarnings = (provider: Partial<IDeliverProvider>) => {
+    const warnings: string[] = []
+    if (!provider.providerName?.trim()) warnings.push('Provider name required')
+    if (!provider.phoneNumber?.trim() && !provider.whatsappNumber?.trim()) {
+      warnings.push('Phone or WhatsApp required')
+    }
+    if (!provider.driverLicenseNumber?.trim())
+      warnings.push('Driver license required')
+    if (provider.vehicleType && !provider.vehicleNumber?.trim()) {
+      warnings.push('Vehicle number required')
+    }
+    if (!provider.nationalIdNumber?.trim())
+      warnings.push('National ID required')
+    if (!provider.policeClearanceCertificateUrl?.trim()) {
+      warnings.push('Police clearance recommended before verification')
+    }
+    return warnings
+  }
+
+  const addDeliveryProvider = () => {
+    const now = new Date().toISOString()
+    const vendorId = formData.id || generateEntityId('VEND')
+    if (!formData.id) setFormData(prev => ({ ...prev, id: vendorId }))
+    const provider: IDeliverProvider = {
+      id: generateEntityId('IDEL'),
+      vendorId,
+      providerName: '',
+      phoneNumber: '',
+      whatsappNumber: '',
+      driverLicenseNumber: '',
+      vehicleNumber: '',
+      vehicleType: '',
+      policeClearanceCertificateUrl: '',
+      nationalIdNumber: '',
+      address: '',
+      country: formData.country || DEFAULT_COUNTRY,
+      province: formData.province || '',
+      cityTown: formData.cityTown || '',
+      district: formData.district || '',
+      suburb: formData.suburb || '',
+      status: 'pending',
+      notes: '',
+      createdAt: now,
+      updatedAt: now
+    }
+    setFormData(prev => ({
+      ...prev,
+      id: vendorId,
+      deliveryProviders: [...(prev.deliveryProviders || []), provider]
+    }))
+    void staffAuditService.logAction({
+      eventType: 'RECORD_CREATED',
+      module: 'vendor',
+      severity: 'info',
+      action: 'iDeliver provider added',
+      recordType: 'ideliver_provider',
+      recordId: provider.id,
+      recordName: provider.providerName || 'Pending provider'
+    })
+  }
+
+  const updateDeliveryProvider = (
+    providerId: string,
+    patch: Partial<IDeliverProvider>
+  ) => {
+    setFormData(prev => ({
+      ...prev,
+      deliveryProviders: (prev.deliveryProviders || []).map(provider =>
+        provider.id === providerId
+          ? { ...provider, ...patch, updatedAt: new Date().toISOString() }
+          : provider
+      )
+    }))
+    if (patch.status) {
+      void staffAuditService.logAction({
+        eventType: 'RECORD_UPDATED',
+        module: 'vendor',
+        severity: patch.status === 'suspended' ? 'high' : 'info',
+        action: `iDeliver provider ${patch.status}`,
+        recordType: 'ideliver_provider',
+        recordId: providerId
+      })
+    }
+  }
+
+  const removeDeliveryProvider = (providerId: string) => {
+    setFormData(prev => ({
+      ...prev,
+      deliveryProviders: (prev.deliveryProviders || []).filter(
+        provider => provider.id !== providerId
+      )
+    }))
+  }
+
+  const handlePoliceClearanceUpload = async (
+    providerId: string,
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    const allowed =
+      file.type.startsWith('image/') || file.type === 'application/pdf'
+    if (!allowed) {
+      showBrandedAlert({
+        title: 'seiGEN Commerce',
+        message: 'Police clearance must be a PDF or image file.',
+        type: 'warning'
+      })
+      return
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      showBrandedAlert({
+        title: 'seiGEN Commerce',
+        message: 'File exceeds 8MB limit.',
+        type: 'warning'
+      })
+      return
+    }
+    const vendorId = formData.id || generateEntityId('VEND')
+    setProviderUploadStatus(prev => ({ ...prev, [providerId]: 'Uploading...' }))
+    try {
+      const url = await vendorService.uploadDeliveryProviderDocument(
+        vendorId,
+        providerId,
+        file,
+        file.name
+      )
+      if (!formData.id) setFormData(prev => ({ ...prev, id: vendorId }))
+      updateDeliveryProvider(providerId, {
+        vendorId,
+        policeClearanceCertificateUrl: url
+      })
+      setProviderUploadStatus(prev => ({ ...prev, [providerId]: 'Uploaded' }))
+      void staffAuditService.logAction({
+        eventType: 'RECORD_UPDATED',
+        module: 'vendor',
+        severity: 'info',
+        action: 'Police clearance uploaded',
+        recordType: 'ideliver_provider',
+        recordId: providerId
+      })
+    } catch (error) {
+      console.error('Police clearance upload failed', error)
+      setProviderUploadStatus(prev => ({ ...prev, [providerId]: 'Failed' }))
+    }
+  }
 
   const duplicates = useMemo(() => {
     if (
-      view !== "form" ||
+      view !== 'form' ||
       (!formData.name &&
         !formData.tradingName &&
         !formData.catalogueDisplayName)
     )
-      return [];
+      return []
     // Filter out the current vendor we are editing
-    const otherVendors = vendors.filter((v) => v.id !== formData.id);
-    return findSimilarVendors(formData, otherVendors);
+    const otherVendors = vendors.filter(v => v.id !== formData.id)
+    return findSimilarVendors(formData, otherVendors)
   }, [
     formData.name,
     formData.tradingName,
     formData.catalogueDisplayName,
     vendors,
     view,
-    formData.id,
-  ]);
+    formData.id
+  ])
 
   const hasCriticalDuplicate = duplicates.some(
-    (d) => d.similarity.level === "exact" || d.similarity.level === "high",
-  );
-  const canManagerOverride = permissionService.canApprove("vendor");
-  const isSaveBlocked = hasCriticalDuplicate && !isManagerOverride;
+    d => d.similarity.level === 'exact' || d.similarity.level === 'high'
+  )
+  const canManagerOverride = permissionService.canApprove('vendor')
+  const isSaveBlocked = hasCriticalDuplicate && !isManagerOverride
 
   const handleOverrideRequest = async () => {
+    const session = requireActiveSession()
+    if (!session) return
     try {
       await approvalService.submitApprovalRequest({
-        requestType: "Duplicate Vendor Override",
-        recordType: "vendor",
-        recordId: formData.id || "new",
-        submittedByStaffId: "STAFF-ADM", // Uses session ID in production
-        submittedByName: "Backend Staff",
-        riskLevel: "medium",
+        requestType: 'Duplicate Vendor Override',
+        recordType: 'vendor',
+        recordId: formData.id || 'new',
+        submittedByStaffId: getSessionStaffId(session),
+        submittedByName: getSessionStaffName(session),
+        riskLevel: 'medium',
         beforeSnapshot: null,
-        afterSnapshot: formData,
-      });
-      setFormSuccess(
-        "Override approval submitted to managers. You will be notified when reviewed.",
-      );
-      setTimeout(() => setView("list"), 2000);
-    } catch (e) {
-      console.error(e);
-      setFormError("Failed to submit approval request.");
-    }
-  };
-
-  const currentVendorOffers = useMemo(() => {
-    const vendorId = formData.id || selectedVendor?.id || "";
-    return vendorOffers.filter((offer) => offer.vendorId === vendorId);
-  }, [vendorOffers, formData.id, selectedVendor?.id]);
-
-  const productById = useMemo(
-    () => new Map(masterProducts.map((product) => [product.id, product])),
-    [masterProducts],
-  );
-
-  const productPickerResults = useMemo(() => {
-    const terms = productPickerSearch.toLowerCase().split(" ").filter(Boolean);
-    const linked = new Set(currentVendorOffers.map((offer) => offer.productId));
-    return masterProducts
-      .filter((product) => !linked.has(product.id))
-      .filter((product) => {
-        if (terms.length === 0) return true;
-        const text = [
-          product.productName,
-          product.brand,
-          product.category,
-          product.sector,
-          product.barcode,
-          product.standardSku,
-          product.description,
-          ...(product.tags || []),
-          ...(product.keywords || []),
-        ]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase();
-        return terms.every((term) => text.includes(term));
+        afterSnapshot: formData
       })
-      .slice(0, 8);
-  }, [masterProducts, productPickerSearch, currentVendorOffers]);
-
-  const resetOfferDraft = () =>
-    setOfferDraft({
-      sellingPrice: 0,
-      stockQuantity: 0,
-      stockStatus: "in_stock",
-      publishToCatalogue: true,
-      deliveryAvailable: true,
-      featured: false,
-      active: true,
-    });
-
-  const handleCreateOffer = async (product: MasterProduct) => {
-    const vendorId = formData.id || selectedVendor?.id;
-    if (!vendorId) {
-      showBrandedAlert({
-        title: "seiGEN Commerce",
-        message: "Save the vendor profile before linking products.",
-        type: "warning",
-      });
-      return;
+      setFormSuccess(
+        'Override approval submitted to managers. You will be notified when reviewed.'
+      )
+      setTimeout(() => setView('list'), 2000)
+    } catch (e) {
+      console.error(e)
+      setFormError('Failed to submit approval request.')
     }
-    const firstBranch = (formData.branches || [])[0];
-    const offer: VendorProductOffer = {
-      id: `VPO-${vendorId}-${product.id}-${Date.now()}`,
-      vendorId,
-      productId: product.id,
-      branchId: offerDraft.branchId || firstBranch?.id || "",
-      sellingPrice: Number(offerDraft.sellingPrice) || 0,
-      buyingPrice: offerDraft.buyingPrice,
-      discountPrice: offerDraft.discountPrice,
-      minOrderQty: offerDraft.minOrderQty,
-      maxOrderQty: offerDraft.maxOrderQty,
-      stockQuantity: Number(offerDraft.stockQuantity) || 0,
-      stockStatus:
-        offerDraft.stockStatus ||
-        ((Number(offerDraft.stockQuantity) || 0) > 0
-          ? "in_stock"
-          : "out_of_stock"),
-      vendorSku: offerDraft.vendorSku || "",
-      vendorProductImage: offerDraft.vendorProductImage || "",
-      publishToCatalogue: offerDraft.publishToCatalogue !== false,
-      deliveryAvailable: offerDraft.deliveryAvailable !== false,
-      featured: !!offerDraft.featured,
-      notes: offerDraft.notes || "",
-      active: offerDraft.active !== false,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    await productService.saveVendorProductOffer(offer);
-    void staffAuditService.logAction({
-      eventType: "RECORD_CREATED",
-      module: "product",
-      severity: "info",
-      action: `Linked ${product.productName} to vendor ${vendorId}`,
-      recordType: "vendor_product_offer",
-      recordId: offer.id,
-      afterSnapshot: offer,
-    });
-    resetOfferDraft();
-    setProductPickerSearch("");
-    await loadData();
-  };
+  }
 
-  const handleUpdateOffer = async (
-    offer: VendorProductOffer,
-    patch: Partial<VendorProductOffer>,
-  ) => {
-    const updated = { ...offer, ...patch, updatedAt: new Date().toISOString() };
-    await productService.saveVendorProductOffer(updated);
-    await loadData();
-  };
+  const getActiveVendorName = () =>
+    selectedVendor?.tradingName ||
+    selectedVendor?.name ||
+    formData.tradingName ||
+    formData.name ||
+    'Vendor'
 
-  const handleDeleteOffer = async (offerId: string) => {
-    await productService.deleteVendorProductOffer(offerId);
-    await loadData();
-  };
+  const handleDownloadProductTemplate = () => {
+    const rows = [
+      {
+        SKU: '',
+        'Product Name': '',
+        QTY: 0,
+        Price: 0,
+        'Vendor Name': getActiveVendorName(),
+        Branch: '',
+        Category: '',
+        Sector: formData.sector || '',
+        Status: 'active',
+        'Delivery Available': 'Yes',
+        'Buying Price': 0,
+        'Discount Price': 0,
+        'Last Updated': '',
+        Description: '',
+        'Image URL': '',
+        'Publish To Catalogue': 'Yes'
+      }
+    ] as any
 
-  if (view === "form") {
-    const currentStaff = staffService.getStaffById(
-      formData.assignedStaffId || "STAFF-ADM",
-    );
+    exportVendorProductRows(rows, getActiveVendorName(), 'Product-Excel-Template')
+  }
+
+  const handleExportVendorProductsPlaceholder = () => {
+    showBrandedAlert({
+      title: 'seiGEN Commerce',
+      message:
+        'No product rows are loaded in Vendor Onboarding. Use Product Management, Storefront Builder, or Vendor Product Sheet workflows to export existing products.',
+      type: 'info'
+    })
+  }
+
+  const handleImportProductsPlaceholder = () => {
+    showBrandedAlert({
+      title: 'seiGEN Commerce',
+      message: 'Import Product Excel: Coming Soon',
+      type: 'info'
+    })
+  }
+
+  if (isLoadingData) {
+    return (
+      <div className="pb-20 min-w-0 max-w-full overflow-x-hidden flex items-center justify-center pt-20">
+        <div className="text-center text-stone-400">
+          <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4" />
+          <p className="text-xs font-bold uppercase tracking-widest">Loading Records...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (view === 'form') {
+    const currentStaff = currentAssignedStaff
     const vendorLogo =
       formData.logoAssetUrl ||
       formData.logoUrl ||
       formData.businessLogoUrl ||
-      "";
+      ''
     const vendorBanner =
       formData.bannerAssetUrl ||
       formData.bannerUrl ||
       formData.businessBannerUrl ||
-      "";
+      ''
     return (
-      <div className="space-y-8 pb-32">
+      <div className='space-y-8 pb-32 min-w-0 max-w-full overflow-x-hidden'>
         <BrandedAlertModal
           {...alertConfig}
           onClose={() => setAlertConfig({ ...alertConfig, isOpen: false })}
         />
 
-        <div className="flex items-center justify-between bg-stone-50 p-6 border border-stone-200">
+        <div className='flex flex-col gap-4 bg-stone-50 p-6 border border-stone-200 min-w-0 sm:flex-row sm:items-center sm:justify-between'>
           <button
-            onClick={() => setView("list")}
-            className="flex items-center gap-2 text-[10px] font-bold uppercase text-stone-400 hover:text-brand-charcoal transition-colors"
+            onClick={() => setView('list')}
+            className='flex items-center gap-2 text-[10px] font-bold uppercase text-stone-400 hover:text-brand-charcoal transition-colors'
           >
-            <ChevronRight size={14} className="rotate-180" /> Back to Registry
+            <ChevronRight size={14} className='rotate-180' /> Back to Registry
           </button>
-          <div className="text-center">
-            <h3 className="text-sm font-bold uppercase tracking-tight text-brand-charcoal">
+          <div className='text-center'>
+            <h3 className='text-sm font-bold uppercase tracking-tight text-brand-charcoal'>
               {selectedVendor
                 ? `Edit Vendor: ${formData.id}`
-                : "Add New Vendor"}
+                : 'Add New Vendor'}
             </h3>
-            <p className="text-[9px] font-mono text-stone-400 uppercase mt-0.5">
+            <p className='text-[9px] font-mono text-stone-400 uppercase mt-0.5'>
               Backend Management
             </p>
           </div>
-          {permissionService.canEdit("vendorManagement") && (
+          {permissionService.canEdit('vendorManagement') && (
             <PrimaryButton
               onClick={saveVendor}
               disabled={isSaving || isSaveBlocked}
-              className={`flex items-center gap-2 ${!permissionService.canEdit("vendorManagement") || isSaving || isSaveBlocked ? "opacity-50 cursor-not-allowed" : ""}`}
+              className={`flex items-center gap-2 ${
+                !permissionService.canEdit('vendorManagement') ||
+                isSaving ||
+                isSaveBlocked
+                  ? 'opacity-50 cursor-not-allowed'
+                  : ''
+              }`}
             >
-              <Save size={14} /> {isSaving ? "Saving..." : "Save Changes"}
+              <Save size={14} />{' '}
+              {isSaving
+                ? 'Saving...'
+                : navigator.onLine
+                ? 'Save Changes'
+                : 'Save Locally'}
             </PrimaryButton>
           )}
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-2 space-y-8">
+        {showDraftPrompt && (
+          <div className='fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4'>
+            <div className='w-full max-w-md border-2 border-brand-orange bg-white p-5 shadow-2xl'>
+              <h3 className='text-sm font-black uppercase text-brand-charcoal'>
+                Unsaved draft found
+              </h3>
+              <p className='mt-2 text-xs font-bold text-stone-600'>
+                Resume or discard the vendor form draft saved on this device?
+              </p>
+              <div className='mt-5 flex gap-3'>
+                <PrimaryButton
+                  type="button"
+                  className='flex-1'
+                  onClick={() => {
+                    vendorDraft.restoreDraft()
+                    setDraftDecisionMade(true)
+                    setShowDraftPrompt(false)
+                  }}
+                >
+                  Resume
+                </PrimaryButton>
+                <SecondaryButton
+                  type="button"
+                  className='flex-1'
+                  onClick={() => {
+                    vendorDraft.discardDraft()
+                    setDraftDecisionMade(true)
+                    setShowDraftPrompt(false)
+                  }}
+                >
+                  Discard
+                </SecondaryButton>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className='grid grid-cols-1 gap-8 min-w-0 xl:[grid-template-columns:minmax(0,2fr)_minmax(0,1fr)]'>
+          <div className='min-w-0 space-y-8'>
             {formError && (
-              <div className="p-4 border-l-4 border-red-500 bg-red-50 text-red-700 text-xs font-bold uppercase tracking-widest flex items-center gap-2">
+              <div className='p-4 border-l-4 border-red-500 bg-red-50 text-red-700 text-xs font-bold uppercase tracking-widest flex items-center gap-2'>
                 <AlertTriangle size={16} /> {formError}
               </div>
             )}
             {formSuccess && (
-              <div className="p-4 border-l-4 border-emerald-500 bg-emerald-50 text-emerald-700 text-xs font-bold uppercase tracking-widest flex items-center gap-2">
+              <div className='p-4 border-l-4 border-emerald-500 bg-emerald-50 text-emerald-700 text-xs font-bold uppercase tracking-widest flex items-center gap-2'>
                 <CheckCircle2 size={16} /> {formSuccess}
               </div>
             )}
@@ -1192,51 +1676,56 @@ export const VendorManagement: React.FC = () => {
             {/* Duplicate Intelligence */}
             {duplicates.length > 0 && (
               <DataPanel
-                title="Duplicate Intelligence"
-                className="border-t-4 border-t-red-500 shadow-sm bg-red-50/30"
+                title='Duplicate Intelligence'
+                className='border-t-4 border-t-red-500 shadow-sm bg-red-50/30'
               >
-                <div className="p-6 space-y-4">
-                  <div className="flex gap-3 text-red-600">
-                    <AlertTriangle size={20} className="shrink-0" />
+                <div className='p-6 space-y-4'>
+                  <div className='flex gap-3 text-red-600'>
+                    <AlertTriangle size={20} className='shrink-0' />
                     <div>
-                      <h4 className="text-sm font-bold uppercase">
+                      <h4 className='text-sm font-bold uppercase'>
                         Potential Duplicates Detected
                       </h4>
-                      <p className="text-xs text-stone-600 mt-1">
+                      <p className='text-xs text-stone-600 mt-1'>
                         The following registry records share strong naming
                         similarities with your input.
                       </p>
                     </div>
                   </div>
-                  <div className="space-y-3 mt-4">
+                  <div className='space-y-3 mt-4'>
                     {duplicates.map((dup, idx) => (
                       <div
                         key={idx}
-                        className="p-4 border border-red-200 bg-white flex flex-col md:flex-row gap-4 justify-between md:items-center"
+                        className='p-4 border border-red-200 bg-white flex flex-col md:flex-row gap-4 justify-between md:items-center'
                       >
                         <div>
-                          <p className="text-xs font-bold uppercase text-brand-charcoal">
-                            {dup.record.name}{" "}
-                            <span className="text-[10px] text-stone-400 font-mono">
+                          <p className='text-xs font-bold uppercase text-brand-charcoal'>
+                            {dup.record.name}{' '}
+                            <span className='text-[10px] text-stone-400 font-mono'>
                               [{dup.record.systemCode}]
                             </span>
                           </p>
                           <p
-                            className={`text-[10px] font-bold mt-1 uppercase ${dup.similarity.level === "exact" || dup.similarity.level === "high" ? "text-red-500" : "text-stone-500"}`}
+                            className={`text-[10px] font-bold mt-1 uppercase ${
+                              dup.similarity.level === 'exact' ||
+                              dup.similarity.level === 'high'
+                                ? 'text-red-500'
+                                : 'text-stone-500'
+                            }`}
                           >
-                            Match: {dup.similarity.score}% -{" "}
+                            Match: {dup.similarity.score}% -{' '}
                             {dup.similarity.level} ({dup.similarity.reason})
                           </p>
                         </div>
-                        <div className="flex flex-wrap gap-2 shrink-0">
+                        <div className='flex flex-wrap gap-2 shrink-0'>
                           <SecondaryButton
-                            size="sm"
+                            size='sm'
                             onClick={() => startEditVendor(dup.record)}
                           >
                             Use Existing Vendor
                           </SecondaryButton>
                           <SecondaryButton
-                            size="sm"
+                            size='sm'
                             onClick={() => startEditVendor(dup.record)}
                           >
                             Create Branch Instead
@@ -1246,17 +1735,17 @@ export const VendorManagement: React.FC = () => {
                     ))}
                   </div>
                   {hasCriticalDuplicate && !isManagerOverride && (
-                    <div className="flex gap-3 mt-6 pt-4 border-t border-red-200">
+                    <div className='flex gap-3 mt-6 pt-4 border-t border-red-200'>
                       {!canManagerOverride ? (
                         <PrimaryButton
-                          size="sm"
+                          size='sm'
                           onClick={handleOverrideRequest}
                         >
                           Submit Override Approval
                         </PrimaryButton>
                       ) : (
                         <PrimaryButton
-                          size="sm"
+                          size='sm'
                           onClick={() => setIsManagerOverride(true)}
                         >
                           Continue Anyway (Manager Override)
@@ -1269,234 +1758,435 @@ export const VendorManagement: React.FC = () => {
             )}
 
             {/* Basic Identity */}
-            <DataPanel title="General Information">
-              <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-1.5 md:col-span-2">
-                  <label className="text-[10px] uppercase font-bold text-stone-400">
+            <DataPanel title='General Information'>
+              <div className='p-6 grid grid-cols-1 md:[grid-template-columns:repeat(auto-fit,minmax(320px,1fr))] gap-6 min-w-0'>
+                <div className='space-y-1.5 md:col-span-2'>
+                  <label className='text-[10px] uppercase font-bold text-stone-400'>
                     Legal Business Name
                   </label>
                   <input
-                    value={formData.name || ""}
-                    onChange={(e) =>
+                    value={formData.name || ''}
+                    onChange={e =>
                       setFormData({ ...formData, name: e.target.value })
                     }
-                    className="w-full border-2 border-stone-200 p-2.5 text-xs font-bold uppercase focus:border-brand-orange outline-none bg-stone-50/50"
-                    placeholder="IDENTIFY BUSINESS ENTITY"
+                    className='w-full border-2 border-stone-200 p-2.5 text-xs font-bold uppercase focus:border-brand-orange outline-none bg-stone-50/50'
+                    placeholder='IDENTIFY BUSINESS ENTITY'
                   />
                 </div>
-                <div className="space-y-1.5">
-                  <label className="text-[10px] uppercase font-bold text-stone-400">
+                <div className='space-y-1.5'>
+                  <label className='text-[10px] uppercase font-bold text-stone-400'>
                     Trading Name / Alias
                   </label>
                   <input
-                    value={formData.tradingName || ""}
-                    onChange={(e) =>
+                    value={formData.tradingName || ''}
+                    onChange={e =>
                       setFormData({ ...formData, tradingName: e.target.value })
                     }
-                    className="w-full border-2 border-stone-200 p-2.5 text-xs font-bold uppercase focus:border-brand-orange outline-none"
+                    className='w-full border-2 border-stone-200 p-2.5 text-xs font-bold uppercase focus:border-brand-orange outline-none'
                   />
                 </div>
-                <div className="space-y-1.5">
-                  <label className="text-[10px] uppercase font-bold text-stone-400">
+                <div className='space-y-1.5'>
+                  <label className='text-[10px] uppercase font-bold text-stone-400'>
                     Sector Classification
                   </label>
-                  <select
-                    value={formData.sector || ""}
-                    onChange={(e) =>
-                      setFormData({ ...formData, sector: e.target.value })
+                  <SearchableComboBox
+                    value={formData.sector || ''}
+                    options={sectorOptions}
+                    getOptionLabel={sector => sector}
+                    getOptionValue={sector => sector}
+                    getOptionSearchText={sector => sector}
+                    onSelect={sector =>
+                      setFormData({ ...formData, sector: sector || '' })
                     }
-                    className="w-full border-2 border-stone-200 p-2.5 text-xs font-bold uppercase focus:border-brand-orange outline-none bg-white"
-                  >
-                    <option value="">Select Sector...</option>
-                    {SECTORS.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
+                    placeholder='Search or select sector...'
+                    allowAddNew
+                    onAddNew={sector => {
+                      setNewSector(sector)
+                      void taxonomyService.addSector(sector).then(sectors => {
+                        setSharedSectors(sectors)
+                        setFormData(prev => ({ ...prev, sector }))
+                      })
+                    }}
+                  />
+                  <div className='flex gap-2'>
+                    <input
+                      value={newSector}
+                      onChange={e => setNewSector(e.target.value)}
+                      className='min-w-0 flex-1 border border-stone-200 p-2 text-[10px] uppercase outline-none focus:border-brand-orange'
+                      placeholder='+ Add New Sector'
+                    />
+                    <button
+                      type='button'
+                      onClick={() => void addCustomSector()}
+                      className='border border-brand-orange px-3 text-[10px] font-bold uppercase text-brand-orange'
+                    >
+                      Add
+                    </button>
+                  </div>
                 </div>
-                <div className="space-y-1.5">
-                  <label className="text-[10px] uppercase font-bold text-stone-400">
+                <div className='space-y-1.5'>
+                  <label className='text-[10px] uppercase font-bold text-stone-400'>
                     Principal Owner
                   </label>
                   <input
-                    value={formData.ownerFullName || ""}
-                    onChange={(e) =>
+                    value={formData.ownerFullName || ''}
+                    onChange={e =>
                       setFormData({
                         ...formData,
-                        ownerFullName: e.target.value,
+                        ownerFullName: e.target.value
                       })
                     }
-                    className="w-full border-2 border-stone-200 p-2.5 text-xs font-bold uppercase focus:border-brand-orange outline-none"
+                    className='w-full border-2 border-stone-200 p-2.5 text-xs font-bold uppercase focus:border-brand-orange outline-none'
                   />
                 </div>
-                <div className="space-y-1.5">
-                  <label className="text-[10px] uppercase font-bold text-stone-400">
+                <div className='space-y-1.5'>
+                  <label className='text-[10px] uppercase font-bold text-stone-400'>
                     Business Type
                   </label>
-                  <select
-                    value={formData.businessType || ""}
-                    onChange={(e) =>
+                  <input
+                    list='vendor-business-type-options'
+                    value={formData.businessType || ''}
+                    onChange={e =>
                       setFormData({ ...formData, businessType: e.target.value })
                     }
-                    className="w-full border-2 border-stone-200 p-2.5 text-xs font-bold uppercase focus:border-brand-orange outline-none bg-white"
-                  >
-                    <option value="">Select Type...</option>
-                    {BUSINESS_TYPES.map((t) => (
-                      <option key={t} value={t}>
-                        {t}
-                      </option>
+                    className='w-full border-2 border-stone-200 p-2.5 text-xs font-bold uppercase focus:border-brand-orange outline-none bg-white'
+                    placeholder='Search or select type...'
+                  />
+                  <datalist id='vendor-business-type-options'>
+                    {businessTypeOptions.map(type => (
+                      <option key={type} value={type} />
                     ))}
-                  </select>
+                  </datalist>
+                  <div className='flex gap-2'>
+                    <input
+                      value={newBusinessType}
+                      onChange={e => setNewBusinessType(e.target.value)}
+                      className='min-w-0 flex-1 border border-stone-200 p-2 text-[10px] uppercase outline-none focus:border-brand-orange'
+                      placeholder='+ Add New Business Type'
+                    />
+                    <button
+                      type='button'
+                      onClick={() => void addCustomBusinessType()}
+                      className='border border-brand-orange px-3 text-[10px] font-bold uppercase text-brand-orange'
+                    >
+                      Add
+                    </button>
+                  </div>
                 </div>
-                <div className="space-y-1.5">
-                  <label className="text-[10px] uppercase font-bold text-stone-400">
+                <div className='space-y-1.5'>
+                  <label className='text-[10px] uppercase font-bold text-stone-400'>
                     Main Phone (Primary)
                   </label>
                   <input
-                    value={formData.mainPhone || ""}
-                    onChange={(e) =>
+                    value={formData.mainPhone || ''}
+                    onChange={e =>
                       setFormData({ ...formData, mainPhone: e.target.value })
                     }
-                    className="w-full border-2 border-stone-200 p-2.5 text-xs font-bold font-mono focus:border-brand-orange outline-none"
+                    className='w-full border-2 border-stone-200 p-2.5 text-xs font-bold font-mono focus:border-brand-orange outline-none'
                   />
                 </div>
-                <div className="space-y-1.5">
-                  <label className="text-[10px] uppercase font-bold text-stone-400">
+                <div className='space-y-1.5'>
+                  <label className='text-[10px] uppercase font-bold text-stone-400'>
                     WhatsApp (Automated Orders)
                   </label>
                   <input
-                    value={formData.whatsappNumber || ""}
-                    onChange={(e) =>
+                    value={formData.whatsappNumber || ''}
+                    onChange={e =>
                       setFormData({
                         ...formData,
-                        whatsappNumber: e.target.value,
+                        whatsappNumber: e.target.value
                       })
                     }
-                    className="w-full border-2 border-stone-200 p-2.5 text-xs font-bold font-mono focus:border-brand-orange outline-none"
+                    className='w-full border-2 border-stone-200 p-2.5 text-xs font-bold font-mono focus:border-brand-orange outline-none'
                   />
                 </div>
-                <div className="space-y-1.5">
-                  <label className="text-[10px] uppercase font-bold text-stone-400">
+                <div className='space-y-1.5'>
+                  <label className='text-[10px] uppercase font-bold text-stone-400'>
                     Business Email Address
                   </label>
                   <input
-                    value={formData.email || ""}
-                    onChange={(e) =>
+                    value={formData.email || ''}
+                    onChange={e =>
                       setFormData({ ...formData, email: e.target.value })
                     }
-                    className="w-full border-2 border-stone-200 p-2.5 text-xs font-bold focus:border-brand-orange outline-none"
+                    className='w-full border-2 border-stone-200 p-2.5 text-xs font-bold focus:border-brand-orange outline-none'
                   />
                 </div>
-                <div className="space-y-1.5 md:col-span-2">
-                  <label className="text-[10px] uppercase font-bold text-stone-400">
+                <div className='space-y-1.5 md:col-span-2'>
+                  <label className='text-[10px] uppercase font-bold text-stone-400'>
                     Business Summary / Capability
                   </label>
                   <textarea
-                    value={formData.businessDescription || ""}
-                    onChange={(e) =>
+                    value={formData.businessDescription || ''}
+                    onChange={e =>
                       setFormData({
                         ...formData,
-                        businessDescription: e.target.value,
+                        businessDescription: e.target.value
                       })
                     }
-                    className="w-full border-2 border-stone-200 p-2.5 text-xs font-medium focus:border-brand-orange outline-none h-20 resize-none"
+                    className='w-full border-2 border-stone-200 p-2.5 text-xs font-medium focus:border-brand-orange outline-none h-20 resize-none'
                   />
                 </div>
-                <div className="space-y-1.5">
-                  <label className="text-[10px] uppercase font-bold text-stone-400">
+                <div className='space-y-1.5'>
+                  <label className='text-[10px] uppercase font-bold text-stone-400'>
                     WhatsApp Group Link
                   </label>
                   <input
-                    value={formData.whatsappGroupLink || ""}
-                    onChange={(e) =>
+                    value={formData.whatsappGroupLink || ''}
+                    onChange={e =>
                       setFormData({
                         ...formData,
-                        whatsappGroupLink: e.target.value,
+                        whatsappGroupLink: e.target.value
                       })
                     }
-                    className="w-full border-2 border-stone-200 p-2.5 text-xs focus:border-brand-orange outline-none font-mono"
-                    placeholder="https://chat.whatsapp.com/..."
+                    className='w-full border-2 border-stone-200 p-2.5 text-xs focus:border-brand-orange outline-none font-mono'
+                    placeholder='https://chat.whatsapp.com/...'
                   />
                 </div>
-                <div className="space-y-1.5">
-                  <label className="text-[10px] uppercase font-bold text-stone-400">
+                <div className='space-y-1.5'>
+                  <label className='text-[10px] uppercase font-bold text-stone-400'>
                     WhatsApp Channel Link
                   </label>
                   <input
-                    value={formData.whatsappChannelLink || ""}
-                    onChange={(e) =>
+                    value={formData.whatsappChannelLink || ''}
+                    onChange={e =>
                       setFormData({
                         ...formData,
-                        whatsappChannelLink: e.target.value,
+                        whatsappChannelLink: e.target.value
                       })
                     }
-                    className="w-full border-2 border-stone-200 p-2.5 text-xs focus:border-brand-orange outline-none font-mono"
-                    placeholder="https://whatsapp.com/channel/..."
+                    className='w-full border-2 border-stone-200 p-2.5 text-xs focus:border-brand-orange outline-none font-mono'
+                    placeholder='https://whatsapp.com/channel/...'
                   />
                 </div>
               </div>
             </DataPanel>
 
+            <DataPanel
+              title='iDeliver / Verified Delivery Provider'
+              subtitle='Register delivery providers connected to this vendor profile.'
+              actions={
+                <SecondaryButton onClick={addDeliveryProvider} size='sm'>
+                  <PlusCircle size={14} className='mr-2' /> Add Provider
+                </SecondaryButton>
+              }
+            >
+              <div className='p-6 space-y-4 min-w-0'>
+                {(formData.deliveryProviders || []).length === 0 ? (
+                  <div className='border border-dashed border-stone-200 p-6 text-center'>
+                    <p className='text-xs font-bold uppercase text-stone-400'>
+                      No iDeliver providers registered.
+                    </p>
+                  </div>
+                ) : (
+                  (formData.deliveryProviders || []).map(provider => {
+                    const warnings = providerReadinessWarnings(provider)
+                    return (
+                      <div
+                        key={provider.id}
+                        className='border border-stone-200 bg-white p-4 space-y-4 min-w-0'
+                      >
+                        <div className='flex items-start justify-between gap-3'>
+                          <div>
+                            <p className='text-xs font-bold uppercase text-brand-charcoal'>
+                              {provider.providerName || 'New Delivery Provider'}
+                            </p>
+                            <p className='text-[10px] uppercase text-stone-400'>
+                              {warnings.length
+                                ? `${warnings.length} readiness warning(s)`
+                                : 'Ready for verification'}
+                            </p>
+                          </div>
+                          <button
+                            type='button'
+                            onClick={() => removeDeliveryProvider(provider.id)}
+                            className='text-red-500 hover:bg-red-50 p-2'
+                            title='Remove provider'
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+
+                        {warnings.length > 0 && (
+                          <div className='border border-orange-100 bg-orange-50 p-3 text-[10px] font-bold uppercase text-brand-orange'>
+                            {warnings.join(' / ')}
+                          </div>
+                        )}
+
+                        <div className='grid grid-cols-1 md:[grid-template-columns:repeat(auto-fit,minmax(240px,1fr))] gap-4'>
+                          {[
+                            ['providerName', 'Provider Name *'],
+                            ['phoneNumber', 'Phone Number *'],
+                            ['whatsappNumber', 'WhatsApp Number'],
+                            ['driverLicenseNumber', 'Driver License *'],
+                            ['vehicleNumber', 'Vehicle Number'],
+                            ['vehicleType', 'Vehicle Type'],
+                            ['nationalIdNumber', 'National ID *'],
+                            ['address', 'Address'],
+                            ['country', 'Country'],
+                            ['province', 'Province'],
+                            ['cityTown', 'City / Town'],
+                            ['district', 'District'],
+                            ['suburb', 'Suburb']
+                          ].map(([field, label]) => (
+                            <label key={field} className='space-y-1.5'>
+                              <span className='text-[10px] uppercase font-bold text-stone-400'>
+                                {label}
+                              </span>
+                              <input
+                                value={String((provider as any)[field] || '')}
+                                onChange={e =>
+                                  updateDeliveryProvider(provider.id, {
+                                    [field]: e.target.value
+                                  } as Partial<IDeliverProvider>)
+                                }
+                                className='w-full border-2 border-stone-200 p-2.5 text-xs font-bold uppercase focus:border-brand-orange outline-none'
+                              />
+                            </label>
+                          ))}
+                          <label className='space-y-1.5'>
+                            <span className='text-[10px] uppercase font-bold text-stone-400'>
+                              Status
+                            </span>
+                            <select
+                              value={provider.status}
+                              onChange={e =>
+                                updateDeliveryProvider(provider.id, {
+                                  status: e.target
+                                    .value as IDeliverProvider['status']
+                                })
+                              }
+                              className='w-full border-2 border-stone-200 p-2.5 text-xs font-bold uppercase focus:border-brand-orange outline-none bg-white'
+                            >
+                              <option value='pending'>Pending</option>
+                              <option value='verified'>Verified</option>
+                              <option value='suspended'>Suspended</option>
+                            </select>
+                          </label>
+                          <label className='space-y-1.5 md:col-span-2'>
+                            <span className='text-[10px] uppercase font-bold text-stone-400'>
+                              Notes
+                            </span>
+                            <textarea
+                              value={provider.notes || ''}
+                              onChange={e =>
+                                updateDeliveryProvider(provider.id, {
+                                  notes: e.target.value
+                                })
+                              }
+                              className='w-full border-2 border-stone-200 p-2.5 text-xs font-medium focus:border-brand-orange outline-none h-20 resize-none'
+                            />
+                          </label>
+                        </div>
+
+                        <div className='border border-stone-200 bg-stone-50 p-4'>
+                          <div className='flex flex-col md:flex-row md:items-center justify-between gap-3'>
+                            <div>
+                              <p className='text-[10px] font-bold uppercase text-stone-500'>
+                                Police Clearance Certificate Copy
+                              </p>
+                              {provider.policeClearanceCertificateUrl ? (
+                                <a
+                                  href={provider.policeClearanceCertificateUrl}
+                                  target='_blank'
+                                  rel='noopener noreferrer'
+                                  className='text-[10px] font-bold uppercase text-brand-orange underline'
+                                >
+                                  View uploaded document
+                                </a>
+                              ) : (
+                                <p className='text-[10px] text-stone-400'>
+                                  PDF or image. Recommended before verification.
+                                </p>
+                              )}
+                            </div>
+                            <label className='inline-flex cursor-pointer items-center gap-2 border border-brand-orange px-3 py-2 text-[10px] font-bold uppercase text-brand-orange'>
+                              <Upload size={12} /> Upload
+                              <input
+                                type='file'
+                                accept='application/pdf,image/*'
+                                className='hidden'
+                                onChange={event =>
+                                  void handlePoliceClearanceUpload(
+                                    provider.id,
+                                    event
+                                  )
+                                }
+                              />
+                            </label>
+                          </div>
+                          {providerUploadStatus[provider.id] && (
+                            <p className='mt-2 text-[10px] uppercase text-stone-500'>
+                              {providerUploadStatus[provider.id]}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+            </DataPanel>
+
             {/* Identity Assets */}
-            <DataPanel title="Identity Assets">
-              <div className="p-6 space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <DataPanel title='Identity Assets'>
+              <div className='p-6 space-y-6 min-w-0'>
+                <div className='grid grid-cols-1 md:[grid-template-columns:repeat(auto-fit,minmax(280px,1fr))] gap-6 min-w-0'>
                   {/* Logo Upload */}
-                  <div className="border-2 border-stone-100 p-4 bg-stone-50/30">
-                    <h4 className="text-[10px] uppercase font-bold text-stone-400 mb-3 flex items-center gap-1.5">
+                  <div className='border-2 border-stone-100 p-4 bg-stone-50/30 min-w-0'>
+                    <h4 className='text-[10px] uppercase font-bold text-stone-400 mb-3 flex items-center gap-1.5'>
                       <ImageIcon size={12} /> Vendor Logo
                     </h4>
-                    <div className="flex gap-4 items-start">
-                      <div className="w-20 h-20 bg-white border-2 border-stone-200 flex items-center justify-center overflow-hidden shrink-0">
+                    <div className='flex gap-4 items-start'>
+                      <div className='w-20 h-20 bg-white border-2 border-stone-200 flex items-center justify-center overflow-hidden shrink-0'>
                         {vendorLogo ? (
                           <img
                             src={vendorLogo}
-                            className="w-full h-full object-contain"
-                            alt="Logo"
-                            onError={(e) => {
-                              e.currentTarget.style.display = "none";
+                            className='w-full h-full object-contain'
+                            alt='Logo'
+                            onError={e => {
+                              e.currentTarget.style.display = 'none'
                             }}
                           />
                         ) : (
-                          <span className="text-[8px] uppercase font-bold text-stone-300 text-center">
+                          <span className='text-[8px] uppercase font-bold text-stone-300 text-center'>
                             No Logo
                             <br />
                             Uploaded
                           </span>
                         )}
                       </div>
-                      <div className="flex-1 space-y-2">
+                      <div className='flex-1 min-w-0 space-y-2'>
                         <input
-                          type="file"
-                          accept="image/*"
+                          type='file'
+                          accept='image/*'
                           onChange={handleLogoSelect}
-                          className="hidden"
-                          id="logo-upload"
+                          className='hidden'
+                          id='logo-upload'
                         />
                         <label
-                          htmlFor="logo-upload"
-                          className="inline-flex items-center gap-2 bg-brand-charcoal text-white px-3 py-1.5 text-[9px] font-bold uppercase tracking-widest cursor-pointer hover:bg-brand-orange transition-colors"
+                          htmlFor='logo-upload'
+                          className='inline-flex items-center gap-2 bg-brand-charcoal text-white px-3 py-1.5 text-[9px] font-bold uppercase tracking-widest cursor-pointer hover:bg-brand-orange transition-colors'
                         >
                           <Upload size={10} /> Select Logo
                         </label>
                         {logoStatus && (
-                          <p className="text-[9px] font-bold text-brand-orange uppercase">
+                          <p className='text-[9px] font-bold text-brand-orange uppercase'>
                             {logoStatus}
                           </p>
                         )}
                         {vendorLogo && (
                           <button
-                            type="button"
+                            type='button'
                             onClick={() =>
-                              setFormData((prev) => ({
+                              setFormData(prev => ({
                                 ...prev,
-                                logoUrl: "",
-                                logoAssetUrl: "",
-                                businessLogoUrl: "",
+                                logoUrl: '',
+                                logoAssetUrl: '',
+                                businessLogoUrl: ''
                               }))
                             }
-                            className="block text-[9px] text-red-500 hover:text-red-700 uppercase font-bold mt-2"
+                            className='block text-[9px] text-red-500 hover:text-red-700 uppercase font-bold mt-2'
                           >
                             Remove Logo
                           </button>
@@ -1506,60 +2196,60 @@ export const VendorManagement: React.FC = () => {
                   </div>
 
                   {/* Banner Upload */}
-                  <div className="border-2 border-stone-100 p-4 bg-stone-50/30">
-                    <h4 className="text-[10px] uppercase font-bold text-stone-400 mb-3 flex items-center gap-1.5">
+                  <div className='border-2 border-stone-100 p-4 bg-stone-50/30 min-w-0'>
+                    <h4 className='text-[10px] uppercase font-bold text-stone-400 mb-3 flex items-center gap-1.5'>
                       <ImageIcon size={12} /> Vendor Banner
                     </h4>
-                    <div className="flex gap-4 items-start flex-col sm:flex-row">
-                      <div className="w-full sm:w-32 h-16 bg-white border-2 border-stone-200 flex items-center justify-center overflow-hidden shrink-0">
+                    <div className='flex gap-4 items-start flex-col sm:flex-row'>
+                      <div className='w-full sm:w-32 h-16 bg-white border-2 border-stone-200 flex items-center justify-center overflow-hidden shrink-0'>
                         {vendorBanner ? (
                           <img
                             src={vendorBanner}
-                            className="w-full h-full object-cover"
-                            alt="Banner"
-                            onError={(e) => {
-                              e.currentTarget.style.display = "none";
+                            className='w-full h-full object-cover'
+                            alt='Banner'
+                            onError={e => {
+                              e.currentTarget.style.display = 'none'
                             }}
                           />
                         ) : (
-                          <span className="text-[8px] uppercase font-bold text-stone-300 text-center">
+                          <span className='text-[8px] uppercase font-bold text-stone-300 text-center'>
                             No Banner
                             <br />
                             Uploaded
                           </span>
                         )}
                       </div>
-                      <div className="flex-1 space-y-2 w-full">
+                      <div className='flex-1 min-w-0 space-y-2 w-full'>
                         <input
-                          type="file"
-                          accept="image/*"
+                          type='file'
+                          accept='image/*'
                           onChange={handleBannerSelect}
-                          className="hidden"
-                          id="banner-upload"
+                          className='hidden'
+                          id='banner-upload'
                         />
                         <label
-                          htmlFor="banner-upload"
-                          className="inline-flex items-center gap-2 bg-brand-charcoal text-white px-3 py-1.5 text-[9px] font-bold uppercase tracking-widest cursor-pointer hover:bg-brand-orange transition-colors"
+                          htmlFor='banner-upload'
+                          className='inline-flex items-center gap-2 bg-brand-charcoal text-white px-3 py-1.5 text-[9px] font-bold uppercase tracking-widest cursor-pointer hover:bg-brand-orange transition-colors'
                         >
                           <Upload size={10} /> Select Banner
                         </label>
                         {bannerStatus && (
-                          <p className="text-[9px] font-bold text-brand-orange uppercase">
+                          <p className='text-[9px] font-bold text-brand-orange uppercase'>
                             {bannerStatus}
                           </p>
                         )}
                         {vendorBanner && (
                           <button
-                            type="button"
+                            type='button'
                             onClick={() =>
-                              setFormData((prev) => ({
+                              setFormData(prev => ({
                                 ...prev,
-                                bannerUrl: "",
-                                bannerAssetUrl: "",
-                                businessBannerUrl: "",
+                                bannerUrl: '',
+                                bannerAssetUrl: '',
+                                businessBannerUrl: ''
                               }))
                             }
-                            className="block text-[9px] text-red-500 hover:text-red-700 uppercase font-bold mt-2"
+                            className='block text-[9px] text-red-500 hover:text-red-700 uppercase font-bold mt-2'
                           >
                             Remove Banner
                           </button>
@@ -1569,45 +2259,45 @@ export const VendorManagement: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="pt-4 border-t border-stone-100">
+                <div className='pt-4 border-t border-stone-100'>
                   <button
-                    type="button"
+                    type='button'
                     onClick={() => setShowManualUrls(!showManualUrls)}
-                    className="text-[10px] font-bold uppercase text-stone-400 hover:text-brand-charcoal transition-colors flex items-center gap-1"
+                    className='text-[10px] font-bold uppercase text-stone-400 hover:text-brand-charcoal transition-colors flex items-center gap-1'
                   >
-                    {showManualUrls ? "Hide" : "Show"} Advanced: Paste URL
+                    {showManualUrls ? 'Hide' : 'Show'} Advanced: Paste URL
                     Manually
                   </button>
                   {showManualUrls && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 p-4 bg-stone-50 border border-stone-200">
-                      <div className="space-y-1.5">
-                        <label className="text-[10px] uppercase font-bold text-stone-400">
+                    <div className='grid grid-cols-1 md:[grid-template-columns:repeat(auto-fit,minmax(280px,1fr))] gap-4 mt-4 p-4 bg-stone-50 border border-stone-200 min-w-0'>
+                      <div className='space-y-1.5'>
+                        <label className='text-[10px] uppercase font-bold text-stone-400'>
                           Logo Asset URL
                         </label>
                         <input
-                          value={formData.logoUrl || ""}
-                          onChange={(e) =>
+                          value={formData.logoUrl || ''}
+                          onChange={e =>
                             setFormData({
                               ...formData,
-                              logoUrl: e.target.value,
+                              logoUrl: e.target.value
                             })
                           }
-                          className="w-full border-2 border-stone-200 p-2.5 text-xs font-mono focus:border-brand-orange outline-none"
+                          className='w-full border-2 border-stone-200 p-2.5 text-xs font-mono focus:border-brand-orange outline-none'
                         />
                       </div>
-                      <div className="space-y-1.5">
-                        <label className="text-[10px] uppercase font-bold text-stone-400">
+                      <div className='space-y-1.5'>
+                        <label className='text-[10px] uppercase font-bold text-stone-400'>
                           Banner Asset URL
                         </label>
                         <input
-                          value={formData.bannerUrl || ""}
-                          onChange={(e) =>
+                          value={formData.bannerUrl || ''}
+                          onChange={e =>
                             setFormData({
                               ...formData,
-                              bannerUrl: e.target.value,
+                              bannerUrl: e.target.value
                             })
                           }
-                          className="w-full border-2 border-stone-200 p-2.5 text-xs font-mono focus:border-brand-orange outline-none"
+                          className='w-full border-2 border-stone-200 p-2.5 text-xs font-mono focus:border-brand-orange outline-none'
                         />
                       </div>
                     </div>
@@ -1617,93 +2307,91 @@ export const VendorManagement: React.FC = () => {
             </DataPanel>
 
             {/* Geographic Mapping */}
-            <DataPanel title="Locations">
-              <div className="p-6 grid grid-cols-1 md:grid-cols-4 gap-6 font-mono">
-                <div className="md:col-span-1 space-y-1.5">
-                  <label className="text-[10px] uppercase font-bold text-stone-400 font-sans">
+            <DataPanel title='Locations'>
+              <div className='p-6 grid grid-cols-1 md:[grid-template-columns:repeat(auto-fit,minmax(220px,1fr))] gap-6 font-mono min-w-0'>
+                <div className='md:col-span-1 space-y-1.5'>
+                  <label className='text-[10px] uppercase font-bold text-stone-400 font-sans'>
                     Country
                   </label>
                   <SearchableCountrySelect
                     value={formData.country || DEFAULT_COUNTRY}
-                    onChange={(country) =>
-                      setFormData({ ...formData, country })
-                    }
-                    className="w-full border-2 border-stone-200 p-2 text-xs font-bold uppercase focus:border-brand-orange outline-none bg-stone-50"
+                    onChange={country => setFormData({ ...formData, country })}
+                    className='w-full border-2 border-stone-200 p-2 text-xs font-bold uppercase focus:border-brand-orange outline-none bg-stone-50'
                   />
                 </div>
-                <div className="md:col-span-1 space-y-1.5">
-                  <label className="text-[10px] uppercase font-bold text-stone-400 font-sans">
+                <div className='md:col-span-1 space-y-1.5'>
+                  <label className='text-[10px] uppercase font-bold text-stone-400 font-sans'>
                     Province
                   </label>
                   <input
-                    value={formData.province || ""}
-                    onChange={(e) =>
+                    value={formData.province || ''}
+                    onChange={e =>
                       setFormData({ ...formData, province: e.target.value })
                     }
-                    className="w-full border-2 border-stone-200 p-2 text-xs font-bold uppercase focus:border-brand-orange outline-none"
+                    className='w-full border-2 border-stone-200 p-2 text-xs font-bold uppercase focus:border-brand-orange outline-none'
                   />
                 </div>
-                <div className="md:col-span-1 space-y-1.5">
-                  <label className="text-[10px] uppercase font-bold text-stone-400 font-sans">
+                <div className='md:col-span-1 space-y-1.5'>
+                  <label className='text-[10px] uppercase font-bold text-stone-400 font-sans'>
                     City / Town
                   </label>
                   <input
-                    value={formData.cityTown || ""}
-                    onChange={(e) =>
+                    value={formData.cityTown || ''}
+                    onChange={e =>
                       setFormData({ ...formData, cityTown: e.target.value })
                     }
-                    className="w-full border-2 border-stone-200 p-2 text-xs font-bold uppercase focus:border-brand-orange outline-none"
+                    className='w-full border-2 border-stone-200 p-2 text-xs font-bold uppercase focus:border-brand-orange outline-none'
                   />
                 </div>
-                <div className="md:col-span-1 space-y-1.5">
-                  <label className="text-[10px] uppercase font-bold text-stone-400 font-sans">
+                <div className='md:col-span-1 space-y-1.5'>
+                  <label className='text-[10px] uppercase font-bold text-stone-400 font-sans'>
                     District
                   </label>
                   <input
-                    value={formData.district || ""}
-                    onChange={(e) =>
+                    value={formData.district || ''}
+                    onChange={e =>
                       setFormData({ ...formData, district: e.target.value })
                     }
-                    className="w-full border-2 border-stone-200 p-2 text-xs font-bold uppercase focus:border-brand-orange outline-none"
+                    className='w-full border-2 border-stone-200 p-2 text-xs font-bold uppercase focus:border-brand-orange outline-none'
                   />
                 </div>
-                <div className="md:col-span-1 space-y-1.5">
-                  <label className="text-[10px] uppercase font-bold text-stone-400 font-sans">
+                <div className='md:col-span-1 space-y-1.5'>
+                  <label className='text-[10px] uppercase font-bold text-stone-400 font-sans'>
                     Suburb
                   </label>
                   <input
-                    value={formData.suburb || ""}
-                    onChange={(e) =>
+                    value={formData.suburb || ''}
+                    onChange={e =>
                       setFormData({ ...formData, suburb: e.target.value })
                     }
-                    className="w-full border-2 border-stone-200 p-2 text-xs font-bold uppercase focus:border-brand-orange outline-none"
+                    className='w-full border-2 border-stone-200 p-2 text-xs font-bold uppercase focus:border-brand-orange outline-none'
                   />
                 </div>
-                <div className="md:col-span-3 space-y-1.5">
-                  <label className="text-[10px] uppercase font-bold text-stone-400 font-sans">
+                <div className='md:col-span-3 space-y-1.5'>
+                  <label className='text-[10px] uppercase font-bold text-stone-400 font-sans'>
                     GPS / Location Notes
                   </label>
                   <input
-                    value={formData.gpsNotes || ""}
-                    onChange={(e) =>
+                    value={formData.gpsNotes || ''}
+                    onChange={e =>
                       setFormData({ ...formData, gpsNotes: e.target.value })
                     }
-                    className="w-full border-2 border-stone-200 p-2 text-xs font-bold uppercase focus:border-brand-orange outline-none"
+                    className='w-full border-2 border-stone-200 p-2 text-xs font-bold uppercase focus:border-brand-orange outline-none'
                   />
                 </div>
-                <div className="md:col-span-4 space-y-1.5">
-                  <label className="text-[10px] uppercase font-bold text-stone-400 font-sans">
+                <div className='md:col-span-4 space-y-1.5'>
+                  <label className='text-[10px] uppercase font-bold text-stone-400 font-sans'>
                     Full Physical Address Specification
                   </label>
                   <input
-                    value={formData.streetAddress || ""}
-                    onChange={(e) =>
+                    value={formData.streetAddress || ''}
+                    onChange={e =>
                       setFormData({
                         ...formData,
-                        streetAddress: e.target.value,
+                        streetAddress: e.target.value
                       })
                     }
-                    className="w-full border-2 border-stone-200 p-2 text-xs font-bold uppercase focus:border-brand-orange outline-none font-sans"
+                    className='w-full border-2 border-stone-200 p-2 text-xs font-bold uppercase focus:border-brand-orange outline-none font-sans'
                   />
                 </div>
               </div>
@@ -1711,235 +2399,243 @@ export const VendorManagement: React.FC = () => {
 
             {/* Branch Management */}
             <DataPanel
-              title="Branches"
+              title='Branches'
               actions={
                 <button
                   onClick={handleBranchAdd}
-                  className="bg-brand-charcoal text-white px-3 py-1 text-[9px] font-bold uppercase flex items-center gap-1.5 transition-opacity hover:opacity-90"
+                  className='bg-brand-charcoal text-white px-3 py-1 text-[9px] font-bold uppercase flex items-center gap-1.5 transition-opacity hover:opacity-90'
                 >
                   <Plus size={10} /> Add Branch
                 </button>
               }
             >
-              <div className="p-0 border-t border-stone-100 divide-y divide-stone-100">
+              <div className='p-0 border-t border-stone-100 divide-y divide-stone-100'>
                 {(formData.branches || []).map((branch, index) => (
-                  <div key={branch.id} className="p-6 space-y-4 bg-stone-50/30">
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                      <div className="space-y-1.5 md:col-span-2">
-                        <label className="text-[9px] uppercase font-bold text-stone-400">
+                  <div key={branch.id} className='p-6 space-y-4 bg-stone-50/30'>
+                    <div className='grid grid-cols-1 md:[grid-template-columns:repeat(auto-fit,minmax(220px,1fr))] gap-4 min-w-0'>
+                      <div className='space-y-1.5 md:col-span-2'>
+                        <label className='text-[9px] uppercase font-bold text-stone-400'>
                           Branch Identity
                         </label>
                         <input
                           value={branch.name}
-                          onChange={(e) =>
+                          onChange={e =>
                             handleBranchUpdate(branch.id, {
-                              name: e.target.value,
+                              name: e.target.value
                             })
                           }
-                          className="w-full border border-stone-300 p-1.5 text-xs font-bold uppercase outline-none focus:border-brand-orange"
+                          className='w-full border border-stone-300 p-1.5 text-xs font-bold uppercase outline-none focus:border-brand-orange'
                         />
                       </div>
-                      <div className="space-y-1.5">
-                        <label className="text-[9px] uppercase font-bold text-stone-400">
+                      <div className='space-y-1.5'>
+                        <label className='text-[9px] uppercase font-bold text-stone-400'>
                           Branch Status
                         </label>
                         <select
                           value={branch.status}
-                          onChange={(e) =>
+                          onChange={e =>
                             handleBranchUpdate(branch.id, {
-                              status: e.target.value as any,
+                              status: e.target.value as any
                             })
                           }
-                          className="w-full border border-stone-300 p-1.5 text-xs font-bold uppercase outline-none"
+                          className='w-full border border-stone-300 p-1.5 text-xs font-bold uppercase outline-none'
                         >
-                          <option value="active">ACTIVE</option>
-                          <option value="suspended">SUSPENDED</option>
+                          <option value='active'>ACTIVE</option>
+                          <option value='suspended'>SUSPENDED</option>
                         </select>
                       </div>
-                      <div className="space-y-1.5">
-                        <label className="text-[9px] uppercase font-bold text-stone-400">
+                      <div className='space-y-1.5'>
+                        <label className='text-[9px] uppercase font-bold text-stone-400'>
                           Primary Branch
                         </label>
                         <button
                           onClick={() =>
                             handleBranchUpdate(branch.id, {
-                              isDefault: !branch.isDefault,
+                              isDefault: !branch.isDefault
                             })
                           }
-                          className={`w-full px-3 py-1.5 text-[9px] font-bold uppercase border h-[34px] ${branch.isDefault ? "bg-brand-charcoal text-white border-brand-charcoal" : "bg-white text-stone-400 border-stone-200"}`}
+                          className={`w-full px-3 py-1.5 text-[9px] font-bold uppercase border h-[34px] ${
+                            branch.isDefault
+                              ? 'bg-brand-charcoal text-white border-brand-charcoal'
+                              : 'bg-white text-stone-400 border-stone-200'
+                          }`}
                         >
                           {branch.isDefault
-                            ? "SYSTEM DEFAULT"
-                            : "SET AS DEFAULT"}
+                            ? 'SYSTEM DEFAULT'
+                            : 'SET AS DEFAULT'}
                         </button>
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-                      <div className="space-y-1.5">
-                        <label className="text-[9px] uppercase font-bold text-stone-400 font-mono italic">
+                    <div className='grid grid-cols-1 md:[grid-template-columns:repeat(auto-fit,minmax(180px,1fr))] gap-4'>
+                      <div className='space-y-1.5'>
+                        <label className='text-[9px] uppercase font-bold text-stone-400 font-mono italic'>
                           Country
                         </label>
                         <SearchableCountrySelect
-                          value={branch.country || formData.country || DEFAULT_COUNTRY}
-                          onChange={(country) =>
+                          value={
+                            branch.country ||
+                            formData.country ||
+                            DEFAULT_COUNTRY
+                          }
+                          onChange={country =>
                             handleBranchUpdate(branch.id, { country })
                           }
-                          className="w-full border border-stone-300 p-1.5 text-xs font-bold uppercase outline-none font-mono"
+                          className='w-full border border-stone-300 p-1.5 text-xs font-bold uppercase outline-none font-mono'
                         />
                       </div>
-                      <div className="space-y-1.5">
-                        <label className="text-[9px] uppercase font-bold text-stone-400 font-mono italic">
+                      <div className='space-y-1.5'>
+                        <label className='text-[9px] uppercase font-bold text-stone-400 font-mono italic'>
                           Province
                         </label>
                         <input
                           value={branch.province}
-                          onChange={(e) =>
+                          onChange={e =>
                             handleBranchUpdate(branch.id, {
-                              province: e.target.value,
+                              province: e.target.value
                             })
                           }
-                          className="w-full border border-stone-300 p-1.5 text-xs font-bold uppercase outline-none font-mono"
+                          className='w-full border border-stone-300 p-1.5 text-xs font-bold uppercase outline-none font-mono'
                         />
                       </div>
-                      <div className="space-y-1.5">
-                        <label className="text-[9px] uppercase font-bold text-stone-400 font-mono italic">
+                      <div className='space-y-1.5'>
+                        <label className='text-[9px] uppercase font-bold text-stone-400 font-mono italic'>
                           City / Town
                         </label>
                         <input
                           value={branch.cityTown}
-                          onChange={(e) =>
+                          onChange={e =>
                             handleBranchUpdate(branch.id, {
-                              cityTown: e.target.value,
+                              cityTown: e.target.value
                             })
                           }
-                          className="w-full border border-stone-300 p-1.5 text-xs font-bold uppercase outline-none font-mono"
+                          className='w-full border border-stone-300 p-1.5 text-xs font-bold uppercase outline-none font-mono'
                         />
                       </div>
-                      <div className="space-y-1.5">
-                        <label className="text-[9px] uppercase font-bold text-stone-400 font-mono italic">
+                      <div className='space-y-1.5'>
+                        <label className='text-[9px] uppercase font-bold text-stone-400 font-mono italic'>
                           District
                         </label>
                         <input
                           value={branch.district}
-                          onChange={(e) =>
+                          onChange={e =>
                             handleBranchUpdate(branch.id, {
-                              district: e.target.value,
+                              district: e.target.value
                             })
                           }
-                          className="w-full border border-stone-300 p-1.5 text-xs font-bold uppercase outline-none font-mono"
+                          className='w-full border border-stone-300 p-1.5 text-xs font-bold uppercase outline-none font-mono'
                         />
                       </div>
-                      <div className="space-y-1.5">
-                        <label className="text-[9px] uppercase font-bold text-stone-400 font-mono italic">
+                      <div className='space-y-1.5'>
+                        <label className='text-[9px] uppercase font-bold text-stone-400 font-mono italic'>
                           Suburb
                         </label>
                         <input
                           value={branch.suburb}
-                          onChange={(e) =>
+                          onChange={e =>
                             handleBranchUpdate(branch.id, {
-                              suburb: e.target.value,
+                              suburb: e.target.value
                             })
                           }
-                          className="w-full border border-stone-300 p-1.5 text-xs font-bold uppercase outline-none font-mono"
+                          className='w-full border border-stone-300 p-1.5 text-xs font-bold uppercase outline-none font-mono'
                         />
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                      <div className="space-y-1.5">
-                        <label className="text-[9px] uppercase font-bold text-stone-400">
+                    <div className='grid grid-cols-1 md:[grid-template-columns:repeat(auto-fit,minmax(220px,1fr))] gap-4 min-w-0'>
+                      <div className='space-y-1.5'>
+                        <label className='text-[9px] uppercase font-bold text-stone-400'>
                           Branch Manager
                         </label>
                         <input
                           value={branch.managerName}
-                          onChange={(e) =>
+                          onChange={e =>
                             handleBranchUpdate(branch.id, {
-                              managerName: e.target.value,
+                              managerName: e.target.value
                             })
                           }
-                          className="w-full border border-stone-300 p-1.5 text-xs font-bold uppercase outline-none"
+                          className='w-full border border-stone-300 p-1.5 text-xs font-bold uppercase outline-none'
                         />
                       </div>
-                      <div className="space-y-1.5">
-                        <label className="text-[9px] uppercase font-bold text-stone-400">
+                      <div className='space-y-1.5'>
+                        <label className='text-[9px] uppercase font-bold text-stone-400'>
                           Opening Hours
                         </label>
                         <input
                           value={branch.openingHours}
-                          onChange={(e) =>
+                          onChange={e =>
                             handleBranchUpdate(branch.id, {
-                              openingHours: e.target.value,
+                              openingHours: e.target.value
                             })
                           }
-                          className="w-full border border-stone-300 p-1.5 text-xs font-bold uppercase outline-none"
-                          placeholder="e.g. 08:00 - 17:00"
+                          className='w-full border border-stone-300 p-1.5 text-xs font-bold uppercase outline-none'
+                          placeholder='e.g. 08:00 - 17:00'
                         />
                       </div>
-                      <div className="space-y-1.5">
-                        <label className="text-[9px] uppercase font-bold text-stone-400 font-mono italic">
+                      <div className='space-y-1.5'>
+                        <label className='text-[9px] uppercase font-bold text-stone-400 font-mono italic'>
                           Phone
                         </label>
                         <input
                           value={branch.phone}
-                          onChange={(e) =>
+                          onChange={e =>
                             handleBranchUpdate(branch.id, {
-                              phone: e.target.value,
+                              phone: e.target.value
                             })
                           }
-                          className="w-full border border-stone-300 p-1.5 text-xs font-bold outline-none font-mono"
+                          className='w-full border border-stone-300 p-1.5 text-xs font-bold outline-none font-mono'
                         />
                       </div>
-                      <div className="space-y-1.5">
-                        <label className="text-[9px] uppercase font-bold text-stone-400 font-mono italic text-green-600">
+                      <div className='space-y-1.5'>
+                        <label className='text-[9px] uppercase font-bold text-stone-400 font-mono italic text-green-600'>
                           WhatsApp
                         </label>
                         <input
                           value={branch.whatsapp}
-                          onChange={(e) =>
+                          onChange={e =>
                             handleBranchUpdate(branch.id, {
-                              whatsapp: e.target.value,
+                              whatsapp: e.target.value
                             })
                           }
-                          className="w-full border border-stone-300 p-1.5 text-xs font-bold outline-none font-mono"
+                          className='w-full border border-stone-300 p-1.5 text-xs font-bold outline-none font-mono'
                         />
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                      <div className="md:col-span-2 space-y-1.5">
-                        <label className="text-[9px] uppercase font-bold text-stone-400">
+                    <div className='grid grid-cols-1 md:[grid-template-columns:repeat(auto-fit,minmax(220px,1fr))] gap-4'>
+                      <div className='md:col-span-2 space-y-1.5'>
+                        <label className='text-[9px] uppercase font-bold text-stone-400'>
                           Physical Address
                         </label>
                         <input
                           value={branch.streetAddress || branch.address}
-                          onChange={(e) =>
+                          onChange={e =>
                             handleBranchUpdate(branch.id, {
                               address: e.target.value,
-                              streetAddress: e.target.value,
+                              streetAddress: e.target.value
                             })
                           }
-                          className="w-full border border-stone-300 p-1.5 text-xs font-bold uppercase outline-none"
+                          className='w-full border border-stone-300 p-1.5 text-xs font-bold uppercase outline-none'
                         />
                       </div>
-                      <div className="space-y-1.5">
-                        <label className="text-[9px] uppercase font-bold text-stone-400">
+                      <div className='space-y-1.5'>
+                        <label className='text-[9px] uppercase font-bold text-stone-400'>
                           Landmark
                         </label>
                         <input
-                          value={branch.landmark || ""}
-                          onChange={(e) =>
+                          value={branch.landmark || ''}
+                          onChange={e =>
                             handleBranchUpdate(branch.id, {
-                              landmark: e.target.value,
+                              landmark: e.target.value
                             })
                           }
-                          className="w-full border border-stone-300 p-1.5 text-xs font-bold uppercase outline-none"
+                          className='w-full border border-stone-300 p-1.5 text-xs font-bold uppercase outline-none'
                         />
                       </div>
-                      <div className="space-y-1.5 flex justify-end items-end pb-1.5">
+                      <div className='space-y-1.5 flex justify-end items-end pb-1.5'>
                         <button
                           onClick={() => handleBranchDelete(branch.id)}
-                          className="text-[9px] font-bold uppercase text-red-400 hover:text-red-700 transition-colors flex items-center gap-1"
+                          className='text-[9px] font-bold uppercase text-red-400 hover:text-red-700 transition-colors flex items-center gap-1'
                         >
                           <Trash2 size={10} /> Delete Branch
                         </button>
@@ -1948,9 +2644,9 @@ export const VendorManagement: React.FC = () => {
                   </div>
                 ))}
                 {(formData.branches || []).length === 0 && (
-                  <div className="p-12 text-center text-stone-300">
-                    <Store size={32} className="mx-auto mb-4 opacity-20" />
-                    <p className="text-[10px] font-bold uppercase italic tracking-widest">
+                  <div className='p-12 text-center text-stone-300'>
+                    <Store size={32} className='mx-auto mb-4 opacity-20' />
+                    <p className='text-[10px] font-bold uppercase italic tracking-widest'>
                       No branches configured.
                     </p>
                   </div>
@@ -1959,20 +2655,24 @@ export const VendorManagement: React.FC = () => {
             </DataPanel>
           </div>
 
-          <div className="space-y-8">
+          <div className='min-w-0 space-y-8'>
             {/* Lifecycle and Sub */}
-            <DataPanel title="Subscription & Status">
-              <div className="p-6 space-y-6">
-                <div className="space-y-3">
-                  <label className="text-[10px] uppercase font-bold text-stone-400">
+            <DataPanel title='Subscription & Status'>
+              <div className='p-6 space-y-6 min-w-0'>
+                <div className='space-y-3'>
+                  <label className='text-[10px] uppercase font-bold text-stone-400'>
                     Entity Status
                   </label>
-                  <div className="flex flex-wrap gap-2">
-                    {VENDOR_STATUSES.map((s) => (
+                  <div className='flex flex-wrap gap-2'>
+                    {VENDOR_STATUSES.map(s => (
                       <button
                         key={s}
                         onClick={() => setFormData({ ...formData, status: s })}
-                        className={`px-2 py-1 text-[9px] font-bold uppercase border transition-all ${formData.status === s ? "bg-brand-orange text-white border-brand-orange shadow-sm" : "bg-white text-stone-400 border-stone-200 hover:border-stone-400"}`}
+                        className={`px-2 py-1 text-[9px] font-bold uppercase border transition-all ${
+                          formData.status === s
+                            ? 'bg-brand-orange text-white border-brand-orange shadow-sm'
+                            : 'bg-white text-stone-400 border-stone-200 hover:border-stone-400'
+                        }`}
                       >
                         {s}
                       </button>
@@ -1980,31 +2680,35 @@ export const VendorManagement: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="space-y-3 pt-6 border-t border-stone-100">
-                  <label className="text-[10px] uppercase font-bold text-stone-400">
+                <div className='space-y-3 pt-6 border-t border-stone-100'>
+                  <label className='text-[10px] uppercase font-bold text-stone-400'>
                     Subscription Matrix
                   </label>
                   <select
-                    value={formData.planId || "starter"}
-                    onChange={(e) =>
+                    value={formData.planId || 'starter'}
+                    onChange={e =>
                       setFormData({ ...formData, planId: e.target.value })
                     }
-                    className="w-full border-2 border-stone-200 p-2.5 text-xs font-bold uppercase focus:border-brand-orange outline-none bg-stone-50 font-mono"
+                    className='w-full border-2 border-stone-200 p-2.5 text-xs font-bold uppercase focus:border-brand-orange outline-none bg-stone-50 font-mono'
                   >
-                    {plans.map((p) => (
+                    {plans.map(p => (
                       <option key={p.id} value={p.id}>
                         {p.name.toUpperCase()} TIER
                       </option>
                     ))}
                   </select>
-                  <div className="flex flex-wrap gap-2 pt-2">
-                    {SUB_STATUSES.map((s) => (
+                  <div className='flex flex-wrap gap-2 pt-2'>
+                    {SUB_STATUSES.map(s => (
                       <button
                         key={s}
                         onClick={() =>
                           setFormData({ ...formData, subscriptionStatus: s })
                         }
-                        className={`px-2 py-1 text-[9px] font-bold uppercase border transition-all ${formData.subscriptionStatus === s ? "bg-brand-charcoal text-white border-brand-charcoal" : "bg-white text-stone-400 border-stone-200"}`}
+                        className={`px-2 py-1 text-[9px] font-bold uppercase border transition-all ${
+                          formData.subscriptionStatus === s
+                            ? 'bg-brand-charcoal text-white border-brand-charcoal'
+                            : 'bg-white text-stone-400 border-stone-200'
+                        }`}
                       >
                         {s}
                       </button>
@@ -2012,245 +2716,295 @@ export const VendorManagement: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4 pt-6 border-t border-stone-100 font-mono">
-                  <div className="space-y-1.5">
-                    <label className="text-[9px] uppercase font-bold text-stone-400 font-sans">
+                <div className='grid grid-cols-1 sm:[grid-template-columns:repeat(auto-fit,minmax(150px,1fr))] gap-4 pt-6 border-t border-stone-100 font-mono min-w-0'>
+                  <div className='space-y-1.5'>
+                    <label className='text-[9px] uppercase font-bold text-stone-400 font-sans'>
                       Start Date
                     </label>
                     <input
-                      type="date"
+                      type='date'
                       value={
-                        formData.subscriptionStartDate?.split("T")[0] || ""
+                        formData.subscriptionStartDate?.split('T')[0] || ''
                       }
-                      onChange={(e) =>
+                      onChange={e =>
                         setFormData({
                           ...formData,
                           subscriptionStartDate: new Date(
-                            e.target.value,
-                          ).toISOString(),
+                            e.target.value
+                          ).toISOString()
                         })
                       }
-                      className="w-full border border-stone-300 p-1.5 text-[10px] font-bold outline-none"
+                      className='w-full border border-stone-300 p-1.5 text-[10px] font-bold outline-none'
                     />
                   </div>
-                  <div className="space-y-1.5">
-                    <label className="text-[9px] uppercase font-bold text-stone-400 font-sans">
+                  <div className='space-y-1.5'>
+                    <label className='text-[9px] uppercase font-bold text-stone-400 font-sans'>
                       Renewal Cycle
                     </label>
                     <input
-                      type="date"
-                      value={formData.subscriptionDueDate?.split("T")[0] || ""}
-                      onChange={(e) =>
+                      type='date'
+                      value={formData.subscriptionDueDate?.split('T')[0] || ''}
+                      onChange={e =>
                         setFormData({
                           ...formData,
                           subscriptionDueDate: new Date(
-                            e.target.value,
-                          ).toISOString(),
+                            e.target.value
+                          ).toISOString()
                         })
                       }
-                      className="w-full border border-stone-300 p-1.5 text-[10px] font-bold outline-none"
+                      className='w-full border border-stone-300 p-1.5 text-[10px] font-bold outline-none'
                     />
                   </div>
-                  <div className="space-y-1.5">
-                    <label className="text-[9px] uppercase font-bold text-stone-400 font-sans">
+                  <div className='space-y-1.5'>
+                    <label className='text-[9px] uppercase font-bold text-stone-400 font-sans'>
                       Last Collection
                     </label>
                     <input
-                      type="date"
-                      value={formData.lastCollectionDate?.split("T")[0] || ""}
-                      onChange={(e) =>
+                      type='date'
+                      value={formData.lastCollectionDate?.split('T')[0] || ''}
+                      onChange={e =>
                         setFormData({
                           ...formData,
                           lastCollectionDate: new Date(
-                            e.target.value,
-                          ).toISOString(),
+                            e.target.value
+                          ).toISOString()
                         })
                       }
-                      className="w-full border border-stone-300 p-1.5 text-[10px] font-bold outline-none"
+                      className='w-full border border-stone-300 p-1.5 text-[10px] font-bold outline-none'
                     />
                   </div>
-                  <div className="space-y-1.5">
-                    <label className="text-[9px] uppercase font-bold text-stone-400 font-sans">
+                  <div className='space-y-1.5'>
+                    <label className='text-[9px] uppercase font-bold text-stone-400 font-sans'>
                       Next Follow-up
                     </label>
                     <input
-                      type="date"
-                      value={formData.nextFollowUpDate?.split("T")[0] || ""}
-                      onChange={(e) =>
+                      type='date'
+                      value={formData.nextFollowUpDate?.split('T')[0] || ''}
+                      onChange={e =>
                         setFormData({
                           ...formData,
                           nextFollowUpDate: new Date(
-                            e.target.value,
-                          ).toISOString(),
+                            e.target.value
+                          ).toISOString()
                         })
                       }
-                      className="w-full border border-stone-300 p-1.5 text-[10px] font-bold outline-none"
+                      className='w-full border border-stone-300 p-1.5 text-[10px] font-bold outline-none'
                     />
                   </div>
                 </div>
 
-                <div className="space-y-1.5 pt-4">
-                  <label className="text-[9px] uppercase font-bold text-stone-400">
+                <div className='space-y-1.5 pt-4'>
+                  <label className='text-[9px] uppercase font-bold text-stone-400'>
                     Internal Collection Notes
                   </label>
                   <textarea
-                    value={formData.collectionNotes || ""}
-                    onChange={(e) =>
+                    value={formData.collectionNotes || ''}
+                    onChange={e =>
                       setFormData({
                         ...formData,
-                        collectionNotes: e.target.value,
+                        collectionNotes: e.target.value
                       })
                     }
-                    className="w-full border border-stone-300 p-2 text-[10px] font-medium outline-none h-16 resize-none focus:border-brand-orange"
+                    className='w-full border border-stone-300 p-2 text-[10px] font-medium outline-none h-16 resize-none focus:border-brand-orange'
                   />
                 </div>
               </div>
             </DataPanel>
 
             {/* Assignments */}
-            <DataPanel title="Personnel Assignments">
-              <div className="p-6 space-y-6">
-                <div className="space-y-2">
-                  <label className="text-[10px] uppercase font-bold text-stone-400">
+            <DataPanel title='Personnel Assignments'>
+              <div className='p-6 space-y-6 min-w-0'>
+                <div className='space-y-2'>
+                  <label className='text-[10px] uppercase font-bold text-stone-400'>
                     Assigned RPN Agent
                   </label>
                   <select
-                    value={formData.assignedRPNId || ""}
-                    onChange={(e) =>
+                    value={formData.assignedRPNId || ''}
+                    onChange={e =>
                       setFormData({
                         ...formData,
-                        assignedRPNId: e.target.value,
+                        assignedRPNId: e.target.value
                       })
                     }
-                    className="w-full border-2 border-stone-200 p-3 text-xs font-bold uppercase focus:border-brand-orange outline-none bg-stone-50"
+                    className='w-full border-2 border-stone-200 p-3 text-xs font-bold uppercase focus:border-brand-orange outline-none bg-stone-50'
                   >
-                    <option value="">Unassigned</option>
-                    {rpns.map((r) => (
+                    <option value=''>Unassigned</option>
+                    {rpns.map(r => (
                       <option key={r.id} value={r.id}>
                         {r.name} [{r.id}]
                       </option>
                     ))}
                   </select>
                   {formData.assignedRPNId &&
-                    rpns.find((r) => r.id === formData.assignedRPNId) && (
-                      <div className="p-3 bg-stone-100 border border-stone-200 flex flex-col gap-1">
-                        <div className="flex items-center gap-2 text-[10px] font-bold uppercase text-stone-500">
-                          <Info size={10} className="text-brand-orange" /> RPN
+                    rpns.find(r => r.id === formData.assignedRPNId) && (
+                      <div className='p-3 bg-stone-100 border border-stone-200 flex flex-col gap-1'>
+                        <div className='flex items-center gap-2 text-[10px] font-bold uppercase text-stone-500'>
+                          <Info size={10} className='text-brand-orange' /> RPN
                           Contact Info
                         </div>
-                        <p className="text-[11px] font-bold text-stone-700">
+                        <p className='text-[11px] font-bold text-stone-700'>
                           {
-                            rpns.find((r) => r.id === formData.assignedRPNId)
+                            rpns.find(r => r.id === formData.assignedRPNId)
                               ?.name
                           }
                         </p>
-                        <p className="text-[10px] font-mono text-stone-500">
+                        <p className='text-[10px] font-mono text-stone-500'>
                           {
-                            rpns.find((r) => r.id === formData.assignedRPNId)
+                            rpns.find(r => r.id === formData.assignedRPNId)
                               ?.phone
                           }
                         </p>
                       </div>
                     )}
                 </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] uppercase font-bold text-stone-400">
+                <div className='space-y-2'>
+                  <label className='text-[10px] uppercase font-bold text-stone-400'>
                     Assigned Staff Member
                   </label>
-                  <input
+                  <SearchableComboBox
                     value={
-                      formData.assignedStaffId ||
                       currentStaff?.fullName ||
-                      "STAFF-ADM"
+                      formData.assignedMemberName ||
+                      ''
                     }
-                    onChange={(e) =>
+                    options={searchableStaff}
+                    getOptionLabel={staff =>
+                      [
+                        staff.fullName || staff.displayName,
+                        staff.role,
+                        staff.desk,
+                        staff.staffCode,
+                        staff.email
+                      ]
+                        .filter(Boolean)
+                        .join(' / ')
+                    }
+                    getOptionValue={staff => staff.id}
+                    getOptionSearchText={staff =>
+                      buildSearchText([
+                        staff.fullName,
+                        staff.displayName,
+                        staff.email,
+                        staff.staffCode,
+                        staff.role,
+                        staff.desk
+                      ])
+                    }
+                    placeholder='Search active staff...'
+                    emptyMessage='No active staff members available.'
+                    onSelect={staff => {
                       setFormData({
                         ...formData,
-                        assignedStaffId: e.target.value, // This should ideally be a dropdown of actual staff
+                        assignedStaffId: staff?.id || '',
+                        assignedStaffName: staff?.fullName || '',
+                        assignedMemberId: staff?.id || '',
+                        assignedMemberName: staff?.fullName || '',
+                        assignedMemberStaffCode: staff?.staffCode || '',
+                        assignedMemberRole: staff?.role || '',
+                        assignedMemberDesk: staff?.desk || ''
                       })
-                    }
-                    className="w-full border-2 border-stone-200 p-3 text-xs font-bold uppercase focus:border-brand-orange outline-none bg-stone-50"
-                    placeholder="ASSIGNED STAFF"
+                    }}
                   />
+                  {searchableStaff.length === 0 && (
+                    <p className='text-[10px] font-bold uppercase text-brand-orange'>
+                      No active staff members available.
+                    </p>
+                  )}
+                  {currentAssignedStaffIsInactive && currentStaff && (
+                    <div className='border border-orange-200 bg-orange-50 p-3 text-[10px] font-bold uppercase text-brand-orange'>
+                      Previously assigned staff is no longer active. Please
+                      reassign to an active staff member.
+                      <div className='mt-1 text-stone-600'>
+                        {currentStaff.fullName} / {currentStaff.role} /{' '}
+                        {currentStaff.desk} / {currentStaff.staffCode}
+                      </div>
+                    </div>
+                  )}
+                  {!currentAssignedStaffIsInactive && currentStaff && (
+                    <p className='text-[10px] text-stone-500'>
+                      {currentStaff.fullName} / {currentStaff.role} /{' '}
+                      {currentStaff.desk} / {currentStaff.staffCode}
+                    </p>
+                  )}
                 </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] uppercase font-bold text-stone-400">
+                <div className='space-y-2'>
+                  <label className='text-[10px] uppercase font-bold text-stone-400'>
                     Source
                   </label>
                   <select
-                    value={formData.dataSource || "backend entered"}
-                    onChange={(e) =>
+                    value={formData.dataSource || 'backend entered'}
+                    onChange={e =>
                       setFormData({
                         ...formData,
-                        dataSource: e.target.value as any,
+                        dataSource: e.target.value as any
                       })
                     }
-                    className="w-full border-2 border-stone-200 p-3 text-xs font-bold uppercase focus:border-brand-orange outline-none"
+                    className='w-full border-2 border-stone-200 p-3 text-xs font-bold uppercase focus:border-brand-orange outline-none'
                   >
-                    {DATA_SOURCES.map((d) => (
+                    {DATA_SOURCES.map(d => (
                       <option key={d} value={d}>
                         {d.toUpperCase()}
                       </option>
                     ))}
                   </select>
                 </div>
-                <div className="pt-6 border-t border-stone-100 space-y-4">
-                  <label className="text-[10px] uppercase font-bold text-stone-400">
+                <div className='pt-6 border-t border-stone-100 space-y-4'>
+                  <label className='text-[10px] uppercase font-bold text-stone-400'>
                     Campaign Attribution
                   </label>
                   <select
-                    value={formData.campaignCode || ""}
-                    onChange={(e) => {
+                    value={formData.campaignCode || ''}
+                    onChange={e => {
                       const campaign = campaigns.find(
-                        (item) => item.campaignCode === e.target.value,
-                      );
+                        item => item.campaignCode === e.target.value
+                      )
                       setFormData({
                         ...formData,
                         campaignCode: e.target.value,
-                        campaignSource: campaign?.campaignName || "",
-                      });
+                        campaignSource: campaign?.campaignName || ''
+                      })
                     }}
-                    className="w-full border-2 border-stone-200 p-3 text-xs font-bold uppercase focus:border-brand-orange outline-none bg-stone-50"
+                    className='w-full border-2 border-stone-200 p-3 text-xs font-bold uppercase focus:border-brand-orange outline-none bg-stone-50'
                   >
-                    <option value="">No campaign attribution</option>
-                    {campaigns.map((campaign) => (
+                    <option value=''>No campaign attribution</option>
+                    {campaigns.map(campaign => (
                       <option key={campaign.id} value={campaign.campaignCode}>
                         {campaign.campaignName} [{campaign.campaignCode}]
                       </option>
                     ))}
                   </select>
                   <input
-                    value={formData.campaignSource || ""}
-                    onChange={(e) =>
+                    value={formData.campaignSource || ''}
+                    onChange={e =>
                       setFormData({
                         ...formData,
-                        campaignSource: e.target.value,
+                        campaignSource: e.target.value
                       })
                     }
-                    placeholder="Campaign source / free text"
-                    className="w-full border-2 border-stone-200 p-3 text-xs font-bold uppercase focus:border-brand-orange outline-none"
+                    placeholder='Campaign source / free text'
+                    className='w-full border-2 border-stone-200 p-3 text-xs font-bold uppercase focus:border-brand-orange outline-none'
                   />
                   <select
-                    value={formData.heardAboutUsVia || ""}
-                    onChange={(e) =>
+                    value={formData.heardAboutUsVia || ''}
+                    onChange={e =>
                       setFormData({
                         ...formData,
-                        heardAboutUsVia: e.target.value as any,
+                        heardAboutUsVia: e.target.value as any
                       })
                     }
-                    className="w-full border-2 border-stone-200 p-3 text-xs font-bold uppercase focus:border-brand-orange outline-none bg-white"
+                    className='w-full border-2 border-stone-200 p-3 text-xs font-bold uppercase focus:border-brand-orange outline-none bg-white'
                   >
-                    <option value="">Heard about us via...</option>
+                    <option value=''>Heard about us via...</option>
                     {[
-                      "Radio",
-                      "TV",
-                      "Roadshow",
-                      "WhatsApp",
-                      "Referral",
-                      "CAH",
-                      "Walk-in",
-                      "Other",
-                    ].map((source) => (
+                      'Radio',
+                      'TV',
+                      'Roadshow',
+                      'WhatsApp',
+                      'Referral',
+                      'CAH',
+                      'Walk-in',
+                      'Other'
+                    ].map(source => (
                       <option key={source} value={source}>
                         {source}
                       </option>
@@ -2261,289 +3015,112 @@ export const VendorManagement: React.FC = () => {
             </DataPanel>
 
             <DataPanel
-              title="Vendor Products"
-              subtitle="Attach master products and manage vendor-specific price, stock, branch and catalogue visibility."
-              className="border-t-4 border-t-brand-orange"
+              title='Products Later'
+              subtitle='Vendor registration is separate from product upload.'
+              className='border-t-4 border-t-brand-orange'
             >
-              <div className="p-6 space-y-5">
-                <div className="grid grid-cols-1 gap-3">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 w-3.5 h-3.5" />
-                    <input
-                      value={productPickerSearch}
-                      onChange={(e) => setProductPickerSearch(e.target.value)}
-                      placeholder="Search master products by name, barcode, brand, category..."
-                      className="w-full border-2 border-stone-200 pl-9 pr-3 py-3 text-xs font-bold uppercase outline-none focus:border-brand-orange"
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <input
-                      type="number"
-                      value={offerDraft.sellingPrice || 0}
-                      onChange={(e) =>
-                        setOfferDraft({
-                          ...offerDraft,
-                          sellingPrice: Number(e.target.value) || 0,
-                        })
-                      }
-                      className="w-full border-2 border-stone-200 p-3 text-xs font-bold uppercase outline-none"
-                      placeholder="Selling price"
-                    />
-                    <input
-                      type="number"
-                      value={offerDraft.stockQuantity || 0}
-                      onChange={(e) =>
-                        setOfferDraft({
-                          ...offerDraft,
-                          stockQuantity: Number(e.target.value) || 0,
-                          stockStatus:
-                            Number(e.target.value) > 0
-                              ? "in_stock"
-                              : "out_of_stock",
-                        })
-                      }
-                      className="w-full border-2 border-stone-200 p-3 text-xs font-bold uppercase outline-none"
-                      placeholder="Stock"
-                    />
-                    <select
-                      value={offerDraft.branchId || ""}
-                      onChange={(e) =>
-                        setOfferDraft({ ...offerDraft, branchId: e.target.value })
-                      }
-                      className="w-full border-2 border-stone-200 p-3 text-xs font-bold uppercase outline-none"
-                    >
-                      <option value="">Default branch</option>
-                      {(formData.branches || []).map((branch) => (
-                        <option key={branch.id} value={branch.id}>
-                          {branch.name}
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      value={offerDraft.vendorSku || ""}
-                      onChange={(e) =>
-                        setOfferDraft({ ...offerDraft, vendorSku: e.target.value })
-                      }
-                      className="w-full border-2 border-stone-200 p-3 text-xs font-bold uppercase outline-none"
-                      placeholder="Vendor SKU"
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <label className="flex items-center gap-2 border border-stone-200 p-3 text-[10px] font-black uppercase">
-                      <input
-                        type="checkbox"
-                        checked={offerDraft.publishToCatalogue !== false}
-                        onChange={(e) =>
-                          setOfferDraft({
-                            ...offerDraft,
-                            publishToCatalogue: e.target.checked,
-                          })
-                        }
-                        className="accent-brand-orange"
-                      />
-                      Publish
-                    </label>
-                    <label className="flex items-center gap-2 border border-stone-200 p-3 text-[10px] font-black uppercase">
-                      <input
-                        type="checkbox"
-                        checked={offerDraft.deliveryAvailable !== false}
-                        onChange={(e) =>
-                          setOfferDraft({
-                            ...offerDraft,
-                            deliveryAvailable: e.target.checked,
-                          })
-                        }
-                        className="accent-brand-orange"
-                      />
-                      Delivery
-                    </label>
-                  </div>
-                </div>
-
-                <div className="space-y-2 max-h-56 overflow-y-auto">
-                  {productPickerResults.map((product) => (
-                    <div
-                      key={product.id}
-                      className="border border-stone-200 p-3 flex items-center justify-between gap-3"
-                    >
-                      <div className="min-w-0">
-                        <p className="text-xs font-black uppercase text-brand-charcoal truncate">
-                          {product.productName}
-                        </p>
-                        <p className="text-[9px] font-bold uppercase text-stone-400 truncate">
-                          {product.brand || "No brand"} / {product.category} /{" "}
-                          {product.barcode || product.standardSku || "No code"}
-                        </p>
-                      </div>
-                      <PrimaryButton size="sm" onClick={() => handleCreateOffer(product)}>
-                        <PlusCircle size={12} className="mr-1" /> Link
-                      </PrimaryButton>
-                    </div>
-                  ))}
-                  {productPickerSearch && productPickerResults.length === 0 && (
-                    <p className="text-[10px] font-bold uppercase text-stone-400 text-center p-4">
-                      No matching master products. Create it in Product Library first.
-                    </p>
-                  )}
-                </div>
-
-                <div className="border-t border-stone-200 pt-4 space-y-3">
-                  <p className="text-[10px] font-black uppercase text-stone-400">
-                    Linked Vendor Offers
+              <div className='p-6 space-y-5 min-w-0'>
+                <div className='border border-stone-200 bg-stone-50 p-4 min-w-0'>
+                  <p className='text-xs font-bold uppercase text-brand-charcoal'>
+                    Vendor registration is separate from product upload.
+                    Products can be imported later using Excel.
                   </p>
-                  {currentVendorOffers.map((offer) => {
-                    const product = productById.get(offer.productId);
-                    const branch = (formData.branches || []).find(
-                      (b) => b.id === offer.branchId,
-                    );
-                    return (
-                      <div key={offer.id} className="border border-stone-200 p-3 space-y-3">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="text-xs font-black uppercase text-brand-charcoal truncate">
-                              {product?.productName || offer.productId}
-                            </p>
-                            <p className="text-[9px] font-bold uppercase text-stone-400">
-                              {branch?.name || "No branch"} / {offer.stockStatus}
-                            </p>
-                          </div>
-                          <button
-                            onClick={() => handleDeleteOffer(offer.id)}
-                            className="p-2 border border-stone-200 text-stone-400 hover:text-red-600 hover:border-red-200"
-                          >
-                            <Trash2 size={12} />
-                          </button>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <input
-                            type="number"
-                            value={offer.sellingPrice}
-                            onChange={(e) =>
-                              handleUpdateOffer(offer, {
-                                sellingPrice: Number(e.target.value) || 0,
-                              })
-                            }
-                            className="border border-stone-200 p-2 text-[10px] font-bold"
-                          />
-                          <input
-                            type="number"
-                            value={offer.stockQuantity}
-                            onChange={(e) =>
-                              handleUpdateOffer(offer, {
-                                stockQuantity: Number(e.target.value) || 0,
-                                stockStatus:
-                                  Number(e.target.value) > 0
-                                    ? "in_stock"
-                                    : "out_of_stock",
-                              })
-                            }
-                            className="border border-stone-200 p-2 text-[10px] font-bold"
-                          />
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <label className="flex items-center gap-2 text-[9px] font-black uppercase">
-                            <input
-                              type="checkbox"
-                              checked={offer.publishToCatalogue}
-                              onChange={(e) =>
-                                handleUpdateOffer(offer, {
-                                  publishToCatalogue: e.target.checked,
-                                })
-                              }
-                              className="accent-brand-orange"
-                            />
-                            Catalogue
-                          </label>
-                          <label className="flex items-center gap-2 text-[9px] font-black uppercase">
-                            <input
-                              type="checkbox"
-                              checked={offer.active}
-                              onChange={(e) =>
-                                handleUpdateOffer(offer, { active: e.target.checked })
-                              }
-                              className="accent-brand-orange"
-                            />
-                            Active
-                          </label>
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {currentVendorOffers.length === 0 && (
-                    <p className="text-[10px] font-bold uppercase text-stone-400 text-center p-4 border border-dashed border-stone-200">
-                      No vendor product offers linked yet.
-                    </p>
-                  )}
+                  <div className='mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3'>
+                    <SecondaryButton onClick={handleDownloadProductTemplate}>
+                      <Download size={14} className='mr-2 inline' /> Download
+                      Product Excel Template
+                    </SecondaryButton>
+                    <SecondaryButton
+                      onClick={handleImportProductsPlaceholder}
+                      disabled
+                    >
+                      <Upload size={14} className='mr-2 inline' /> Import
+                      Product Excel
+                    </SecondaryButton>
+                    <SecondaryButton onClick={handleExportVendorProductsPlaceholder}>
+                      <Download size={14} className='mr-2 inline' /> Export
+                      Vendor Products to Excel
+                    </SecondaryButton>
+                  </div>
+                  <p className='mt-3 text-[10px] font-bold uppercase text-stone-500'>
+                    Linked product offers, branded vendor products, storefront
+                    products, and catalogue selections remain managed in their
+                    dedicated workflows.
+                  </p>
                 </div>
               </div>
             </DataPanel>
 
-            <DataPanel title="System Information">
-              <div className="p-6 space-y-2 font-mono">
-                <div className="flex justify-between text-[9px] uppercase font-bold">
-                  <span className="text-stone-400">System Code:</span>
-                  <span className="text-stone-600 tracking-wider">
-                    {formData.systemCode || "PENDING ASSIGNMENT"}
+            <DataPanel title='System Information'>
+              <div className='p-6 space-y-2 font-mono min-w-0'>
+                <div className='flex justify-between text-[9px] uppercase font-bold'>
+                  <span className='text-stone-400'>System Code:</span>
+                  <span className='text-stone-600 tracking-wider break-all text-right'>
+                    {formData.systemCode || 'PENDING ASSIGNMENT'}
                   </span>
                 </div>
-                <div className="flex justify-between text-[9px] uppercase font-bold">
-                  <span className="text-stone-400">ID Specification:</span>
-                  <span className="text-stone-600">{formData.id}</span>
-                </div>
-                <div className="flex justify-between text-[9px] uppercase font-bold">
-                  <span className="text-stone-400">Created At:</span>
-                  <span className="text-stone-600">
-                    {new Date(formData.createdAt || "").toLocaleString()}
+                <div className='flex justify-between text-[9px] uppercase font-bold'>
+                  <span className='text-stone-400'>ID Specification:</span>
+                  <span className='text-stone-600 break-all text-right'>
+                    {formData.id}
                   </span>
                 </div>
-                <div className="flex justify-between text-[9px] uppercase font-bold border-t border-stone-100 pt-2 mt-2">
-                  <span className="text-stone-400">Origin Staff:</span>
-                  <span className="text-stone-600">{formData.createdBy}</span>
+                <div className='flex justify-between text-[9px] uppercase font-bold'>
+                  <span className='text-stone-400'>Created At:</span>
+                  <span className='text-stone-600'>
+                    {new Date(formData.createdAt || '').toLocaleString()}
+                  </span>
+                </div>
+                <div className='flex justify-between text-[9px] uppercase font-bold border-t border-stone-100 pt-2 mt-2'>
+                  <span className='text-stone-400'>Origin Staff:</span>
+                  <span className='text-stone-600 break-all text-right'>
+                    {formData.createdBy}
+                  </span>
                 </div>
               </div>
             </DataPanel>
           </div>
         </div>
       </div>
-    );
+    )
   }
 
   return (
-    <div className="space-y-8 pb-20">
+    <div className='space-y-8 pb-20 min-w-0 max-w-full overflow-x-hidden'>
       <BrandedAlertModal
         {...alertConfig}
         onClose={() => setAlertConfig({ ...alertConfig, isOpen: false })}
       />
 
       {/* Console Controls */}
-      <div className="bg-stone-50 border border-stone-200 p-6">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-6">
+      <div className='bg-stone-50 border border-stone-200 p-6'>
+        <div className='flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-6'>
           <div>
-            <h3 className="text-sm font-bold uppercase tracking-tight text-brand-charcoal">
+            <h3 className='text-sm font-bold uppercase tracking-tight text-brand-charcoal'>
               Vendor Management
             </h3>
-            <p className="text-[10px] text-stone-400 font-mono mt-1 uppercase italic">
+            <p className='text-[10px] text-stone-400 font-mono mt-1 uppercase italic'>
               Backend System // Vendor Management
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {permissionService.canCreate("addNewVendor") && (
+          <div className='flex flex-wrap gap-2'>
+            {permissionService.canCreate('addNewVendor') && (
               <PrimaryButton // Check both addNewVendor and general vendorManagement create
                 onClick={startNewVendor}
-                className="flex items-center gap-2"
+                className='flex items-center gap-2'
               >
                 <Plus size={14} /> Add New Vendor
               </PrimaryButton>
             )}
             <SecondaryButton
               onClick={downloadOnboardingForm}
-              className="flex items-center gap-2"
+              className='flex items-center gap-2'
             >
               <FileCode size={14} /> Download Onboarding Form
             </SecondaryButton>
             <SecondaryButton
               onClick={previewOnboardingForm}
-              className="flex items-center gap-2"
+              className='flex items-center gap-2'
             >
               <Info size={14} /> Preview Onboarding Form
             </SecondaryButton>
@@ -2551,35 +3128,29 @@ export const VendorManagement: React.FC = () => {
         </div>
 
         {/* Advanced Filter Row */}
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4 pt-6 border-t border-stone-200">
+        <div className='grid grid-cols-1 md:[grid-template-columns:repeat(auto-fit,minmax(220px,1fr))] gap-4 pt-6 border-t border-stone-200'>
           <SearchInput
-            placeholder="Search Vendor..."
+            placeholder='Search Vendor...'
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="lg:col-span-1 shadow-sm"
+            onChange={e => setSearch(e.target.value)}
+            className='lg:col-span-1 shadow-sm'
           />
-          <div className="relative">
-            <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 w-3.5 h-3.5" />
-            <select
-              value={filterSector}
-              onChange={(e) => setFilterSector(e.target.value)}
-              className="w-full bg-white border border-stone-200 pl-9 pr-6 py-1.5 text-[10px] font-bold uppercase focus:outline-none appearance-none"
-            >
-              <option value="All">All Sectors</option>
-              {SECTORS.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-          </div>
+          <SearchableComboBox
+            value={filterSector === 'All' ? '' : filterSector}
+            options={sectorOptions}
+            getOptionLabel={sector => sector}
+            getOptionValue={sector => sector}
+            getOptionSearchText={sector => sector}
+            placeholder='All Sectors'
+            onSelect={sector => setFilterSector(sector || 'All')}
+          />
           <select
             value={filterRPN}
-            onChange={(e) => setFilterRPN(e.target.value)}
-            className="w-full bg-white border border-stone-200 px-6 py-1.5 text-[10px] font-bold uppercase focus:outline-none"
+            onChange={e => setFilterRPN(e.target.value)}
+            className='w-full bg-white border border-stone-200 px-6 py-1.5 text-[10px] font-bold uppercase focus:outline-none'
           >
-            <option value="All">All RPN Agents</option>
-            {rpns.map((r) => (
+            <option value='All'>All RPN Agents</option>
+            {rpns.map(r => (
               <option key={r.id} value={r.id}>
                 {r.name} [{r.id}]
               </option>
@@ -2587,11 +3158,11 @@ export const VendorManagement: React.FC = () => {
           </select>
           <select
             value={filterSubStatus}
-            onChange={(e) => setFilterSubStatus(e.target.value)}
-            className="w-full bg-white border border-stone-200 px-6 py-1.5 text-[10px] font-bold uppercase focus:outline-none"
+            onChange={e => setFilterSubStatus(e.target.value)}
+            className='w-full bg-white border border-stone-200 px-6 py-1.5 text-[10px] font-bold uppercase focus:outline-none'
           >
-            <option value="All">Sub Status</option>
-            {SUB_STATUSES.map((s) => (
+            <option value='All'>Sub Status</option>
+            {SUB_STATUSES.map(s => (
               <option key={s} value={s}>
                 {s.toUpperCase()}
               </option>
@@ -2599,11 +3170,11 @@ export const VendorManagement: React.FC = () => {
           </select>
           <select
             value={filterVendorStatus}
-            onChange={(e) => setFilterVendorStatus(e.target.value)}
-            className="w-full bg-white border border-stone-200 px-6 py-1.5 text-[10px] font-bold uppercase focus:outline-none"
+            onChange={e => setFilterVendorStatus(e.target.value)}
+            className='w-full bg-white border border-stone-200 px-6 py-1.5 text-[10px] font-bold uppercase focus:outline-none'
           >
-            <option value="All">Lifecycle</option>
-            {VENDOR_STATUSES.map((s) => (
+            <option value='All'>Lifecycle</option>
+            {VENDOR_STATUSES.map(s => (
               <option key={s} value={s}>
                 {s.toUpperCase()}
               </option>
@@ -2613,140 +3184,140 @@ export const VendorManagement: React.FC = () => {
       </div>
 
       <DataPanel
-        title="Vendors"
+        title='Vendors'
         subtitle={`${filtered.length} active records found`}
         headers={[
-          "System Code",
-          "Vendor Details",
-          "Location / RPN",
-          "Plan / Status",
-          "Due Date",
-          "Operations",
+          'System Code',
+          'Vendor Details',
+          'Location / RPN',
+          'Plan / Status',
+          'Due Date',
+          'Operations'
         ]}
       >
-        {filtered.map((vendor) => {
-          const rpn = rpns.find((r) => r.id === vendor.assignedRPNId);
+        {filtered.map(vendor => {
+          const rpn = rpns.find(r => r.id === vendor.assignedRPNId)
           const vendorLogo =
             vendor.logoAssetUrl ||
             vendor.logoUrl ||
             vendor.businessLogoUrl ||
-            "";
+            ''
           return (
             <tr
               key={vendor.id}
-              className="group hover:bg-stone-50 transition-colors"
+              className='group hover:bg-stone-50 transition-colors'
             >
-              <div className="p-4 border-b border-stone-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 border border-stone-200 bg-orange-50/50 flex items-center justify-center p-1">
+              <div className='p-4 border-b border-stone-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4'>
+                <div className='flex items-center gap-4'>
+                  <div className='w-10 h-10 border border-stone-200 bg-orange-50/50 flex items-center justify-center p-1'>
                     {vendorLogo ? (
                       <img
                         src={vendorLogo}
-                        className="w-full h-full object-cover grayscale opacity-80"
-                        alt=""
-                        onError={(e) => {
-                          e.currentTarget.style.display = "none";
+                        className='w-full h-full object-cover grayscale opacity-80'
+                        alt=''
+                        onError={e => {
+                          e.currentTarget.style.display = 'none'
                         }}
                       />
                     ) : (
-                      <Store size={20} className="text-brand-charcoal" />
+                      <Store size={20} className='text-brand-charcoal' />
                     )}
                   </div>
-                  <div className="flex-1">
-                    <p className="text-[10px] font-black uppercase text-brand-charcoal">
+                  <div className='flex-1'>
+                    <p className='text-[10px] font-black uppercase text-brand-charcoal'>
                       {vendor.name}
                     </p>
-                    <p className="text-[8px] font-mono text-stone-500 mt-0.5">
-                      {vendor.systemCode || "N/A"}
+                    <p className='text-[8px] font-mono text-stone-500 mt-0.5'>
+                      {vendor.systemCode || 'N/A'}
                     </p>
                   </div>
                 </div>
 
-                <div className="flex-1 min-w-0">
-                  <p className="text-[9px] font-bold uppercase text-stone-500">
+                <div className='flex-1 min-w-0'>
+                  <p className='text-[9px] font-bold uppercase text-stone-500'>
                     Contact
                   </p>
-                  <p className="text-xs text-brand-charcoal break-words">
+                  <p className='text-xs text-brand-charcoal break-words'>
                     {vendor.email}
                   </p>
-                  <p className="text-xs text-brand-charcoal break-words">
+                  <p className='text-xs text-brand-charcoal break-words'>
                     {vendor.mainPhone}
                   </p>
-                  <p className="text-xs text-brand-charcoal break-words">
+                  <p className='text-xs text-brand-charcoal break-words'>
                     {vendor.whatsappNumber}
                   </p>
                 </div>
 
-                <div className="flex-1 min-w-0">
-                  <p className="text-[9px] font-bold uppercase text-stone-500">
+                <div className='flex-1 min-w-0'>
+                  <p className='text-[9px] font-bold uppercase text-stone-500'>
                     Address
                   </p>
-                  <p className="text-xs text-brand-charcoal break-words">
+                  <p className='text-xs text-brand-charcoal break-words'>
                     {vendor.streetAddress}
                   </p>
-                  <p className="text-xs text-brand-charcoal break-words">
+                  <p className='text-xs text-brand-charcoal break-words'>
                     {vendor.cityTown}, {vendor.province}
                   </p>
                 </div>
 
-                <div className="flex-1 min-w-0">
-                  <p className="text-[9px] font-bold uppercase text-stone-500">
+                <div className='flex-1 min-w-0'>
+                  <p className='text-[9px] font-bold uppercase text-stone-500'>
                     Plan / Status
                   </p>
-                  <p className="text-xs font-bold uppercase text-brand-charcoal">
-                    {plans.find((p) => p.id === vendor.planId)?.name ||
+                  <p className='text-xs font-bold uppercase text-brand-charcoal'>
+                    {plans.find(p => p.id === vendor.planId)?.name ||
                       vendor.planId}
                   </p>
                   <StatusBadge
                     status={vendor.subscriptionStatus}
                     variant={
-                      vendor.subscriptionStatus === "active"
-                        ? "success"
-                        : "warning"
+                      vendor.subscriptionStatus === 'active'
+                        ? 'success'
+                        : 'warning'
                     }
                   />
                   <StatusBadge
                     status={vendor.status}
-                    variant={vendor.status === "active" ? "success" : "neutral"}
-                    className="mt-1"
+                    variant={vendor.status === 'active' ? 'success' : 'neutral'}
+                    className='mt-1'
                   />
                 </div>
 
-                <div className="flex-1 min-w-0">
-                  <p className="text-[9px] font-bold uppercase text-stone-500">
+                <div className='flex-1 min-w-0'>
+                  <p className='text-[9px] font-bold uppercase text-stone-500'>
                     Due Date
                   </p>
-                  <p className="text-xs font-bold text-brand-charcoal">
+                  <p className='text-xs font-bold text-brand-charcoal'>
                     {vendor.subscriptionDueDate
                       ? new Date(
-                          vendor.subscriptionDueDate,
+                          vendor.subscriptionDueDate
                         ).toLocaleDateString()
-                      : "N/A"}
+                      : 'N/A'}
                   </p>
-                  <p className="text-[9px] font-bold uppercase text-stone-500 mt-1">
+                  <p className='text-[9px] font-bold uppercase text-stone-500 mt-1'>
                     RPN
                   </p>
-                  <p className="text-xs text-brand-charcoal">
-                    {rpn?.name || "Unassigned"}
+                  <p className='text-xs text-brand-charcoal'>
+                    {rpn?.name || 'Unassigned'}
                   </p>
                 </div>
 
-                <div className="flex-shrink-0 flex gap-2">
-                  {permissionService.canEdit("vendorManagement") && (
+                <div className='flex-shrink-0 flex gap-2'>
+                  {permissionService.canEdit('vendorManagement') && (
                     <button
                       onClick={() => startEditVendor(vendor)}
-                      className="p-2 border border-stone-200 text-stone-400 hover:border-brand-charcoal hover:text-brand-charcoal transition-all bg-white"
+                      className='p-2 border border-stone-200 text-stone-400 hover:border-brand-charcoal hover:text-brand-charcoal transition-all bg-white'
                     >
                       <Edit2 size={12} />
                     </button>
                   )}
-                  {permissionService.canDelete("vendorManagement") && (
+                  {permissionService.canDelete('vendorManagement') && (
                     <button
                       onClick={() => {
-                        setVendorToDelete(vendor.id);
-                        setIsDeleteDialogOpen(true);
+                        setVendorToDelete(vendor.id)
+                        setIsDeleteDialogOpen(true)
                       }}
-                      className="p-2 border border-stone-200 text-stone-400 hover:border-red-600 hover:text-red-600 transition-all bg-white"
+                      className='p-2 border border-stone-200 text-stone-400 hover:border-red-600 hover:text-red-600 transition-all bg-white'
                     >
                       <Trash2 size={12} />
                     </button>
@@ -2754,22 +3325,22 @@ export const VendorManagement: React.FC = () => {
                 </div>
               </div>
             </tr>
-          );
+          )
         })}
         {filtered.length === 0 && (
-          <div className="p-6">
+          <div className='p-6'>
             <EmptyState
-              title="No Vendors Found"
-              description="No vendors match the current filters. Clear filters to see more."
+              title='No Vendors Found'
+              description='No vendors match the current filters. Clear filters to see more.'
               icon={Layers}
               action={
                 <SecondaryButton
                   onClick={() => {
-                    setSearch("");
-                    setFilterSector("All");
-                    setFilterRPN("All");
-                    setFilterSubStatus("All");
-                    setFilterVendorStatus("All");
+                    setSearch('')
+                    setFilterSector('All')
+                    setFilterRPN('All')
+                    setFilterSubStatus('All')
+                    setFilterVendorStatus('All')
                   }}
                 >
                   Clear Filters
@@ -2782,13 +3353,13 @@ export const VendorManagement: React.FC = () => {
 
       <ConfirmDialog
         isOpen={isDeleteDialogOpen}
-        title="Confirm Vendor Deletion"
-        message="Deleting this vendor will result in immediate loss of all branch data and product mappings."
-        confirmLabel="Delete Vendor"
-        variant="danger"
+        title='Confirm Vendor Deletion'
+        message='Deleting this vendor will result in immediate loss of all branch data and product mappings.'
+        confirmLabel='Delete Vendor'
+        variant='danger'
         onConfirm={handleDelete}
         onCancel={() => setIsDeleteDialogOpen(false)}
       />
     </div>
-  );
-};
+  )
+}

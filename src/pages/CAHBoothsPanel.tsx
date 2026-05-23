@@ -295,9 +295,11 @@ export const CAHBoothsPanel: React.FC = () => {
             <div className="bg-white border-2 border-stone-100 p-4 sticky top-6">
               <div className="flex justify-between items-center mb-4 pb-2 border-b border-stone-100">
                 <h4 className="text-xs font-bold uppercase text-brand-charcoal">Booth Asset Register</h4>
-                {permissionService.canCreate("cahBooths") && <button onClick={() => handleCreateAsset(selectedBoothId)} className="text-[10px] font-bold uppercase text-brand-orange hover:text-brand-charcoal flex items-center gap-1">
-                  <Plus size={10} /> Add Asset
-                </button>
+                {permissionService.canCreate("cahBooths") && (
+                  <button onClick={() => handleCreateAsset(selectedBoothId)} className="text-[10px] font-bold uppercase text-brand-orange hover:text-brand-charcoal flex items-center gap-1">
+                    <Plus size={10} /> Add Asset
+                  </button>
+                )}
               </div>
 
               <div className="space-y-3">

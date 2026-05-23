@@ -31,12 +31,21 @@ import {
   EmptyState,
   StatCard,
   ConfirmDialog,
+  BrandedAlertModal,
 } from "./CommonUI.tsx";
 import { cahService } from "../services/cahService.ts";
 import { logService } from "../services/logService.ts";
 import { analyticsService } from "../services/analyticsService.ts";
 import { vendorService } from "../services/vendorService.ts";
 import { asArray } from "../utils/safeData.ts";
+import { generateCAHLinkId } from "../utils/idGenerator.ts";
+import {
+  getSession,
+  getSessionRole,
+  getSessionStaffId,
+  getSessionStaffName,
+  hasValidSession,
+} from "../utils/session.ts";
 import {
   CAHLink,
   CAHLinkType,
@@ -91,6 +100,17 @@ export const CAHLinksPanel: React.FC = () => {
   const [editingLink, setEditingLink] = useState<Partial<CAHLink> | null>(null);
   const [viewMode, setViewMode] = useState<"table" | "grid">("grid");
   const [formError, setFormError] = useState("");
+  const [alertConfig, setAlertConfig] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    type: "success" | "error" | "warning" | "info";
+  }>({
+    isOpen: false,
+    title: "seiGEN Commerce",
+    message: "",
+    type: "info",
+  });
 
   const [confirmConfig, setConfirmConfig] = useState<{
     title: string;
@@ -113,6 +133,24 @@ export const CAHLinksPanel: React.FC = () => {
   const safeLinks = asArray<CAHLink>(links);
   const safeVendors = asArray<Vendor>(vendors);
   const safeEvents = asArray<ActivityLog>(events);
+
+  const showBrandedAlert = (message: string, type: "warning" | "error" | "info" = "warning") => {
+    setAlertConfig({
+      isOpen: true,
+      title: "seiGEN Commerce",
+      message,
+      type,
+    });
+  };
+
+  const requireSession = () => {
+    const session = getSession();
+    if (!hasValidSession(session)) {
+      showBrandedAlert("Session expired. Please login again.", "warning");
+      return null;
+    }
+    return session;
+  };
 
   useEffect(() => {
     void loadData();
@@ -358,7 +396,7 @@ export const CAHLinksPanel: React.FC = () => {
     }
 
     setEditingLink({
-      id: `CAH-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
+      id: generateCAHLinkId(),
       type: "WhatsApp Channel",
       name: "",
       url: "",
@@ -390,6 +428,10 @@ export const CAHLinksPanel: React.FC = () => {
 
   const handleSaveLink = async () => {
     setFormError("");
+    const session = requireSession();
+    if (!session) return;
+    const staffId = getSessionStaffId(session);
+    const staffName = getSessionStaffName(session);
 
     const normalizedUrl = getSafeUrl(editingLink).trim();
 
@@ -413,9 +455,11 @@ export const CAHLinksPanel: React.FC = () => {
       ...editingLink,
       url: normalizedUrl,
       whatsappUrl: normalizedUrl,
-      updatedBy: "STAFF-ADM",
+      updatedBy: staffId,
+      updatedByName: staffName,
       updatedAt: new Date().toISOString(),
-      createdBy: editingLink.createdBy || "STAFF-ADM",
+      createdBy: editingLink.createdBy || staffId,
+      createdByName: (editingLink as any).createdByName || staffName,
       createdAt: editingLink.createdAt || new Date().toISOString(),
     } as CAHLink;
 
@@ -432,58 +476,62 @@ export const CAHLinksPanel: React.FC = () => {
       cahService.saveLink(linkToSave);
     }
 
-    if (followerCountChanged) {
+    try {
+      if (followerCountChanged) {
+        analyticsService.logEvent({
+          eventType: "CAH_FOLLOWER_COUNT_UPDATED",
+          actorType: getSessionRole(session),
+          actorName: staffName,
+          cahId: linkToSave.id,
+          details: {
+            previousCount: existingLink?.currentFollowerCount || 0,
+            newCount: linkToSave.currentFollowerCount || 0,
+            growth: linkToSave.followerGrowth || 0,
+            growthPercentage: linkToSave.followerGrowthPercentage || 0,
+          },
+        });
+
+        logService.add({
+          userId: staffId,
+          action: "CAH_FOLLOWER_COUNT_UPDATED",
+          entityType: "cah",
+          entityId: linkToSave.id,
+          details: `Follower count updated from ${
+            existingLink?.currentFollowerCount || 0
+          } to ${linkToSave.currentFollowerCount || 0} for CAH link "${
+            linkToSave.name
+          }".`,
+          severity: "info",
+        });
+      }
+
       analyticsService.logEvent({
-        eventType: "CAH_FOLLOWER_COUNT_UPDATED",
-        actorType: "admin",
-        actorName: "System Admin",
+        eventType: editingLink.createdAt
+          ? "WHATSAPP_ACCESS_LINK_UPDATED"
+          : "WHATSAPP_ACCESS_LINK_CREATED",
+        actorType: getSessionRole(session),
+        actorName: staffName,
         cahId: linkToSave.id,
         details: {
-          previousCount: existingLink?.currentFollowerCount || 0,
-          newCount: linkToSave.currentFollowerCount || 0,
-          growth: linkToSave.followerGrowth || 0,
-          growthPercentage: linkToSave.followerGrowthPercentage || 0,
+          name: linkToSave.name,
+          type: linkToSave.type,
+          url: linkToSave.whatsappUrl,
         },
       });
 
       logService.add({
-        userId: "STAFF-ADM",
-        action: "CAH_FOLLOWER_COUNT_UPDATED",
+        userId: staffId,
+        action: editingLink.createdAt
+          ? "WHATSAPP_ACCESS_LINK_UPDATED"
+          : "WHATSAPP_ACCESS_LINK_CREATED",
         entityType: "cah",
         entityId: linkToSave.id,
-        details: `Follower count updated from ${
-          existingLink?.currentFollowerCount || 0
-        } to ${linkToSave.currentFollowerCount || 0} for CAH link "${
-          linkToSave.name
-        }".`,
+        details: `CAH Link "${linkToSave.name}" for ${linkToSave.targetAudience} was modified.`,
         severity: "info",
       });
+    } catch (auditError) {
+      console.error("CAH link audit logging failed", auditError);
     }
-
-    analyticsService.logEvent({
-      eventType: editingLink.createdAt
-        ? "WHATSAPP_ACCESS_LINK_UPDATED"
-        : "WHATSAPP_ACCESS_LINK_CREATED",
-      actorType: "admin",
-      actorName: "System Admin",
-      cahId: linkToSave.id,
-      details: {
-        name: linkToSave.name,
-        type: linkToSave.type,
-        url: linkToSave.whatsappUrl,
-      },
-    });
-
-    logService.add({
-      userId: "STAFF-ADM",
-      action: editingLink.createdAt
-        ? "WHATSAPP_ACCESS_LINK_UPDATED"
-        : "WHATSAPP_ACCESS_LINK_CREATED",
-      entityType: "cah",
-      entityId: linkToSave.id,
-      details: `CAH Link "${linkToSave.name}" for ${linkToSave.targetAudience} was modified.`,
-      severity: "info",
-    });
 
     void loadData();
     setIsFormOpen(false);
@@ -496,20 +544,26 @@ export const CAHLinksPanel: React.FC = () => {
       message: "Permanently archive and delete this WhatsApp link?",
       variant: "danger",
       action: async () => {
+        const session = requireSession();
+        if (!session) return;
         try {
           await cahService.deleteLinkFromFirebase(id);
         } catch (e) {
           cahService.deleteLink(id);
         }
 
-        logService.add({
-          userId: "STAFF-ADM",
-          action: "CAH_LINK_DELETED",
-          entityType: "cah",
-          entityId: id,
-          details: "CAH link removed from hub.",
-          severity: "warning",
-        });
+        try {
+          logService.add({
+            userId: getSessionStaffId(session),
+            action: "CAH_LINK_DELETED",
+            entityType: "cah",
+            entityId: id,
+            details: "CAH link removed from hub.",
+            severity: "warning",
+          });
+        } catch (auditError) {
+          console.error("CAH link audit logging failed", auditError);
+        }
 
         void loadData();
       },
@@ -738,14 +792,14 @@ export const CAHLinksPanel: React.FC = () => {
                 </span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6">
+              <div className="grid grid-cols-1 sm:[grid-template-columns:repeat(auto-fit,minmax(240px,1fr))] gap-6">
                 {linksInGroup.map((link) => {
                   const linkUrl = getSafeUrl(link);
 
                   return (
                     <div
                       key={link.id}
-                      className="bg-white border-2 border-stone-100 p-5 flex flex-col hover:border-brand-orange transition-all group relative"
+                    className="bg-white border-2 border-stone-100 p-5 min-w-0 flex flex-col hover:border-brand-orange transition-all group relative"
                     >
                       <div className="absolute top-4 right-4 flex gap-1 flex-wrap">
                         <StatusBadge
@@ -1035,7 +1089,7 @@ export const CAHLinksPanel: React.FC = () => {
             WhatsApp Access Hub Analytics
           </h3>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:[grid-template-columns:repeat(auto-fit,minmax(260px,1fr))] gap-6">
             <div className="bg-white border border-stone-200 p-4">
               <h4 className="text-xs font-bold uppercase text-stone-600 mb-3 flex items-center gap-2">
                 <TrendingUp size={14} /> Top Growing Links
@@ -1282,7 +1336,7 @@ export const CAHLinksPanel: React.FC = () => {
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:[grid-template-columns:repeat(auto-fit,minmax(180px,1fr))] gap-4">
                   <div className="space-y-1.5">
                     <label className="text-[10px] uppercase font-bold text-stone-400">
                       Link Type
@@ -1362,7 +1416,7 @@ export const CAHLinksPanel: React.FC = () => {
                     )}
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:[grid-template-columns:repeat(auto-fit,minmax(180px,1fr))] gap-4">
                   <div className="space-y-1.5">
                     <label className="text-[10px] uppercase font-bold text-stone-400">
                       Sector Affiliation
@@ -1430,7 +1484,7 @@ export const CAHLinksPanel: React.FC = () => {
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4 pt-4 border-t border-stone-100">
+                <div className="grid grid-cols-1 sm:[grid-template-columns:repeat(auto-fit,minmax(180px,1fr))] gap-4 pt-4 border-t border-stone-100">
                   <div className="space-y-1.5">
                     <label className="text-[10px] uppercase font-bold text-stone-400">
                       Category
@@ -1527,7 +1581,7 @@ export const CAHLinksPanel: React.FC = () => {
                     <Users size={12} /> Member / Follower Tracking
                   </h4>
 
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:[grid-template-columns:repeat(auto-fit,minmax(150px,1fr))] gap-4">
                     <div className="space-y-1.5">
                       <label className="text-[10px] uppercase font-bold text-stone-400">
                         Current Count
@@ -1552,7 +1606,8 @@ export const CAHLinksPanel: React.FC = () => {
                               previous?.currentFollowerCount,
                             currentFollowerCount: newValue,
                             followerCountUpdatedAt: new Date().toISOString(),
-                            followerCountUpdatedBy: "STAFF-ADM",
+                            followerCountUpdatedBy:
+                              getSessionStaffName(getSession(), "Unknown staff"),
                             followerGrowth: growth,
                             followerGrowthPercentage: growthPercentage,
                           }));
@@ -1573,7 +1628,7 @@ export const CAHLinksPanel: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:[grid-template-columns:repeat(auto-fit,minmax(150px,1fr))] gap-4">
                     <div className="space-y-1.5">
                       <label className="text-[10px] uppercase font-bold text-stone-400">
                         Growth
@@ -1713,6 +1768,10 @@ export const CAHLinksPanel: React.FC = () => {
           message={`Update count for "${countModalLink.name}":`}
           variant="warning"
           onConfirm={() => {
+            const session = requireSession();
+            if (!session) return;
+            const staffId = getSessionStaffId(session);
+            const staffName = getSessionStaffName(session);
             const count = parseInt(newCountValue) || 0;
             const previousCount = countModalLink.currentFollowerCount || 0;
             const growth = count - previousCount;
@@ -1724,36 +1783,40 @@ export const CAHLinksPanel: React.FC = () => {
               previousFollowerCount: previousCount,
               currentFollowerCount: count,
               followerCountUpdatedAt: new Date().toISOString(),
-              followerCountUpdatedBy: "STAFF-ADM",
+              followerCountUpdatedBy: staffName,
               followerGrowth: growth,
               followerGrowthPercentage: growthPercentage,
-              updatedBy: "STAFF-ADM",
+              updatedBy: staffId,
               updatedAt: new Date().toISOString(),
             };
 
             cahService.saveLink(updatedLink);
 
-            analyticsService.logEvent({
-              eventType: "CAH_FOLLOWER_COUNT_UPDATED",
-              actorType: "admin",
-              actorName: "System Admin",
-              cahId: countModalLink.id,
-              details: {
-                previousCount,
-                newCount: count,
-                growth,
-                growthPercentage,
-              },
-            });
+            try {
+              analyticsService.logEvent({
+                eventType: "CAH_FOLLOWER_COUNT_UPDATED",
+                actorType: getSessionRole(session),
+                actorName: staffName,
+                cahId: countModalLink.id,
+                details: {
+                  previousCount,
+                  newCount: count,
+                  growth,
+                  growthPercentage,
+                },
+              });
 
-            logService.add({
-              userId: "STAFF-ADM",
-              action: "CAH_FOLLOWER_COUNT_UPDATED",
-              entityType: "cah",
-              entityId: countModalLink.id,
-              details: `Follower count updated from ${previousCount} to ${count} for CAH link "${countModalLink.name}".`,
-              severity: "info",
-            });
+              logService.add({
+                userId: staffId,
+                action: "CAH_FOLLOWER_COUNT_UPDATED",
+                entityType: "cah",
+                entityId: countModalLink.id,
+                details: `Follower count updated from ${previousCount} to ${count} for CAH link "${countModalLink.name}".`,
+                severity: "info",
+              });
+            } catch (auditError) {
+              console.error("CAH follower audit logging failed", auditError);
+            }
 
             void loadData();
             setIsCountModalOpen(false);
@@ -1772,6 +1835,16 @@ export const CAHLinksPanel: React.FC = () => {
           </div>
         </ConfirmDialog>
       )}
+
+      <BrandedAlertModal
+        isOpen={alertConfig.isOpen}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        type={alertConfig.type}
+        onClose={() =>
+          setAlertConfig((previous) => ({ ...previous, isOpen: false }))
+        }
+      />
     </div>
   );
 };

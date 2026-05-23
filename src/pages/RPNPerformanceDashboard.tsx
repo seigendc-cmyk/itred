@@ -718,6 +718,11 @@ export const RPNPerformanceDashboard: React.FC = () => {
     };
   }, [scorecards, vendors]);
 
+  const workflowAnalytics = useMemo(
+    () => rpnService.getWorkflowAnalytics(),
+    [vendors],
+  );
+
   const campaignMatrix = useMemo(() => {
     return campaigns.map((campaign) => {
       const matchedVendors = vendors.filter(
@@ -1000,6 +1005,14 @@ export const RPNPerformanceDashboard: React.FC = () => {
           <StatCard label="Top Onboarding" value={executive.topOnboarding} icon={Users} />
           <StatCard label="Top Revenue" value={executive.topRevenue} icon={DollarSign} />
           <StatCard label="Highest Risk" value={executive.highestRisk} icon={AlertTriangle} variant="warning" />
+          <StatCard label="Prospects Today" value={String(workflowAnalytics.prospectsToday)} icon={Users} />
+          <StatCard label="Invites Today" value={String(workflowAnalytics.invitationsToday)} icon={Megaphone} />
+          <StatCard label="Appointments Today" value={String(workflowAnalytics.appointmentsBookedToday)} icon={CalendarDays} />
+          <StatCard label="Conversions Today" value={String(workflowAnalytics.conversionsToday)} icon={Target} variant="success" />
+          <StatCard label="Overdue Follow-ups" value={String(workflowAnalytics.overdueFollowUps)} icon={AlertTriangle} variant="warning" />
+          <StatCard label="Pipeline Conversion" value={`${workflowAnalytics.conversionRate}%`} icon={TrendingUp} />
+          <StatCard label="Best Source" value={workflowAnalytics.bestSource} icon={Megaphone} />
+          <StatCard label="Best Area" value={workflowAnalytics.bestArea} icon={BarChart3} />
         </div>
       )}
 

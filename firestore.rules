@@ -48,6 +48,21 @@ service cloud.firestore {
       allow delete: if isConsoleAdmin();
     }
 
+    match /itred_staff_messages/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+
+    match /itred_staff_chat_threads/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+
+    match /itred_staff_chat_groups/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+
     match /itred_vendors/{document=**} {
       allow get, list, create, update: if true;
       allow delete: if isConsoleAdmin();

@@ -9,6 +9,7 @@ import {
   InteractionType,
 } from "../types.ts";
 import { notificationService } from "./notificationService.ts";
+import { readDiagnosticsService } from "./readDiagnosticsService.ts";
 
 const STORAGE_KEY = "itred_whatsapp_activity_logs";
 const INTEL_STORAGE_KEY = "itred_whatsapp_intelligence_logs";
@@ -42,7 +43,9 @@ export const whatsappActivityService = {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       const parsed = raw ? JSON.parse(raw) : [];
-      return Array.isArray(parsed) ? parsed : [];
+      const logs = Array.isArray(parsed) ? parsed : [];
+      readDiagnosticsService.track("whatsappActivityService", STORAGE_KEY, "getLogs", logs.length);
+      return logs;
     } catch (e) {
       console.error("Failed to parse whatsapp activity logs", e);
       return [];
@@ -104,6 +107,36 @@ export const whatsappActivityService = {
     }
     localStorage.setItem(INTEL_STORAGE_KEY, JSON.stringify(logs));
     this.detectMarketSignals(scoredLog, logs);
+  },
+
+  getRecent(limit = 100): WhatsAppActivityLog[] {
+    return whatsappActivityService
+      .getLogs()
+      .sort(
+        (a, b) =>
+          new Date((b as any).createdAt || (b as any).date || 0).getTime() -
+          new Date((a as any).createdAt || (a as any).date || 0).getTime(),
+      )
+      .slice(0, limit);
+  },
+
+  getByVendorId(vendorId: string): WhatsAppActivityLog[] {
+    return whatsappActivityService
+      .getLogs()
+      .filter((log) => (log as any).vendorId === vendorId);
+  },
+
+  getByRpnId(rpnId: string): WhatsAppActivityLog[] {
+    return whatsappActivityService
+      .getLogs()
+      .filter((log) => (log as any).rpnId === rpnId || (log as any).assignedRpnId === rpnId);
+  },
+
+  getByDateRange(from: string, to: string): WhatsAppActivityLog[] {
+    return whatsappActivityService.getLogs().filter((log) => {
+      const date = String((log as any).createdAt || (log as any).date || "").slice(0, 10);
+      return (!from || date >= from) && (!to || date <= to);
+    });
   },
 
   deleteIntelligenceLog(id: string): void {

@@ -1,4 +1,4 @@
-/**
+﻿﻿﻿/**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -32,6 +32,16 @@ export enum AppRoute {
   NOTIFICATIONS = "notifications",
   STAFF_TASKS = "staff-tasks",
   RPN_PERFORMANCE = "rpn-performance",
+  FINANCE_DESK = "finance-desk",
+  CASH_BANK_MANAGER = "cash-bank-manager",
+  RPN_PAYMENTS_LEDGER = "rpn-payments-ledger",
+  FINANCE_REPORTS = "finance-reports",
+  BI_OVERVIEW = "console-bi-overview",
+  AI_REPORTS = "console-ai-reports",
+  PRODUCT_TRENDS = "console-product-trends",
+  VENDOR_REPORTS = "console-vendor-reports",
+  RPN_BI_PERFORMANCE = "console-rpn-performance",
+  VIRAL_GROWTH = "console-viral-growth",
 }
 export type DeskType =
   | "SysAdmin Desk"
@@ -42,6 +52,7 @@ export type DeskType =
   | "RPN Management Desk"
   | "CAH Operations Desk"
   | "BI & Analytics Desk"
+  | "Finance Desk"
   | "Viewer Desk";
 
 export type PermissionLevel =
@@ -54,6 +65,8 @@ export type PermissionLevel =
   | "delete"
   | "export"
   | "full";
+
+export type FieldDataSource = "manual" | "import" | "field" | "system" | "firebase" | string;
 
 export type MenuKey =
   | "dashboard"
@@ -87,7 +100,16 @@ export type MenuKey =
   | "approvalQueue"
   | "notifications"
   | "staffTasks"
-  | "rpnPerformance";
+  | "rpnPerformance"
+  | "financeDesk"
+  | "cashBankManager"
+  | "rpnPaymentsLedger"
+  | "financeReports"
+  | "biOverview"
+  | "aiReports"
+  | "productTrends"
+  | "vendorReports"
+  | "viralGrowth";
 
 export type MenuPermissions = Partial<Record<MenuKey, PermissionLevel>>;
 
@@ -129,6 +151,7 @@ export type ActionPermissionKey =
   | "inventory.spotChecks.complete"
   | "inventory.spotChecks.assign"
   | "inventory.spotChecks.updateStock"
+  | "inventory.updateStockAfterAudit"
   | "inventory.spotChecks.escalate"
   | "inventory.spotChecks.viewAnalytics"
   | "cah.view"
@@ -138,6 +161,12 @@ export type ActionPermissionKey =
   | "pricing.view"
   | "pricing.submitApproval"
   | "pricing.approve"
+  | "subscriptions.view"
+  | "subscriptions.recordPayment"
+  | "subscriptions.waive"
+  | "subscriptions.generateReceipt"
+  | "subscriptions.postToFinance"
+  | "subscriptions.generateRpnCommission"
   | "notifications.view"
   | "notifications.markRead"
   | "notifications.resolve"
@@ -151,6 +180,12 @@ export type ActionPermissionKey =
   | "staffTasks.updateStatus"
   | "staffTasks.review"
   | "staffTasks.cancel"
+  | "staffChat.view"
+  | "staffChat.sendDirect"
+  | "staffChat.sendGroup"
+  | "staffChat.assignTask"
+  | "staffChat.monitor"
+  | "staffChat.deleteMessage"
   | "approvalQueue.view"
   | "approvalQueue.approve"
   | "staffTasks.viewOwn"
@@ -169,6 +204,18 @@ export type ActionPermissionKey =
   | "rpn.viewCommissions"
   | "rpn.exportReports"
   | "staff.editKycDetails"
+  | "rpnProspects.view"
+  | "rpnProspects.create"
+  | "rpnProspects.edit"
+  | "rpnProspects.delete"
+  | "rpnPipeline.moveStage"
+  | "rpnPipeline.managerOverride"
+  | "rpnPipeline.convertToVendor"
+  | "rpnAppointments.edit"
+  | "rpnFollowups.edit"
+  | "rpnPipeline.analytics"
+  | "staff.editPermissions"
+  | "staff.manage"
   | "staff.generateStaffCode"
   | "staff.repairDuplicateCodes"
   | "staff.suspend"
@@ -183,13 +230,313 @@ export type ActionPermissionKey =
   | "roles.deleteRoleTemplate"
   | "roles.assignRoleToStaff"
   | "roles.auditPermissionChanges"
+  | "system.settings.edit"
   | "approvalQueue.reject"
   | "approvalQueue.returnForCorrection"
   | "staffAudit.view"
   | "staffAudit.viewAll"
-  | "staffAudit.export";
+  | "staffAudit.export"
+  | "finance.view"
+  | "finance.settings.manage"
+  | "finance.coa.manage"
+  | "finance.cashBankAccounts.manage"
+  | "finance.ledger.view"
+  | "finance.transaction.create"
+  | "finance.ledger.exportPdf"
+  | "finance.payment.create"
+  | "finance.payment.approve"
+  | "finance.payment.post"
+  | "finance.payment.void"
+  | "finance.receipt.create"
+  | "finance.receipt.post"
+  | "finance.journal.create"
+  | "finance.journal.approve"
+  | "finance.journal.post"
+  | "finance.allowOverdraw"
+  | "finance.rpnPayments.view"
+  | "finance.rpnPayments.generate"
+  | "finance.rpnPayments.approve"
+  | "finance.rpnPayments.pay"
+  | "finance.reports.view"
+  | "finance.reports.print"
+  | "finance.reports.downloadPdf"
+  | "finance.reports.exportCsv"
+  | "finance.reports.approvePrint"
+  | "finance.reports.viewSensitive"
+  | "finance.reports.viewRpnPayments"
+  | "finance.reports.viewAssets"
+  | "finance.reports.viewLedger"
+  | "finance.reports.viewAuditTrail";
 
 export type ActionPermissions = Partial<Record<ActionPermissionKey, boolean>>;
+
+export type AccountType =
+  | "Asset"
+  | "Liability"
+  | "Equity"
+  | "Income"
+  | "Expense"
+  | "Cost of Sales"
+  | "Contra Asset"
+  | "Contra Income";
+
+export interface ChartOfAccount {
+  id: string;
+  accountCode: string;
+  accountName: string;
+  accountType: AccountType;
+  accountSubType?: string;
+  normalBalance: "Debit" | "Credit";
+  description?: string;
+  parentAccountId?: string;
+  isCashBankAccount?: boolean;
+  isSystemAccount?: boolean;
+  status: "active" | "inactive";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CashBankAccount {
+  id: string;
+  accountId: string;
+  accountCode?: string;
+  accountName: string;
+  accountType: "Cash" | "Bank" | "Mobile Money" | "Card Processor" | "Other";
+  currency: "USD" | "ZiG" | "ZAR" | "Other";
+  bankName?: string;
+  branchName?: string;
+  accountNumber?: string;
+  walletNumber?: string;
+  openingBalance: number;
+  currentBalance: number;
+  status: "active" | "inactive";
+  requiresApprovalForPayments: boolean;
+  approvalLimit?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FinanceLedgerEntry {
+  id: string;
+  transactionNumber: string;
+  transactionDate: string;
+  transactionType:
+    | "Opening Balance"
+    | "Payment"
+    | "Receipt"
+    | "Deposit"
+    | "Transfer"
+    | "Journal";
+  accountId: string;
+  cashBankAccountId?: string;
+  description: string;
+  payeeName?: string;
+  payerName?: string;
+  debit: number;
+  credit: number;
+  amount: number;
+  runningBalance?: number;
+  reference?: string;
+  status: "draft" | "posted" | "void";
+  createdByStaffId?: string;
+  createdByStaffName?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type FinanceAssetCategory =
+  | "Starlink / Connectivity Kit"
+  | "Router / Network Device"
+  | "Office Furniture"
+  | "Office Equipment"
+  | "Building"
+  | "Vehicle"
+  | "RPN Issued Phone"
+  | "Promotional Kit"
+  | "Roadshow Equipment"
+  | "Training Equipment"
+  | "Data Centre Equipment"
+  | "Other";
+
+export type FinanceAssetStatus =
+  | "active"
+  | "assigned"
+  | "in-maintenance"
+  | "disposed"
+  | "inactive";
+
+export interface FinanceAsset {
+  id: string;
+  assetCode: string;
+  assetName: string;
+  category: FinanceAssetCategory;
+  brand?: string;
+  model?: string;
+  serialNumber?: string;
+  location?: string;
+  assignedTo?: string;
+  acquisitionDate: string;
+  purchaseCost: number;
+  currentValue: number;
+  assetAccountId: string;
+  cashBankAccountId?: string;
+  maintenanceExpenseAccountId: string;
+  disposalAccountId?: string;
+  supplierName?: string;
+  warrantyExpiryDate?: string;
+  notes?: string;
+  status: FinanceAssetStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FinanceAssetMaintenanceRecord {
+  id: string;
+  assetId: string;
+  maintenanceDate: string;
+  maintenanceType:
+    | "Inspection"
+    | "Repair"
+    | "Service"
+    | "Replacement"
+    | "Upgrade"
+    | "Other";
+  provider?: string;
+  cost: number;
+  expenseAccountId: string;
+  notes?: string;
+  nextMaintenanceDate?: string;
+  status: "scheduled" | "completed" | "cancelled";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FinanceAssetDisposalRecord {
+  id: string;
+  assetId: string;
+  disposalDate: string;
+  disposalMethod: "Sold" | "Scrapped" | "Donated" | "Lost" | "Stolen" | "Other";
+  proceeds: number;
+  disposalAccountId: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type FinanceReportType =
+  | "Cash / Bank Ledger Report"
+  | "Transaction Listing Report"
+  | "Chart of Accounts Report"
+  | "Cash / Bank Account Balances Report"
+  | "Receipts Report"
+  | "Payments Report"
+  | "Journal Entries Report"
+  | "RPN Payments / Commissions Report"
+  | "Asset Register Report"
+  | "Asset Maintenance Report"
+  | "Finance Approval Report"
+  | "Print / Export Audit Report";
+
+export interface FinanceReportFilters {
+  reportType: FinanceReportType;
+  dateFrom?: string;
+  dateTo?: string;
+  periodPreset?:
+    | "Today"
+    | "This Week"
+    | "This Month"
+    | "This Quarter"
+    | "This Year"
+    | "Custom";
+  accountId?: string;
+  cashBankAccountId?: string;
+  transactionType?: string;
+  status?: string;
+  staff?: string;
+  vendor?: string;
+  rpn?: string;
+  assetCategory?: string;
+  assetStatus?: string;
+  payeePayer?: string;
+  approvalStatus?: string;
+  amountMin?: number;
+  amountMax?: number;
+}
+
+export interface FinanceReportResult {
+  reportRef: string;
+  reportType: FinanceReportType;
+  title: string;
+  filters: FinanceReportFilters;
+  rows: any[];
+  totals: Record<string, number | string>;
+  generatedAt: string;
+  unavailableMessage?: string;
+}
+
+export interface FinanceReportPrintLog {
+  id: string;
+  reportRef: string;
+  reportType: FinanceReportType;
+  filters: FinanceReportFilters;
+  action: "print" | "pdf_download" | "csv_export" | "approval_requested";
+  staffId?: string;
+  staffName?: string;
+  staffDesk?: string;
+  approvalId?: string;
+  status: "allowed" | "blocked" | "pending_approval" | "completed";
+  createdAt: string;
+}
+
+export interface RPNPaymentLedgerEntry {
+  id: string;
+  rpnId: string;
+  rpnName: string;
+  vendorId: string;
+  vendorName: string;
+  sourceType:
+    | "Paid Onboarding"
+    | "Recurring Subscription"
+    | "Bonus"
+    | "Adjustment";
+  sourceTransactionId?: string;
+  sourceSubscriptionId?: string;
+  sourcePaymentId?: string;
+  vendorPlan?: string;
+  vendorPaymentAmount: number;
+  commissionRate?: number;
+  commissionAmountDue: number;
+  commissionAmountPaid: number;
+  balanceDue: number;
+  currency: string;
+  periodStart?: string;
+  periodEnd?: string;
+  dueDate: string;
+  status:
+    | "due"
+    | "pending_approval"
+    | "approved"
+    | "paid"
+    | "held"
+    | "rejected"
+    | "void";
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+  approvedByStaffId?: string;
+  approvedAt?: string;
+  paidByStaffId?: string;
+  paidAt?: string;
+}
+
+export interface RPNPaymentSummary {
+  rpnId: string;
+  rpnName: string;
+  totalDue: number;
+  totalPaid: number;
+  balanceDue: number;
+  entryCount: number;
+}
 
 export interface NavItem {
   id: AppRoute;
@@ -224,7 +571,7 @@ export interface Staff {
   fullName: string;
   displayName: string;
   role: string;
-  desk: DeskType;
+  desk: DeskType | string;
   email?: string;
   phone?: string;
   whatsapp?: string;
@@ -238,9 +585,11 @@ export interface Staff {
     | "archived"
     | "pending_delete"
     | "archived_deleted"
-    | "deleted";
+    | "deleted"
+    | string;
+  staffName?: string;
   passcode: string;
-  mustChangePasscode: boolean;
+  mustChangePasscode?: boolean;
   failedAttemptCount: number;
   isLocked: boolean;
   lastLoginDate?: string;
@@ -458,6 +807,200 @@ export interface WhatsAppIntelligenceLog {
   duplicatePatternDetected?: boolean;
 }
 
+export interface VendorMarketFeedInsight {
+  id: string;
+  category:
+    | "observation"
+    | "risk"
+    | "demand"
+    | "handling"
+    | "opportunity";
+  severity: "info" | "warning" | "high" | "critical";
+  title: string;
+  message: string;
+  metric?: string;
+}
+
+export interface VendorMarketFeedRecommendation {
+  id: string;
+  priority: "low" | "medium" | "high" | "critical";
+  action: string;
+  reason: string;
+  owner?: string;
+}
+
+export interface VendorMarketFeedScore {
+  value: number;
+  grade: "A" | "B" | "C" | "D" | "E";
+  demandScore: number;
+  conversionScore: number;
+  handlingScore: number;
+  riskScore: number;
+  summary: string;
+}
+
+export interface VendorMarketFeedReport {
+  vendorId: string;
+  vendorName: string;
+  sector?: string;
+  branch?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  totalInteractions: number;
+  uniqueCustomers: number;
+  productEnquiries: number;
+  priceEnquiries: number;
+  stockAvailabilityEnquiries: number;
+  confirmedOrders: number;
+  convertedLeads: number;
+  lostLeads: number;
+  pendingFollowUps: number;
+  complaints: number;
+  deliveryComplaints: number;
+  warrantyIssues: number;
+  fraudAlerts: number;
+  averageResponseTimeMinutes: number;
+  topRequestedProducts: Array<{ name: string; count: number }>;
+  topRequestedCategories: Array<{ name: string; count: number }>;
+  topCustomerLocations: Array<{ name: string; count: number }>;
+  repeatCustomerCount: number;
+  unresolvedIssues: number;
+  score: VendorMarketFeedScore;
+  executiveSummary: string;
+  keyObservations: VendorMarketFeedInsight[];
+  riskWarnings: VendorMarketFeedInsight[];
+  demandSignals: VendorMarketFeedInsight[];
+  customerHandlingWeaknesses: VendorMarketFeedInsight[];
+  remedialRecommendations: VendorMarketFeedRecommendation[];
+  whatsappSummary: string;
+}
+
+export interface MarketTrendFilters {
+  dateFrom?: string;
+  dateTo?: string;
+  vendorId?: string;
+  productId?: string;
+  sector?: string;
+  category?: string;
+  suburb?: string;
+  city?: string;
+  province?: string;
+  country?: string;
+  interactionType?: string;
+  source?: string;
+  buyingIntent?: string;
+  status?: string;
+}
+
+export interface TrendingProduct {
+  productId?: string;
+  productName: string;
+  vendorId?: string;
+  vendorName?: string;
+  sector?: string;
+  category?: string;
+  trendScore: number;
+  totalInteractions: number;
+  productEnquiries: number;
+  priceEnquiries: number;
+  stockQueries: number;
+  clickSignals: number;
+  repeatCustomerInterest: number;
+  confirmedOrders: number;
+  convertedLeads: number;
+  lostLeads: number;
+  complaints: number;
+  topLocations: Array<{ name: string; count: number }>;
+}
+
+export interface LocationTrend {
+  level: "suburb" | "city" | "province" | "country";
+  name: string;
+  totalInteractions: number;
+  topProducts: Array<{ name: string; count: number }>;
+  topSectors: Array<{ name: string; count: number }>;
+  confirmedBuyingIntent: number;
+  lostLeads: number;
+  complaints: number;
+  conversionRate: number;
+  dominantMarketBehaviour: string;
+}
+
+export interface CustomerBehaviourSummary {
+  totalCustomers: number;
+  priceCheckers: number;
+  seriousBuyers: number;
+  repeatBuyers: number;
+  hotLeads: number;
+  lostBuyers: number;
+  complaintRisks: number;
+  convertedCustomers: number;
+  behaviourMix: Array<{ behaviour: string; count: number }>;
+}
+
+export interface VendorMarketPerformance {
+  vendorId: string;
+  vendorName: string;
+  totalInteractions: number;
+  uniqueCustomers: number;
+  topRequestedProducts: Array<{ name: string; count: number }>;
+  confirmedOrders: number;
+  convertedLeads: number;
+  lostLeads: number;
+  pendingFollowUps: number;
+  complaints: number;
+  averageResponseTimeMinutes: number;
+  marketFeedScore: number;
+  remedialRecommendations: string[];
+}
+
+export interface MarketRiskSignal {
+  id: string;
+  type:
+    | "complaint"
+    | "lost_opportunity"
+    | "stock_gap"
+    | "slow_response"
+    | "fraud"
+    | "follow_up";
+  severity: "info" | "warning" | "high" | "critical";
+  title: string;
+  message: string;
+  vendorId?: string;
+  productName?: string;
+  location?: string;
+  count: number;
+}
+
+export interface MarketRecommendation {
+  id: string;
+  priority: "low" | "medium" | "high" | "critical";
+  action: string;
+  reason: string;
+  target?: string;
+}
+
+export interface MarketTrendReport {
+  filters: MarketTrendFilters;
+  generatedAt: string;
+  periodLabel: string;
+  executiveSummary: string;
+  totalInteractions: number;
+  uniqueCustomers: number;
+  confirmedBuyingIntent: number;
+  convertedLeads: number;
+  lostLeads: number;
+  complaints: number;
+  pendingFollowUps: number;
+  trendingProducts: TrendingProduct[];
+  locationTrends: LocationTrend[];
+  customerBehaviour: CustomerBehaviourSummary;
+  vendorPerformance: VendorMarketPerformance[];
+  riskSignals: MarketRiskSignal[];
+  recommendations: MarketRecommendation[];
+  whatsappSummary: string;
+}
+
 export interface DeliveryStaff {
   id: string;
   fullName: string;
@@ -472,6 +1015,29 @@ export interface DeliveryStaff {
   status: "active" | "suspended";
 }
 
+export interface IDeliverProvider {
+  id: string;
+  vendorId: string;
+  providerName: string;
+  phoneNumber: string;
+  whatsappNumber?: string;
+  driverLicenseNumber: string;
+  vehicleNumber?: string;
+  vehicleType?: string;
+  policeClearanceCertificateUrl?: string;
+  nationalIdNumber: string;
+  address?: string;
+  country?: string;
+  province?: string;
+  cityTown?: string;
+  district?: string;
+  suburb?: string;
+  status: "pending" | "verified" | "suspended";
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type FeatureStatus = "active" | "inactive" | "archived";
 export type DeploymentFrequency = "weekly" | "bi-weekly" | "monthly" | "custom";
 export type BIAnalyticsLevel = "none" | "basic" | "standard" | "advanced";
@@ -480,20 +1046,44 @@ export type FarmProducerShowcaseLevel = "none" | "basic" | "full";
 export type CahBoothSupportLevel = "none" | "basic" | "priority";
 export type CahFollowerTrackingLevel = "none" | "basic" | "advanced";
 
+export type PlanEntitlements = {
+  maxImagesPerListing?: number;
+  maxImagesPerProduct?: number;
+};
+
+export type ListingImage = {
+  url: string;
+  alt?: string | null;
+  sortOrder?: number;
+  isPrimary?: boolean;
+};
+
 export interface PricingPlan {
   id: string;
   name: string;
   monthlyPrice: number;
   currency: string;
   maxProducts: number;
+  enableBrandedProducts?: boolean;
+  brandedProductsIncluded?: number | "unlimited";
+  brandedProductAddOnEnabled?: boolean;
+  brandedProductAddOnPrice?: number;
+  brandedProductAddOnQuantity?: number;
+  maxBrandedProducts?: number | "unlimited";
   maxVendorsPerCatalogue: number;
   maxImagesPerCatalogue: number;
+  maxImagesPerListing?: number;
+  maxImagesPerProduct?: number;
   deploymentFrequency: DeploymentFrequency;
   maxDeploymentsPerMonth: number;
   maxCahLinks: number;
+  maxNoticesPerMonth?: number;
   maxBranchesPerVendor: number;
   maxStaffPerVendor: number;
   maxDeliveryContactsPerVendor: number;
+  enableIDeliver?: boolean;
+  maxDeliveryProviders?: number;
+  allowVerifiedDeliveryProvider?: boolean;
   isWhatsAppProductButtonEnabled: boolean;
   isDirectCallProductButtonEnabled: boolean;
   isVendorWhatsAppGroupLinkEnabled: boolean;
@@ -508,6 +1098,8 @@ export interface PricingPlan {
   isVendorStorefrontCahLinksSupported: boolean;
   isVendorStorefrontWhatsAppButtonEnabled: boolean;
   isVendorStorefrontDirectCallButtonEnabled: boolean;
+  enableStorefrontCart?: boolean;
+  enableWhatsappOrders?: boolean;
   maxStorefrontImages: number;
   maxStorefrontDeploymentsPerMonth: number;
   storefrontExpiryPeriodDays?: number;
@@ -528,6 +1120,71 @@ export interface PricingPlan {
   updatedBy: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface VendorEntitlementSnapshot {
+  vendorId: string;
+  planId: string;
+  planName: string;
+  subscriptionStatus: SubscriptionStatus;
+  isLocked: boolean;
+  lockReason?: string;
+  limits: {
+    maxProducts: number;
+    maxBranchesPerVendor: number;
+    maxStaffPerVendor: number;
+    maxDeliveryContactsPerVendor: number;
+    maxDeploymentsPerMonth: number;
+    maxStorefrontDeploymentsPerMonth: number;
+    maxStorefrontImages: number;
+    maxCahLinks: number;
+    maxNoticesPerMonth: number;
+    inventorySpotChecksPerMonth: number;
+    biAnalyticsLevel: BIAnalyticsLevel;
+    isVendorStorefrontEnabled: boolean;
+    enableStorefrontCart?: boolean;
+    enableWhatsappOrders?: boolean;
+  };
+  usage: VendorPlanUsageSnapshot;
+  generatedAt: string;
+}
+
+export interface VendorPlanUsageSnapshot {
+  vendorId: string;
+  monthKey: string;
+  productCount: number;
+  branchCount: number;
+  staffCount: number;
+  deliveryContactCount: number;
+  catalogueGenerationsThisMonth: number;
+  storefrontGenerationsThisMonth: number;
+  noticesUsedThisMonth: number;
+  biReportsGeneratedThisMonth: number;
+  cahLinksUsed: number;
+  inventorySpotChecksUsedThisMonth: number;
+  updatedAt: string;
+}
+
+export interface VendorPlanUsageLedgerEntry {
+  id: string;
+  vendorId: string;
+  usageDate: string;
+  monthKey: string;
+  usageType:
+    | "product_created"
+    | "branch_added"
+    | "staff_invited"
+    | "delivery_contact_added"
+    | "catalogue_generated"
+    | "storefront_generated"
+    | "notice_published"
+    | "bi_report_generated"
+    | "inventory_spot_check_used"
+    | "cah_link_added";
+  quantity: number;
+  sourceId?: string;
+  description?: string;
+  createdAt: string;
 }
 
 export type SubscriptionStatus =
@@ -561,6 +1218,7 @@ export type CollectionRecordStatus =
 export type VendorStatus =
   | "lead"
   | "active"
+  | "pending_review"
   | "suspended"
   | "dormant"
   | "cancelled";
@@ -575,14 +1233,18 @@ export type VendorType =
 export interface Vendor {
   id: string;
   systemCode: string;
+  vendorCode?: string;
   name: string;
   tradingName: string;
   ownerFullName: string;
   sector: string;
+  category?: string;
   businessType: string;
   vendorType: VendorType;
   mainPhone: string;
   whatsappNumber: string;
+  phone?: string;
+  whatsapp?: string;
   email: string;
   country: string;
   province: string;
@@ -617,24 +1279,22 @@ export interface Vendor {
   churnStatus?: "active" | "at_risk" | "churned";
   churnReason?: string;
   assignedStaffId?: string;
+  assignedStaffName?: string;
+  assignedMemberId?: string;
+  assignedMemberName?: string;
+  assignedMemberStaffCode?: string;
+  assignedMemberRole?: string;
+  assignedMemberDesk?: string;
   planId: string; // References PricingPlan.id
   subscriptionStatus: SubscriptionStatus;
+  campaignCode?: string;
+  campaignSource?: string;
+  heardAboutUsVia?: string;
   subscriptionStartDate?: string;
   subscriptionDueDate?: string;
   lastCollectionDate?: string;
   nextFollowUpDate?: string;
   collectionNotes?: string;
-  campaignSource?: string;
-  campaignCode?: string;
-  heardAboutUsVia?:
-    | "Radio"
-    | "TV"
-    | "Roadshow"
-    | "WhatsApp"
-    | "Referral"
-    | "CAH"
-    | "Walk-in"
-    | "Other";
   dataSource: FieldDataSource;
 
   // Traceability
@@ -647,6 +1307,7 @@ export interface Vendor {
   branches: Branch[];
   staff: Staff[];
   deliveryStaff: DeliveryStaff[];
+  deliveryProviders?: IDeliverProvider[];
 }
 
 export type ProductStatus =
@@ -680,6 +1341,7 @@ export interface MasterProduct {
   tags: string[];
   keywords: string[];
   imageUrl?: string;
+  images?: ListingImage[];
   additionalImages?: string[];
   unit?: string;
   searchableText: string;
@@ -692,6 +1354,19 @@ export interface VendorProductOffer {
   id: string;
   vendorId: string;
   productId: string;
+  productMode?: "linked_product" | "branded_product";
+  sourceType?: "master_linked" | "vendor_branded";
+  masterProductId?: string | null;
+  brandOwnerVendorId?: string;
+  isVendorBranded?: boolean;
+  brandDisplayName?: string;
+  brandLogoUrl?: string;
+  brandBannerUrl?: string;
+  category?: string;
+  sector?: string;
+  description?: string;
+  sku?: string;
+  productName?: string;
   branchId?: string;
   sellingPrice: number;
   buyingPrice?: number;
@@ -702,6 +1377,7 @@ export interface VendorProductOffer {
   stockStatus: VendorProductStockStatus;
   vendorSku?: string;
   vendorProductImage?: string;
+  images?: ListingImage[];
   publishToCatalogue: boolean;
   deliveryAvailable: boolean;
   featured: boolean;
@@ -711,7 +1387,42 @@ export interface VendorProductOffer {
   updatedAt: string;
 }
 
-export type ActorType = "backend_staff" | "rpn" | "admin" | "system";
+export interface VendorListItem {
+  id: string;
+  name: string;
+  tradingName?: string;
+  status: VendorStatus;
+  planId?: string;
+  sector?: string;
+  category?: string;
+  province?: string;
+  cityTown?: string;
+  district?: string;
+  suburb?: string;
+  rpnId?: string;
+  readinessScore?: number;
+  productCount?: number;
+  branchCount?: number;
+  updatedAt?: string;
+}
+
+export interface ProductListItem {
+  id: string;
+  name?: string;
+  productName: string;
+  vendorId: string;
+  vendorName?: string;
+  sector?: string;
+  category?: string;
+  status: ProductStatus;
+  publishToCatalogue: boolean;
+  sellingPrice: number;
+  stockQuantity: number;
+  imageThumbUrl?: string;
+  updatedAt?: string;
+}
+
+export type ActorType = "backend_staff" | "rpn" | "admin" | "system" | string;
 
 export type EventType =
   | "VENDOR_CREATED"
@@ -787,10 +1498,12 @@ export type EventType =
   | "STAFF_LOGIN_BLOCKED_SUSPENDED"
   | "STAFF_LOGOUT"
   | "ACCESS_DENIED"
-  | "STAFF_ARCHIVED"
   | "STAFF_DELETE_REQUESTED"
   | "STAFF_DELETE_APPROVED"
-  | "STAFF_DELETE_REJECTED";
+  | "STAFF_DELETE_REJECTED"
+  | "RPN_PIPELINE_UPDATED"
+  | "RPN_PROSPECT_EDITED"
+  | string;
 
 export type VendorStorefrontStatus =
   | "draft"
@@ -924,6 +1637,7 @@ export interface InventorySpotCheck {
   result: SpotCheckResult;
   nextCheckDate?: string;
   status: SpotCheckStatus;
+  completedAt?: string;
   createdBy: string;
   updatedBy: string;
   createdAt: string;
@@ -932,23 +1646,44 @@ export interface InventorySpotCheck {
 
 export interface Product {
   id: string;
+  productMode?: "linked_product" | "branded_product";
+  sourceType?: "master_linked" | "vendor_branded";
+  masterProductId?: string | null;
+  brandOwnerVendorId?: string;
+  isVendorBranded?: boolean;
+  brandDisplayName?: string;
+  brandLogoUrl?: string;
+  brandBannerUrl?: string;
   productId?: string;
   offerId?: string;
   vendorId: string;
   vendorName: string; // snapshot
   branchId: string;
   branchName: string; // snapshot
+  productName?: string;
+  country?: string;
+  province?: string;
+  cityTown?: string;
+  district?: string;
+  suburb?: string;
+  streetAddress?: string;
   sector: string;
   category: string;
   name: string;
   sku: string;
   productCode: string; // barcode
+  barcode?: string;
   brand: string;
   model: string;
   description: string;
   tags: string[];
+  keywords?: string[];
+  searchableText?: string;
+  additionalImages?: string[];
+  images?: ListingImage[];
   unitOfMeasure: string;
   sellingPrice: number;
+  buyingPrice?: number;
   oldPrice?: number;
   stockQuantity: number; // available quantity
   minStockAlert: number;
@@ -1052,6 +1787,7 @@ export interface CatalogueGeneration {
   deletedAt?: string;
   hostedUrl?: string;
   publicSlug?: string;
+  catalogueAnalyticsSnapshot?: any;
   configSnapshot?: {
     vendorIds: string[];
     cahLinkIds: string[];
@@ -1066,7 +1802,6 @@ export interface CatalogueGeneration {
     includeOutOfStock: boolean;
     maxProducts: number;
     maxImages: number;
-    entitlementSummary?: any[];
   };
 }
 
@@ -1083,6 +1818,16 @@ export interface Subscription {
   dueDate: string;
   gracePeriodDays: number;
   status: SubscriptionStatus;
+  addOns?: Array<{
+    addOnKey: "branded_products" | string;
+    enabled: boolean;
+    quantity: number;
+    price: number;
+    billingCycle: "monthly" | "quarterly" | "yearly" | string;
+    startsAt?: string;
+    endsAt?: string;
+    status: "active" | "inactive" | "cancelled" | "expired" | string;
+  }>;
   lastPaymentDate?: string;
   lastCollectionAmount?: number;
   collectionMethod?: CollectionMethod;
@@ -1111,7 +1856,42 @@ export interface CollectionRecord {
   status: CollectionRecordStatus;
   approvedBy?: string;
   approvedAt?: string;
+  receiptNumber?: string;
+  financeTransactionId?: string;
+  rpnCommissionGenerated?: boolean;
   createdAt: string;
+}
+
+export interface VendorSubscriptionPayment {
+  id: string;
+  vendorId: string;
+  vendorName: string;
+  rpnId?: string;
+  rpnName?: string;
+  planId?: string;
+  planName?: string;
+  billingPeriodStart: string;
+  billingPeriodEnd: string;
+  dueDate: string;
+  amountDue: number;
+  amountPaid: number;
+  balanceDue: number;
+  currency: string;
+  paymentStatus:
+    | "unpaid"
+    | "partial"
+    | "paid"
+    | "overdue"
+    | "waived"
+    | "cancelled";
+  paymentDate?: string;
+  paymentMethod?: string;
+  paymentReference?: string;
+  receiptNumber?: string;
+  financeTransactionId?: string;
+  rpnCommissionGenerated?: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type RPNLevel = "Junior RPN" | "Leader RPN" | "IMM";
@@ -1170,13 +1950,313 @@ export interface RPN {
   };
 }
 
+export type RpnChurnBonusType = "fixed" | "percentage_of_recurring_revenue";
+export type RpnAssignmentStatus = "active" | "released" | "transferred";
+export type RpnOnboardingLogStatus = "pending" | "approved" | "rejected" | "duplicate";
+export type RpnCompensationRunStatus =
+  | "draft"
+  | "reviewed"
+  | "approved"
+  | "posted"
+  | "paid"
+  | "cancelled";
+
+export interface RpnCompensationPlan {
+  id: string;
+  name: string;
+  isActive: boolean;
+  wageEnabled: boolean;
+  dailyVendorTarget: number;
+  wageRatePerVendor: number;
+  maxDailyWagePayable: number;
+  portfolioCeiling: number;
+  recurringCommissionEnabled: boolean;
+  recurringCommissionRate: number;
+  churnBonusEnabled: boolean;
+  churnThresholdPercent: number;
+  churnBonusType: RpnChurnBonusType;
+  churnBonusValue: number;
+  autoDisableWageAfterThreshold: boolean;
+  switchToCommissionOnlyAfterMonths: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RpnCompensationPolicy {
+  id: string;
+  rpnId: string;
+  planId: string;
+  wageEnabledOverride?: boolean;
+  commissionOnly: boolean;
+  recurringCommissionRateOverride?: number;
+  movedToCommissionOnlyAt?: string;
+  movedToCommissionOnlyBy?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RpnVendorAssignment {
+  id: string;
+  vendorId: string;
+  vendorName: string;
+  rpnId: string;
+  rpnName: string;
+  status: RpnAssignmentStatus;
+  assignedAt: string;
+  releasedAt?: string;
+  releaseReason?: string;
+  transferredToRpnId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RpnOnboardingLog {
+  id: string;
+  rpnId: string;
+  rpnName: string;
+  vendorId: string;
+  vendorName: string;
+  onboardingDate: string;
+  status: RpnOnboardingLogStatus;
+  qualifiesForWage: boolean;
+  rejectionReason?: string;
+  approvedBy?: string;
+  approvedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RpnCompensationRunLine {
+  id: string;
+  runId: string;
+  rpnId: string;
+  rpnName: string;
+  planId: string;
+  portfolioCount: number;
+  portfolioCeiling: number;
+  openingActivePortfolio: number;
+  churnedVendors: number;
+  churnRatePercent: number;
+  qualifyingOnboardings: number;
+  wageAmount: number;
+  recurringRevenue: number;
+  recurringCommissionAmount: number;
+  churnBonusAmount: number;
+  totalPayable: number;
+  commissionOnly: boolean;
+  overPortfolioCeiling: boolean;
+  readyForCommissionOnly: boolean;
+  notes?: string;
+}
+
+export interface RpnCommissionPosting {
+  id: string;
+  runId: string;
+  ledgerEntryIds: string[];
+  postedAt: string;
+  postedBy?: string;
+  status: "posted" | "reversed";
+}
+
+export interface RpnPaymentBatch {
+  id: string;
+  runId: string;
+  paymentAccountId: string;
+  ledgerEntryIds: string[];
+  paidAt: string;
+  paidBy?: string;
+  totalPaid: number;
+  status: "paid" | "reversed";
+}
+
+export interface RpnCompensationRun {
+  id: string;
+  periodFrom: string;
+  periodTo: string;
+  status: RpnCompensationRunStatus;
+  lines: RpnCompensationRunLine[];
+  wageTotal: number;
+  recurringCommissionTotal: number;
+  churnBonusTotal: number;
+  totalPayable: number;
+  postedAt?: string;
+  paidAt?: string;
+  paymentAccountId?: string;
+  posting?: RpnCommissionPosting;
+  paymentBatch?: RpnPaymentBatch;
+  createdBy?: string;
+  approvedBy?: string;
+  approvedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type RpnCompensationLedgerTransactionType =
+  | "onboarding_wage"
+  | "recurring_commission"
+  | "churn_bonus"
+  | "manual_adjustment"
+  | "wage_reversal"
+  | "commission_reversal"
+  | "bonus_reversal"
+  | "coa_posting"
+  | "payment";
+
+export interface RpnCompensationLedgerEntry {
+  id: string;
+  rpnId: string;
+  rpnName?: string;
+  transactionDate: string;
+  periodFrom: string;
+  periodTo: string;
+  transactionType: RpnCompensationLedgerTransactionType;
+  sourceType: "compensation_run" | "run_line" | "manual" | "coa" | "cashbook" | "reversal";
+  sourceId: string;
+  compensationRunId?: string;
+  vendorId?: string;
+  debitAmount: number;
+  creditAmount: number;
+  runningBalance: number;
+  currency: string;
+  status: "draft" | "approved" | "posted" | "paid" | "reversed" | "cancelled";
+  coaDebitAccountId?: string;
+  coaCreditAccountId?: string;
+  cashbookEntryId?: string;
+  journalEntryId?: string;
+  description: string;
+  createdBy?: string;
+  createdAt: string;
+}
+
+export interface RpnCompensationStatementReport {
+  rpnId: string;
+  rpnName: string;
+  periodFrom: string;
+  periodTo: string;
+  wageEarned: number;
+  recurringCommissionEarned: number;
+  churnBonusEarned: number;
+  adjustments: number;
+  reversals: number;
+  totalEarned: number;
+  amountPaid: number;
+  balanceDue: number;
+  portfolioVendorCount: number;
+  returningVendorCount: number;
+  churnRatePercent: number;
+  commissionRate: number;
+  wageStatus: "enabled" | "disabled" | "commission_only";
+}
+
+export interface RpnPayablesLedgerReport {
+  rpnId: string;
+  rpnName: string;
+  openingBalance: number;
+  wageEarned: number;
+  commissionEarned: number;
+  bonusEarned: number;
+  adjustments: number;
+  reversals: number;
+  payments: number;
+  closingBalance: number;
+}
+
+export interface RpnPortfolioRevenueReport {
+  rpnId: string;
+  rpnName: string;
+  openingPortfolioVendors: number;
+  newVendorsOnboarded: number;
+  returningVendors: number;
+  churnedVendors: number;
+  grossVendorRevenueReceived: number;
+  wageCost: number;
+  commissionCost: number;
+  bonusCost: number;
+  totalRpnCost: number;
+  netRpnContribution: number;
+  portfolioCeilingUsagePercent: number;
+}
+
+export interface RpnChurnRetentionReport {
+  rpnId: string;
+  rpnName: string;
+  openingActiveVendors: number;
+  returningVendors: number;
+  churnedVendors: number;
+  churnPercentage: number;
+  churnThreshold: number;
+  bonusQualification: boolean;
+  bonusAmount: number;
+  highChurnWarning: boolean;
+}
+
+export interface RpnCashbookPaymentReport {
+  paymentDate: string;
+  rpnId: string;
+  rpnName: string;
+  amount: number;
+  paymentAccount: string;
+  paymentMethod: string;
+  reference: string;
+  cashbookEntryId?: string;
+  compensationRunId: string;
+  paidBy?: string;
+  status: string;
+}
+
+export interface RpnProfitabilityReport {
+  rpnId: string;
+  rpnName: string;
+  grossRevenueFromAssignedVendors: number;
+  wageCost: number;
+  commissionCost: number;
+  bonusCost: number;
+  totalRpnCost: number;
+  netContribution: number;
+  costToRevenuePercentage: number;
+  churnImpact: number;
+  portfolioProductivity: number;
+}
+
+export interface RpnCompensationException {
+  id: string;
+  severity: "warning" | "high" | "critical";
+  type:
+    | "duplicate_active_assignment"
+    | "receipt_without_assignment"
+    | "reversed_receipt_after_commission"
+    | "unapproved_onboarding_wage"
+    | "portfolio_ceiling"
+    | "duplicate_vendor_count"
+    | "posted_unpaid"
+    | "unusual_commission"
+    | "commission_only_wage";
+  message: string;
+  rpnId?: string;
+  vendorId?: string;
+  compensationRunId?: string;
+}
+
+export interface RpnCompensationReportFilters {
+  dateFrom?: string;
+  dateTo?: string;
+  rpnId?: string;
+  vendorId?: string;
+  compensationRunId?: string;
+  status?: string;
+  transactionType?: RpnCompensationLedgerTransactionType | "";
+  paymentStatus?: string;
+}
+
 export type CollectionType =
   | "vendor profile"
   | "itred_products"
   | "price update"
   | "image update"
   | "subscription collection"
-  | "follow-up";
+  | "follow-up"
+  | "prospect_details";
 
 export type CollectionStatus =
   | "pending backend entry"
@@ -1210,6 +2290,35 @@ export type CAHLinkType =
   | "RPN Support Group"
   | "Catalogue Distribution Group"
   | "Other";
+
+export type MarketingCampaignType =
+  | "Radio"
+  | "TV"
+  | "Roadshow"
+  | "WhatsApp"
+  | "Flyer"
+  | "Social Media"
+  | "Referral"
+  | "Commerce Access Hub"
+  | "Other";
+
+export interface MarketingCampaign {
+  id: string;
+  campaignName: string;
+  campaignType: MarketingCampaignType;
+  startDate: string;
+  endDate: string;
+  targetArea?: string;
+  targetSector?: string;
+  budget: number;
+  message?: string;
+  channelPartner?: string;
+  assignedRpnIds: string[];
+  campaignCode: string;
+  status: "active" | "completed" | "paused";
+  createdAt: string;
+  updatedAt: string;
+}
 
 export type CAHTargetAudience =
   | "customers"
@@ -1255,6 +2364,7 @@ export interface CAHLink {
   // Customer Support
   supportName?: string;
   supportNumber?: string;
+  supportWhatsappNumber?: string;
   supportLink?: string;
   supportMessageTemplate?: string;
   supportAvailabilityNotes?: string;
@@ -1278,6 +2388,8 @@ export interface CAHLink {
 
   // Internal legacy support
   whatsappUrl: string;
+  url?: string;
+  vendorId?: string;
   showInCatalogue?: boolean;
   locationLink?: string;
   createdBy: string;
@@ -1394,10 +2506,12 @@ export type NotificationType =
   | "vendor_readiness"
   | "subscription_due"
   | "subscription_overdue"
-  | "lead_followup"
+  | "lead_followup" // This might be deprecated in favor of RPNFollowUpTask
   | "catalogue_warning"
   | "customer_feedback"
   | "system_alert"
+  | "finance_report"
+  | "notification"
   | "permission_change";
 export type NotificationPriority = "low" | "medium" | "high" | "critical";
 export type NotificationStatus =
@@ -1429,6 +2543,8 @@ export interface ITredNotification {
   archivedAt?: string;
 }
 
+export type AppNotification = ITredNotification;
+
 export type ApprovalRequestStatus =
   | "pending"
   | "approved"
@@ -1452,6 +2568,9 @@ export interface ApprovalRequest {
     | "rpn_agent_update"
     | "staff_kyc_update"
     | "permission_change"
+    | "finance_report_print"
+    | "rpn_commission_payout"
+    | "Duplicate Vendor Override"
     | "staff_delete";
   recordType: string;
   recordId: string;
@@ -1519,23 +2638,100 @@ export interface StaffTask {
   metadata?: Record<string, any>;
 }
 
-export interface VendorReadinessResult {
-  vendorId: string;
-  vendorName: string;
-  score: number;
-  level: "Ready" | "Needs Attention" | "Critical";
-  missingItems: string[];
-  recommendedActions: string[];
+export interface RPNFollowUpTask {
+  id: string;
+  prospectId: string;
+  prospectName: string;
+  assignedToStaffId: string;
+  assignedToStaffName: string;
+  dueDate: string;
+  status: "Pending" | "Completed" | "Cancelled";
+  notes?: string;
+  completionNotes?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
-export interface EstimatedRevenueGrowth {
-  leadCount: number;
-  estimatedConvertedLeads: number;
-  averageLeadConversionRatePercent: number;
-  averageOrderValueUsd: number;
-  leadRevenueConfidenceFactor: number;
-  estimatedGrossRevenue: number;
-  estimatedRevenueGrowth: number;
+export type StaffMessageType = "direct" | "group" | "task" | "alert";
+export type StaffMessagePriority = "normal" | "high" | "critical";
+export type StaffChatTaskStatus =
+  | "pending"
+  | "in_progress"
+  | "completed"
+  | "overdue";
+
+export interface StaffMessage {
+  id: string;
+  threadId: string;
+  messageType: StaffMessageType;
+  fromStaffId: string;
+  fromStaffName: string;
+  toStaffId?: string;
+  toStaffName?: string;
+  groupId?: string;
+  groupName?: string;
+  targetDesk?: string;
+  targetRole?: string;
+  message: string;
+  priority: StaffMessagePriority;
+  relatedModule?: string;
+  relatedRecordId?: string;
+  taskId?: string;
+  taskTitle?: string;
+  taskDescription?: string;
+  assignedToStaffId?: string;
+  dueDate?: string;
+  taskStatus?: StaffChatTaskStatus;
+  readBy?: string[];
+  readAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StaffChatThread {
+  id: string;
+  threadType: "direct" | "group";
+  participantStaffIds: string[];
+  groupId?: string;
+  groupName?: string;
+  lastMessage?: string;
+  lastMessageAt?: string;
+  unreadBy?: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StaffChatGroup {
+  id: string;
+  groupName: string;
+  targetDesk?: string;
+  targetRole?: string;
+  memberStaffIds?: string[];
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StaffChatMonitorSummary {
+  unreadByStaff: Array<{
+    staffId: string;
+    staffName: string;
+    unreadCount: number;
+  }>;
+  overdueTaskMessages: StaffMessage[];
+  unresolvedCriticalMessages: StaffMessage[];
+  responseDelays: Array<{
+    staffId: string;
+    staffName: string;
+    oldestUnreadAt: string;
+    hoursWaiting: number;
+  }>;
+  activity: Array<{
+    staffId: string;
+    staffName: string;
+    sentCount: number;
+    receivedUnreadCount: number;
+  }>;
 }
 
 export interface FeedbackWhatsAppRoute {
@@ -1558,90 +2754,82 @@ export interface FeedbackWhatsAppRoute {
   updatedAt: string;
 }
 
+export interface VendorReadinessResult {
+  vendorId: string;
+  vendorName: string;
+  score: number;
+  level: "Ready" | "Needs Attention" | "Critical" | string;
+  missingItems: string[];
+  recommendedActions: string[];
+}
+
+export interface EstimatedRevenueGrowth {
+  leadCount: number;
+  estimatedConvertedLeads: number;
+  averageLeadConversionRatePercent: number;
+  averageOrderValueUsd: number;
+  leadRevenueConfidenceFactor: number;
+  estimatedGrossRevenue: number;
+  estimatedRevenueGrowth: number;
+}
+
+export interface RPNAppointment {
+  id: string;
+  [key: string]: any;
+}
+
+export interface RPNInvitationPipelineItem {
+  id: string;
+  [key: string]: any;
+}
+
+export interface CatalogueContactHubSettings {
+  whatsappCommunityGroups: any[];
+  marketingPhoneContacts: any[];
+  marketingWhatsappContacts: any[];
+  updatedAt?: string;
+  seigenLogoUrl?: string;
+  companyLogoUrl?: string;
+  systemLogoUrl?: string;
+}
+
 export interface RPNPerformanceSettings {
-  dailyOnboardingTarget?: number;
-  weeklyOnboardingTarget?: number;
-  monthlyOnboardingTarget?: number;
+  dailyOnboardingThreshold?: number;
+  weeklyOnboardingThreshold?: number;
+  monthlyOnboardingThreshold?: number;
   minimumActiveVendorRetentionRate?: number;
   bonusEligibilityTargetPercent?: number;
   underperformanceAlertDays?: number;
   churnRiskThreshold?: number;
+  churnWarningPercent?: number;
+  minimumCollectionRatePercent?: number;
+  graceDaysBeforeWarning?: number;
   minimumRevenueContributionTarget?: number;
   campaignAttributionWindowDays?: number;
-  dailyOnboardingThreshold: number;
-  weeklyOnboardingThreshold: number;
-  monthlyOnboardingThreshold: number;
-  churnWarningPercent: number;
-  churnWarningRate?: number;
+  subscriptionDueWarningDays?: number;
+  subscriptionOverdueEscalationDays?: number;
   recurringVendorRetentionTarget?: number;
   minimumRecurringRevenueTarget?: number;
-  overdueVendorFollowUpDays?: number;
-  inactiveAssignedVendorDays?: number;
-  minimumCollectionRatePercent: number;
-  graceDaysBeforeWarning: number;
-  subscriptionDueWarningDays: number;
-  subscriptionOverdueEscalationDays: number;
-  enableThresholdAlerts: boolean;
-  requireApprovalForThresholdChange: boolean;
-  updatedAt: string;
+  enableThresholdAlerts?: boolean;
+  requireApprovalForThresholdChange?: boolean;
+  rpnOnboardingCommissionAmount?: number;
+  rpnRecurringCommissionPercent?: number;
+  rpnRecurringCommissionAfterMonths?: number;
+  rpnSalaryDropAfterMonths?: number;
+  rpnPostSalaryRecurringCommissionPercent?: number;
+  rpnCommissionCurrency?: string;
+  updatedAt?: string;
   updatedByStaffId?: string;
   updatedByName?: string;
-}
-
-export type MarketingCampaignType =
-  | "Radio"
-  | "TV"
-  | "Roadshow"
-  | "WhatsApp"
-  | "Flyer"
-  | "Social Media"
-  | "Referral"
-  | "Commerce Access Hub"
-  | "Other";
-
-export type MarketingCampaignStatus =
-  | "draft"
-  | "active"
-  | "completed"
-  | "paused"
-  | "cancelled";
-
-export interface MarketingCampaign {
-  id: string;
-  campaignName: string;
-  campaignType: MarketingCampaignType;
-  startDate: string;
-  endDate: string;
-  targetArea: string;
-  targetSector: string;
-  budget: number;
-  message: string;
-  channelPartner?: string;
-  assignedRpnIds: string[];
-  campaignCode: string;
-  status: MarketingCampaignStatus;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface CampaignPerformance {
-  campaignId: string;
-  vendorsOnboarded: number;
-  revenueGenerated: number;
-  activeVendors: number;
-  churnedVendors: number;
-  costPerVendor: number;
-  revenuePerDollarSpent: number;
-  retentionRate: number;
-  bestRpn: string;
-  bestArea: string;
-  bestSector: string;
 }
 
 export interface SystemSettings {
   seigenLogoUrl?: string;
   feedbackWhatsAppRoutes?: FeedbackWhatsAppRoute[];
   defaultFeedbackWhatsAppNumber?: string;
+  catalogueSupportTitle?: string;
+  catalogueSupportMessage?: string;
+  catalogueSupportWhatsAppNumber?: string;
   syncEndpointUrl?: string;
   rpnPerformanceSettings?: RPNPerformanceSettings;
   vendorReadinessTaskThreshold?: number;
@@ -1650,6 +2838,11 @@ export interface SystemSettings {
   averageLeadConversionRatePercent?: number;
   averageOrderValueUsd?: number;
   leadRevenueConfidenceFactor?: number;
+  financeCustomSubTypes?: Partial<Record<AccountType, string[]>>;
+  customBusinessTypes?: string[];
+  customSectors?: string[];
+  customProductCategories?: Partial<Record<string, string[]>>;
+  catalogueArchiveRetentionDays?: number;
   enableSessionTimeout?: boolean;
   sessionTimeoutMinutes?: number;
   updatedAt?: string;
@@ -1686,11 +2879,13 @@ export interface StaffAuditLog {
     | "EXPORT_DOWNLOADED"
     | "SYSTEM_SETTING_CHANGED"
     | "TASK_CREATED"
-    | "STAFF_TASK_CREATED"
     | "TASK_STATUS_UPDATED"
     | "TASK_REVIEWED"
     | "TASK_CANCELLED"
-    | "NOTIFICATION_UPDATED";
+    | "NOTIFICATION_UPDATED"
+    | "REPORT_PRINTED"
+    | "REPORT_EXPORT_REQUESTED"
+    | string;
   severity: "info" | "warning" | "high" | "critical";
   staffId: string;
   staffName: string;
@@ -1706,12 +2901,21 @@ export interface StaffAuditLog {
     | "pricing"
     | "subscription"
     | "staff"
+    | "roles"
     | "approval"
     | "staff_tasks"
     | "notifications"
-    | "vendor_readiness"
+    | "catalogue_archive"
+    | "finance"
+    | "finance_reports"
     | "settings"
-    | "analytics";
+    | "analytics"
+    | "rpn"
+    | "system"
+    | "staff_chat"
+    | "vendor_readiness"
+    | "vendor_products"
+    | string;
   action: string;
   recordType?: string;
   recordId?: string;
@@ -1727,4 +2931,186 @@ export interface StaffAuditLog {
   };
   sessionId?: string;
   createdAt: string;
+}
+
+export type PipelineStage =
+  | "New Prospect"
+  | "Contacted"
+  | "Introduction Sent"
+  | "Interested"
+  | "Follow-up Required"
+  | "Demo Scheduled"
+  | "Negotiation"
+  | "Ready for Onboarding"
+  | "Onboarded"
+  | "Not Interested"
+  | "Dormant"
+  | "Rejected"
+  // Legacy pipeline stages
+  | "New Query"
+  | "Invitation Sent"
+  | "Appointment Set"
+  | "Visited / Demo Done"
+  | "Business Details Collected"
+  | "Products Requested"
+  | "Onboarding Started"
+  | "Converted to Vendor"
+  | "Deferred"
+  | "Closed / Lost";
+
+export const PROSPECT_PIPELINE_STAGES: PipelineStage[] = [
+  "New Prospect",
+  "Contacted",
+  "Introduction Sent",
+  "Interested",
+  "Follow-up Required",
+  "Demo Scheduled",
+  "Negotiation",
+  "Ready for Onboarding",
+  "Onboarded",
+  "Not Interested",
+  "Dormant",
+  "Rejected",
+];
+
+export type ProspectSourceType =
+  | "Phone Call"
+  | "WhatsApp Introduction"
+  | "Referral"
+  | "Field Visit"
+  | "Walk-in"
+  | "Marketing Response"
+  | "Other";
+
+export const PROSPECT_SOURCE_TYPES: ProspectSourceType[] = [
+  "Phone Call",
+  "WhatsApp Introduction",
+  "Referral",
+  "Field Visit",
+  "Walk-in",
+  "Marketing Response",
+  "Other",
+];
+
+export interface ProspectActivityLog {
+  id: string;
+  prospectId: string;
+  actionType: string;
+  actionLabel: string;
+  oldValue?: string;
+  newValue?: string;
+  note?: string;
+  createdBy: string;
+  createdByRole?: string;
+  createdAt: string;
+}
+
+export type ProspectPriority = "Low" | "Medium" | "High" | "Urgent" | "Critical";
+
+export const PROSPECT_PRIORITIES: ProspectPriority[] = [
+  "Low",
+  "Medium",
+  "High",
+  "Urgent",
+  "Critical",
+];
+
+export const PROSPECT_COST_CATEGORIES = [
+  "estimatedCost",
+  "transportCost",
+  "airtimeCost",
+  "otherCost",
+  "totalCost",
+] as const;
+
+export type RPNProspectSource =
+  | "Phone"
+  | "WhatsApp Intro"
+  | "Referral"
+  | "Field Visit"
+  | "Other";
+
+export interface RPNProspectQuery {
+  id: string;
+  prospectName?: string;
+  contactPerson?: string;
+  businessName?: string;
+  phone?: string;
+  whatsapp?: string;
+  whatsappNumber?: string;
+  sector?: string;
+  category?: string;
+  location?: string;
+  suburb?: string;
+  district?: string;
+  city?: string;
+  querySource?: RPNProspectSource | string;
+  sourceType?: ProspectSourceType | string;
+  sourceName?: string;
+  referredBy?: string;
+  campaignName?: string;
+  urgency?: UrgencyLevel;
+  priority?: ProspectPriority;
+  notes?: string;
+  introLetterSent?: boolean;
+  phoneCallMade?: boolean;
+  taskObjective?: string;
+  costFactors?: string | number;
+  estimatedCost?: number;
+  transportCost?: number;
+  airtimeCost?: number;
+  otherCost?: number;
+  totalCost?: number;
+  estimatedTransportCost?: number;
+  estimatedAirtimeCost?: number;
+  estimatedOtherCost?: number;
+  totalEstimatedCost?: number;
+  actualTransportCost?: number;
+  actualAirtimeCost?: number;
+  actualOtherCost?: number;
+  totalActualCost?: number;
+  costNotes?: string;
+  lastActivityDate?: string;
+  lastActivityNote?: string;
+  createdAt: string;
+  updatedAt: string;
+  createdBy?: string;
+  pipelineStage: PipelineStage;
+  stageUpdatedAt: string;
+  stageUpdatedBy: string;
+  stageHistory: Array<{
+    stage: PipelineStage;
+    enteredAt: string;
+    enteredByStaffId?: string;
+    enteredByStaffName?: string;
+    notes?: string;
+    fromStage?: PipelineStage;
+  }>;
+  assignedRpnId?: string;
+  assignedRpnName?: string;
+  assignedStaffId?: string;
+  assignedStaffName?: string;
+  assignmentDate?: string;
+  assignmentRole?: "Owner" | "Support" | "Observer" | string;
+  nextFollowUpDate?: string;
+  followUpDate?: string;
+  timelineNotes?: string;
+  status?: "Converted" | string;
+  conversionDate?: string;
+  activityHistory?: ProspectActivityLog[];
+}
+
+export interface RPNWorkflowAnalytics {
+  totalProspects: number;
+  prospectsToday: number;
+  invitationsToday: number;
+  appointmentsBookedToday: number;
+  appointmentsCompletedToday: number;
+  conversionsToday: number;
+  overdueFollowUps: number;
+  conversionRate: number;
+  bestSource: string;
+  bestSector: string;
+  bestArea: string;
+  averageDaysToConversion: number;
 }

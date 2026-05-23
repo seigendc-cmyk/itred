@@ -10,6 +10,8 @@ import {
   deleteDoc,
   serverTimestamp,
 } from "firebase/firestore";
+import { CACHE_TTL, dataCacheService } from "./dataCacheService.ts";
+import { readDiagnosticsService } from "./readDiagnosticsService.ts";
 
 const STAFF_KEY = "itred_staff_records";
 const ROLE_TEMPLATES_KEY = "itred_role_templates";
@@ -196,6 +198,10 @@ const DEFAULT_STAFF: Staff[] = [
       roleMenuPermissions: "full",
       staffAccessLogs: "full",
       systemSettings: "full",
+      financeDesk: "full",
+      cashBankManager: "full",
+      rpnPaymentsLedger: "full",
+      financeReports: "full",
       staffTasks: "full",
       notifications: "full",
     },
@@ -211,6 +217,21 @@ const DEFAULT_STAFF: Staff[] = [
       "staffTasks.updateStatus": true,
       "staffTasks.review": true,
       "staffTasks.cancel": true,
+      "staffChat.view": true,
+      "staffChat.sendDirect": true,
+      "staffChat.sendGroup": true,
+      "staffChat.assignTask": true,
+      "staffChat.monitor": true,
+      "staffChat.deleteMessage": true,
+      "roles.viewPermissions": true,
+      "roles.editPermissions": true,
+      "roles.createRoleTemplate": true,
+      "roles.deleteRoleTemplate": true,
+      "roles.assignRoleToStaff": true,
+      "roles.auditPermissionChanges": true,
+      "staff.editPermissions": true,
+      "staff.manage": true,
+      "system.settings.edit": true,
     },
     createdBy: "system",
     updatedBy: "system",
@@ -319,7 +340,7 @@ const DEFAULT_STAFF: Staff[] = [
   },
 ];
 
-const ROLE_TEMPLATES_OBJECT: Record<string, MenuPermissions> = {
+const ROLE_TEMPLATES_OBJECT: Record<string, any> = {
   SysAdmin: {
     dashboard: "full",
     vendorManagement: "full",
@@ -347,6 +368,10 @@ const ROLE_TEMPLATES_OBJECT: Record<string, MenuPermissions> = {
     staffAccessLogs: "full",
     systemSettings: "full",
     rpnPerformance: "full",
+    financeDesk: "full",
+    cashBankManager: "full",
+    rpnPaymentsLedger: "full",
+    financeReports: "full",
     staffTasks: "full",
     notifications: "full",
     howTo: "view",
@@ -378,6 +403,10 @@ const ROLE_TEMPLATES_OBJECT: Record<string, MenuPermissions> = {
     staffAccessLogs: "full",
     systemSettings: "full",
     rpnPerformance: "full",
+    financeDesk: "full",
+    cashBankManager: "full",
+    rpnPaymentsLedger: "full",
+    financeReports: "full",
     staffTasks: "full",
     notifications: "full",
     howTo: "view",
@@ -481,17 +510,39 @@ const ROLE_TEMPLATES_OBJECT: Record<string, MenuPermissions> = {
 
 export const staffService = {
   getAllStaff: (): Staff[] => {
-    return getLocalStaff();
+    const cached = dataCacheService.getCached<Staff[]>("staff-list", CACHE_TTL.STAFF);
+    if (cached) return cached;
+    const staff = getLocalStaff();
+    dataCacheService.setCached("staff-list", staff);
+    readDiagnosticsService.track("staffService", STAFF_KEY, "getAllStaff(local)", staff.length);
+    return staff;
+  },
+
+  getActive: (): Staff[] => {
+    return staffService.getAllStaff().filter((staff) => staff.status === "active");
+  },
+
+  getRecent: (limit = 100): Staff[] => {
+    return staffService
+      .getAllStaff()
+      .sort(
+        (a, b) =>
+          new Date(b.updatedAt || b.createdAt || 0).getTime() -
+          new Date(a.updatedAt || a.createdAt || 0).getTime(),
+      )
+      .slice(0, limit);
   },
 
   loadStaffFromFirebase: async (): Promise<Staff[]> => {
     try {
       const remoteStaff = await loadStaffFromFirestore();
+      readDiagnosticsService.track("staffService", FIRESTORE_STAFF_COLLECTION, "loadStaffFromFirebase", remoteStaff.length);
       console.log(
         `[Firebase Diagnostic] Loaded ${remoteStaff.length} staff records from Firestore collection: ${FIRESTORE_STAFF_COLLECTION}`,
       );
 
       saveLocalStaff(remoteStaff);
+      dataCacheService.setCached("staff-list", remoteStaff);
       return remoteStaff;
     } catch (error) {
       console.warn(
@@ -542,6 +593,7 @@ export const staffService = {
     await validateUniqueStaffIdentity(staffToSave);
 
     upsertLocalStaff(staffToSave);
+    dataCacheService.clearCache("staff-list");
 
     try {
       console.log(
@@ -561,6 +613,7 @@ export const staffService = {
   deleteStaff: (id: string): void => {
     const allStaff = getLocalStaff().filter((staff) => staff.id !== id);
     saveLocalStaff(allStaff);
+    dataCacheService.clearCache("staff-list");
 
     void deleteDoc(doc(db, FIRESTORE_STAFF_COLLECTION, id)).catch((error) => {
       console.error(`Failed to delete staff ${id} from Firebase.`, error);
@@ -587,6 +640,12 @@ export const staffService = {
   },
 
   getDefaultMenuPermissions: (role: string): MenuPermissions => {
+    const cached = dataCacheService.getCached<Record<string, MenuPermissions>>(
+      "role-templates",
+      CACHE_TTL.ROLES,
+    );
+    if (cached) return cached[role] || {};
+    dataCacheService.setCached("role-templates", staffService.ROLE_TEMPLATES);
     return staffService.ROLE_TEMPLATES[role] || {};
   },
 
@@ -728,9 +787,10 @@ export const staffService = {
     return { totalRepaired };
   },
 
-  saveRoleTemplates: (templates: Record<string, MenuPermissions>): void => {
+  saveRoleTemplates: (templates: Record<string, any>): void => {
     localStorageService.set(ROLE_TEMPLATES_KEY, templates);
     Object.assign(staffService.ROLE_TEMPLATES, templates);
+    dataCacheService.clearCache("role-templates");
 
     void setDoc(
       doc(db, FIRESTORE_SETTINGS_COLLECTION, "role_templates"),

@@ -14,45 +14,89 @@ function safeString(value, fallback = "") {
   return String(value).slice(0, 500);
 }
 
+function safeNullableString(value) {
+  if (value === undefined || value === null || value === "") return null;
+  return String(value).slice(0, 500);
+}
+
 function safeId(value, fallback) {
   const raw = safeString(value, fallback);
   return raw.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 120);
 }
 
+function sanitizeValue(value) {
+  if (value === undefined) return null;
+  if (value === null) return null;
+  if (Array.isArray(value)) return value.map(sanitizeValue);
+  if (typeof value === "object") {
+    const clean = {};
+    for (const [key, nestedValue] of Object.entries(value)) {
+      clean[key] = sanitizeValue(nestedValue);
+    }
+    return clean;
+  }
+  return value;
+}
+
 function normalizeEvent(raw, batchId, req) {
   const eventId = safeId(raw.eventId, `evt_${Date.now()}_${Math.random().toString(36).slice(2)}`);
+  const createdAt = safeString(raw.createdAt || raw.timestamp, nowIso());
+  const sessionId = safeString(raw.sessionId || raw.deviceSessionId || "");
+  const metadata = sanitizeValue(raw.metadata || raw.payload || {});
 
   return {
     eventId,
     batchId,
+    catalogueId: safeNullableString(raw.catalogueId),
+    catalogueSerial: safeNullableString(raw.catalogueSerial),
+    vendorId: safeNullableString(raw.vendorId),
+    vendorName: safeNullableString(raw.vendorName),
+    productId: safeNullableString(raw.productId),
+    productName: safeNullableString(raw.productName),
     eventType: safeString(raw.eventType, "UNKNOWN"),
-    timestamp: safeString(raw.timestamp, nowIso()),
+    searchTerm: safeNullableString(raw.searchTerm),
+    city: safeNullableString(raw.city),
+    suburb: safeNullableString(raw.suburb),
+    source: safeString(raw.source || raw.sourceType || "offline_catalogue"),
+    createdAt,
+    timestamp: createdAt,
+    synced: false,
     receivedAt: nowIso(),
-
-    source: safeString(raw.source || raw.sourceType || "unknown"),
-    sourceType: safeString(raw.sourceType || ""),
-    deviceSessionId: safeString(raw.deviceSessionId || ""),
-
-    catalogueId: safeString(raw.catalogueId || ""),
-    storefrontId: safeString(raw.storefrontId || ""),
-    vendorId: safeString(raw.vendorId || ""),
-    vendorName: safeString(raw.vendorName || ""),
-    productId: safeString(raw.productId || ""),
-    productName: safeString(raw.productName || ""),
-    leadRef: safeString(raw.leadRef || ""),
-
-    sector: safeString(raw.sector || ""),
-    category: safeString(raw.category || ""),
-
-    userAgent: safeString(req.headers["user-agent"] || "", ""),
+    userAgent: safeString(raw.userAgent || req.headers["user-agent"] || "", ""),
+    sessionId,
+    deviceSessionId: sessionId,
+    storefrontId: safeNullableString(raw.storefrontId),
+    leadRef: safeNullableString(raw.leadRef || metadata.leadRef),
+    sector: safeNullableString(raw.sector || metadata.sector),
+    category: safeNullableString(raw.category || metadata.category),
     ipHashSource: safeString(req.ip || req.headers["x-forwarded-for"] || "", ""),
-
-    payload: raw.payload && typeof raw.payload === "object" ? raw.payload : {},
+    metadata,
+    payload: metadata,
   };
 }
 
 function mapCollectionForEvent(eventType) {
   switch (eventType) {
+    case "catalogue_open":
+    case "product_view":
+    case "product_click":
+    case "share_click":
+    case "catalogue_expired_view":
+      return "itred_catalogue_activity_events";
+
+    case "product_search":
+      return "itred_product_demand_signals";
+
+    case "vendor_click":
+    case "whatsapp_click":
+    case "call_click":
+      return "itred_vendor_impact_events";
+
+    case "cart_add":
+    case "cart_remove":
+    case "order_created":
+      return "itred_catalogue_commerce_events";
+
     case "SURVEY_ANSWERED":
     case "EXPIRY_SURVEY_OPENED":
       return "itred_catalogue_survey_responses";
@@ -122,10 +166,10 @@ exports.syncOfflineCommerceEvents = onRequest(
       const batchRecord = {
         batchId,
         receivedAt: nowIso(),
-        source: safeString(body.source || "unknown"),
-        catalogueId: safeString(body.catalogueId || ""),
-        storefrontId: safeString(body.storefrontId || ""),
-        deviceSessionId: safeString(body.deviceSessionId || ""),
+        source: safeString(body.source || (events[0] && events[0].source) || "offline_catalogue"),
+        catalogueId: safeString(body.catalogueId || (events[0] && events[0].catalogueId) || ""),
+        storefrontId: safeString(body.storefrontId || (events[0] && events[0].storefrontId) || ""),
+        deviceSessionId: safeString(body.deviceSessionId || (events[0] && (events[0].sessionId || events[0].deviceSessionId)) || ""),
         sentAt: safeString(body.sentAt || ""),
         eventCount: events.length,
         userAgent: safeString(req.headers["user-agent"] || ""),
@@ -143,10 +187,10 @@ exports.syncOfflineCommerceEvents = onRequest(
         normalizeEvent(
           {
             ...raw,
-            source: body.source,
+            source: body.source || raw.source,
             catalogueId: raw.catalogueId || body.catalogueId,
             storefrontId: raw.storefrontId || body.storefrontId,
-            deviceSessionId: raw.deviceSessionId || body.deviceSessionId,
+            deviceSessionId: raw.deviceSessionId || raw.sessionId || body.deviceSessionId,
           },
           batchId,
           req

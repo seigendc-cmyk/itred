@@ -36,7 +36,137 @@ const normalizeImageUrl = (imageUrl?: string) => {
   return `data:image/webp;base64,${imageUrl}`;
 };
 
+const getProductGalleryImages = (product: Product, limit = 6) => {
+  const raw = [
+    ...(((product as any).images || []) as any[]),
+    ...(((product as any).galleryImages || []) as any[]),
+    ...(((product as any).imageUrls || []) as any[]),
+    ...(product.additionalImages || []),
+    product.imageUrl,
+  ];
+  const seen = new Set<string>();
+  return raw
+    .map((item: any) =>
+      String(typeof item === "string" ? item : item?.url || item?.imageUrl || "").trim(),
+    )
+    .filter((url) => {
+      if (!url || seen.has(url)) return false;
+      seen.add(url);
+      return true;
+    })
+    .slice(0, limit);
+};
+
 const smallerText = (text: string) => escapeHtml(text || "");
+
+const normalizeLookup = (value?: string | null) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const getCahWhatsappUrl = (link?: Partial<CAHLink> | any) => {
+  const candidates = [
+    link?.whatsappCommunityLink,
+    link?.whatsappGroupLink,
+    link?.whatsappChannelLink,
+    link?.catalogueDistributionGroupLink,
+    link?.customerDiscoveryGroupLink,
+    link?.vendorSupportGroupLink,
+    link?.supportLink,
+    link?.whatsappUrl,
+    link?.url,
+  ];
+  return (
+    candidates
+      .map((candidate) => String(candidate || "").trim())
+      .find((candidate) =>
+        /^https:\/\/(chat\.whatsapp\.com|wa\.me|www\.whatsapp\.com|whatsapp\.com)\//i.test(
+          candidate,
+        ),
+      ) || ""
+  );
+};
+
+const isActiveCahLink = (link?: Partial<CAHLink> | any) => {
+  const status = normalizeLookup(link?.status || (link?.isActive ? "active" : ""));
+  return link?.isActive === true || status === "active";
+};
+
+const resolveVendorsProductsDiscoveryCahUrl = (
+  cahLinks: CAHLink[],
+  defaultCAHLink?: string,
+) => {
+  const activeLinks = cahLinks.filter(
+    (link) => isActiveCahLink(link) && !!getCahWhatsappUrl(link),
+  );
+  const targetName = normalizeLookup("Vendors Products Discovery");
+  const exactLink = activeLinks.find(
+    (link: any) =>
+      normalizeLookup(link.title || link.name || link.whatsappCommunityName) ===
+      targetName,
+  );
+  const allValues = new Set(["all sector", "all sections", "all"]);
+  const allSectorLink = activeLinks.find((link: any) => {
+    const sector = normalizeLookup(link.sector);
+    const category = normalizeLookup(link.category);
+    return allValues.has(sector) || allValues.has(category);
+  });
+  const defaultLink = String(defaultCAHLink || "").trim();
+  const validDefault = /^https:\/\/(chat\.whatsapp\.com|wa\.me|www\.whatsapp\.com|whatsapp\.com)\//i.test(
+    defaultLink,
+  )
+    ? defaultLink
+    : "";
+  const resolvedLink = exactLink || allSectorLink;
+  const cahHref = resolvedLink ? getCahWhatsappUrl(resolvedLink) : validDefault;
+  const source = exactLink
+    ? "vendors-products-discovery"
+    : allSectorLink
+      ? "all-sector"
+      : validDefault
+        ? "default"
+        : "disabled";
+
+  if (!cahHref) {
+    console.warn("Vendors Products Discovery Access Hub link not found.");
+  }
+  console.table({
+    resolvedCAHLink: cahHref,
+    source,
+  });
+
+  return { cahHref, source };
+};
+
+const WHATSAPP_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 11.8a8.5 8.5 0 0 1-12.6 7.4L4 20.2l1.1-3.8A8.5 8.5 0 1 1 20.5 11.8Z"></path><path d="M8.8 8.2c.2-.5.4-.5.7-.5h.5c.2 0 .4.1.5.4l.7 1.7c.1.3.1.5-.1.7l-.4.5c-.1.1-.2.3 0 .5.5.9 1.2 1.7 2.4 2.3.3.2.4.1.6-.1l.7-.8c.2-.2.4-.2.7-.1l1.6.8c.3.1.4.3.4.6-.1.7-.6 1.4-1.2 1.6-.6.3-2.7.2-5-1.7-2.1-1.7-3.4-3.8-3.5-5 0-.4.1-.7.3-1Z"></path></svg>';
+const CALL_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.4 19.4 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.3 1.8.6 2.6a2 2 0 0 1-.5 2.1L8 9.6a16 16 0 0 0 6.4 6.4l1.2-1.2a2 2 0 0 1 2.1-.5c.8.3 1.7.5 2.6.6a2 2 0 0 1 1.7 2Z"></path></svg>';
+const SEARCH_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path></svg>';
+const CLEAR_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path></svg>';
+const CART_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="21" r="1"></circle><circle cx="20" cy="21" r="1"></circle><path d="M1 1h4l2.7 13.4a2 2 0 0 0 2 1.6h8.7a2 2 0 0 0 2-1.6L23 6H6"></path></svg>';
+const MENU_DOTS_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.5"></circle><circle cx="12" cy="12" r="1.5"></circle><circle cx="12" cy="19" r="1.5"></circle></svg>';
+const CLOSE_ICON_SVG = CLEAR_ICON_SVG;
+
+const iconButton = (
+  className: string,
+  label: string,
+  icon: string,
+  attrs: string = "",
+  text?: string,
+) =>
+  `<button class="${className}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}" ${attrs}>${icon}${text ? `<span>${escapeHtml(text)}</span>` : ""}</button>`;
+
+const iconLink = (
+  className: string,
+  label: string,
+  icon: string,
+  href: string,
+  attrs: string = "",
+  text?: string,
+) =>
+  `<a href="${href}" class="${className}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}" ${attrs}>${icon}${text ? `<span>${escapeHtml(text)}</span>` : ""}</a>`;
 
 export const generateVendorStorefrontHtml = (
   vendor: Vendor,
@@ -52,9 +182,12 @@ export const generateVendorStorefrontHtml = (
   expiryDate?: string,
   allowWhatsApp: boolean = false,
   allowCall: boolean = false,
+  allowCart: boolean = false,
+  allowWhatsappOrders: boolean = false,
   selectedVendorId?: string,
   feedbackWhatsAppNumber?: string,
   syncEndpointUrl?: string,
+  defaultCAHLink?: string,
 ) => {
   const vendorProducts = selectedVendorId
     ? products.filter((p) => p.vendorId === selectedVendorId)
@@ -68,6 +201,17 @@ export const generateVendorStorefrontHtml = (
     : "";
   const farmProduceProducts = vendorProducts.filter((p) => p.isFarmProduce);
   const hasFarmProduce = farmProduceProducts.length > 0;
+  const cleanPhone = (num?: string) => (num ? num.replace(/[^0-9+]/g, "") : "");
+  const cleanWa = (num?: string) => (num ? num.replace(/[^0-9]/g, "") : "");
+  const cartEnabled = !!allowCart && !!allowWhatsappOrders;
+  const getBranchForProduct = (product: Product) =>
+    branches.find((branch) => branch.id && branch.id === product.branchId) ||
+    branches.find(
+      (branch) =>
+        branch.name &&
+        product.branchName &&
+        branch.name.toLowerCase() === product.branchName.toLowerCase(),
+    );
 
   if (vendorProducts.length === 0) {
     // We will handle the empty state rendering later in the function,
@@ -79,7 +223,11 @@ export const generateVendorStorefrontHtml = (
       ? '<div style="grid-column: 1 / -1; padding: 24px; text-align: center; color: var(--muted); background: #f9f9f9; border: 1px dashed var(--border); border-radius: 8px;">No products available for this vendor.</div>'
       : vendorProducts
           .map((p) => {
-            const imageSrc = normalizeImageUrl(p.imageUrl);
+            const gallery = getProductGalleryImages(p, 6);
+            if (getProductGalleryImages(p, 99).length > gallery.length) {
+              console.warn("Listing exceeded image limit, truncating to first 6 images.");
+            }
+            const imageSrc = normalizeImageUrl(gallery[0] || p.imageUrl);
             const searchString = escapeHtml(
               [
                 p.name,
@@ -100,40 +248,85 @@ export const generateVendorStorefrontHtml = (
             );
             const stockClass = p.stockQuantity > 0 ? "stock-in" : "stock-out";
             const stockText = p.stockQuantity > 0 ? "In Stock" : "Out of Stock";
+            const isOutOfStock = (Number(p.stockQuantity) || 0) <= 0;
+            const allowsBackorder = !!(p as any).allowBackorder;
+            const productBranch = getBranchForProduct(p);
+            const productWhatsapp =
+              cleanWa(productBranch?.whatsapp) || cleanWa(vendor.whatsappNumber);
+            const productPhone =
+              cleanPhone(productBranch?.phone) || cleanPhone(vendor.mainPhone);
+            const waButton = allowWhatsApp && productWhatsapp
+              ? iconButton(
+                  "icon-btn icon-btn-whatsapp product-wa-btn",
+                  "Order on WhatsApp",
+                  WHATSAPP_ICON_SVG,
+                  `data-product-id="${escapeHtml(p.id)}" data-action="whatsapp"`,
+                )
+              : "";
+            const callButton = allowCall && productPhone
+              ? iconButton(
+                  "icon-btn icon-btn-call product-call-btn",
+                  "Call Vendor",
+                  CALL_ICON_SVG,
+                  `data-product-id="${escapeHtml(p.id)}" data-action="call"`,
+                )
+              : "";
+            const cartButton =
+              cartEnabled && isOutOfStock && !allowsBackorder
+                ? `<button class="cart-add-btn disabled" type="button" disabled aria-disabled="true">Out of stock</button>`
+                : cartEnabled
+                  ? `<button class="cart-add-btn product-cart-btn" type="button" data-product-id="${escapeHtml(p.id)}" data-action="cart">Add to Cart</button>`
+                  : "";
+
+            const modeBadge =
+              p.productMode === "branded_product" ? "BRANDED" : "LINKED";
+            const brandName =
+              p.productMode === "branded_product" && p.brandDisplayName
+                ? p.brandDisplayName
+                : p.brand || p.category || vendor.sector || "General";
+            const rawPrice = (p as any).sellingPrice;
+            const numericPrice = Number(rawPrice);
+            const hasPrice =
+              rawPrice !== undefined &&
+              rawPrice !== null &&
+              rawPrice !== "" &&
+              Number.isFinite(numericPrice);
+            const priceLabel = hasPrice
+              ? `${escapeHtml((p as any).currency || (vendor as any).currency || "USD")} ${numericPrice.toFixed(2)}`
+              : "Price on enquiry";
 
             return `
-      <article class="product-card" data-id="${p.id}" data-search="${searchString}">
-        <div class="product-img-wrapper" onclick="openProductModal('${p.id}')">
+      <article class="product-card" data-id="${escapeHtml(p.id)}" data-search="${searchString}">
+        <div class="product-img-wrapper product-view-btn" data-product-id="${escapeHtml(p.id)}" data-action="view" role="button" tabindex="0">
           <img src="${imageSrc}" loading="lazy" alt="${escapeHtml(p.name)}" onerror="this.style.display='none'" />
         </div>
         <div class="product-info">
-          <div class="product-brand">${escapeHtml(p.brand || p.category || vendor.sector || "General")}</div>
-          <h3 class="product-name" onclick="openProductModal('${p.id}')">${escapeHtml(p.name)}</h3>
-          <div class="product-price">USD ${p.sellingPrice.toFixed(2)}</div>
+          <div class="product-brand">${escapeHtml(brandName)} · ${modeBadge}</div>
+          <h3 class="product-name product-view-btn" data-product-id="${escapeHtml(p.id)}" data-action="view" role="button" tabindex="0">${escapeHtml(p.name)}</h3>
+          <div class="product-price">${priceLabel}</div>
           <div class="product-meta">
             <span class="stock-status ${stockClass}">${stockText}</span>
             <span class="branch">${escapeHtml(p.branchName || "Main")}</span>
           </div>
-          <div class="product-actions">
-            <button class="btn btn-wa" onclick="orderWhatsApp('${p.id}')">WhatsApp</button>
-            <button class="btn btn-call" onclick="callVendor('${p.id}')">Call</button>
+          <div class="product-actions icon-action-row">
+            ${waButton}
+            ${callButton}
+            ${iconButton("icon-btn icon-btn-orange product-view-btn", "View product details", SEARCH_ICON_SVG, `data-product-id="${escapeHtml(p.id)}" data-action="view"`)}
           </div>
+          ${cartButton}
         </div>
       </article>
     `;
           })
           .join("");
 
-  const cleanPhone = (num?: string) => (num ? num.replace(/[^0-9+]/g, "") : "");
-  const cleanWa = (num?: string) => (num ? num.replace(/[^0-9]/g, "") : "");
-
   const branchRows = branches
     .map((branch) => {
       const waLink = cleanWa(branch.whatsapp)
-        ? `<a href="https://wa.me/${cleanWa(branch.whatsapp)}" class="btn btn-wa" style="flex:1;" target="_blank">WhatsApp</a>`
+        ? iconLink("icon-btn icon-btn-whatsapp", "WhatsApp branch", WHATSAPP_ICON_SVG, `https://wa.me/${cleanWa(branch.whatsapp)}`, 'target="_blank" rel="noopener"')
         : "";
       const callLink = cleanPhone(branch.phone)
-        ? `<a href="tel:${cleanPhone(branch.phone)}" class="btn btn-call" style="flex:1;">Call</a>`
+        ? iconLink("icon-btn icon-btn-call", "Call branch", CALL_ICON_SVG, `tel:${cleanPhone(branch.phone)}`)
         : "";
       return `
       <div class="info-card">
@@ -151,10 +344,10 @@ export const generateVendorStorefrontHtml = (
   const staffRows = staff
     .map((person) => {
       const waLink = cleanWa(person.whatsapp)
-        ? `<a href="https://wa.me/${cleanWa(person.whatsapp)}" class="btn btn-wa" style="flex:1;" target="_blank">WhatsApp</a>`
+        ? iconLink("icon-btn icon-btn-whatsapp", "WhatsApp staff member", WHATSAPP_ICON_SVG, `https://wa.me/${cleanWa(person.whatsapp)}`, 'target="_blank" rel="noopener"')
         : "";
       const callLink = cleanPhone(person.phone)
-        ? `<a href="tel:${cleanPhone(person.phone)}" class="btn btn-call" style="flex:1;">Call</a>`
+        ? iconLink("icon-btn icon-btn-call", "Call staff member", CALL_ICON_SVG, `tel:${cleanPhone(person.phone)}`)
         : "";
       return `
       <div class="info-card">
@@ -170,10 +363,10 @@ export const generateVendorStorefrontHtml = (
     deliveryStaff
       .map((driver) => {
         const waLink = cleanWa(driver.whatsapp)
-          ? `<a href="https://wa.me/${cleanWa(driver.whatsapp)}" class="btn btn-wa" style="flex:1;" target="_blank">WhatsApp</a>`
+          ? iconLink("icon-btn icon-btn-whatsapp", "WhatsApp delivery contact", WHATSAPP_ICON_SVG, `https://wa.me/${cleanWa(driver.whatsapp)}`, 'target="_blank" rel="noopener"')
           : "";
         const callLink = cleanPhone(driver.phone)
-          ? `<a href="tel:${cleanPhone(driver.phone)}" class="btn btn-call" style="flex:1;">Call</a>`
+          ? iconLink("icon-btn icon-btn-call", "Call delivery contact", CALL_ICON_SVG, `tel:${cleanPhone(driver.phone)}`)
           : "";
         return `
       <div class="info-card">
@@ -195,8 +388,8 @@ export const generateVendorStorefrontHtml = (
       <div class="info-row"><strong>Email:</strong> ${escapeHtml(vendor.email || "N/A")}</div>
       <div class="info-row"><strong>Hours:</strong> ${escapeHtml(vendor.openingHours || "N/A")}</div>
       <div class="info-actions">
-        ${cleanPhone(vendor.mainPhone) ? `<a href="tel:${cleanPhone(vendor.mainPhone)}" class="btn btn-call" style="flex:1">Call HQ</a>` : ""}
-        ${cleanWa(vendor.whatsappNumber) ? `<a href="https://wa.me/${cleanWa(vendor.whatsappNumber)}" class="btn btn-wa" style="flex:1" target="_blank">WhatsApp HQ</a>` : ""}
+        ${cleanPhone(vendor.mainPhone) ? iconLink("icon-btn-label icon-btn-call", "Call HQ", CALL_ICON_SVG, `tel:${cleanPhone(vendor.mainPhone)}`, "", "Call HQ") : ""}
+        ${cleanWa(vendor.whatsappNumber) ? iconLink("icon-btn-label icon-btn-whatsapp", "WhatsApp HQ", WHATSAPP_ICON_SVG, `https://wa.me/${cleanWa(vendor.whatsappNumber)}`, 'target="_blank" rel="noopener"', "WhatsApp HQ") : ""}
       </div>
     </div>
   `;
@@ -225,11 +418,13 @@ export const generateVendorStorefrontHtml = (
     vendor.bannerAssetUrl || vendor.bannerUrl || vendor.businessBannerUrl,
   );
   const mainSector = escapeHtml(vendor.sector || "General");
-  const cahJoinUrl =
-    communityLink?.whatsappCommunityLink ||
-    groupLink?.whatsappGroupLink ||
-    groupLink?.catalogueDistributionGroupLink ||
-    "https://itred.com/join";
+  const { cahHref: cahJoinUrl } = resolveVendorsProductsDiscoveryCahUrl(
+    cahLinks,
+    defaultCAHLink,
+  );
+  const joinCahCtaHtml = cahJoinUrl
+    ? `<a class="btn btn-outline footer-cta join-cah" href="${escapeHtml(cahJoinUrl)}" target="_blank" rel="noopener" onclick="logHubClick('join_cah', '${escapeHtml(cahJoinUrl)}'); return false;">Join Commerce Access Hub</a>`
+    : `<button class="btn btn-outline footer-cta join-cah" type="button" disabled aria-disabled="true" title="Vendors Products Discovery Access Hub link not found." onclick="console.warn('Vendors Products Discovery Access Hub link not found.')">Join Commerce Access Hub</button>`;
 
   return `<!doctype html>
 <html lang="en">
@@ -293,7 +488,7 @@ export const generateVendorStorefrontHtml = (
     .stock-in { color: #16a34a; }
     .stock-out { color: #dc2626; }
     
-    .product-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: auto; }
+    .product-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: auto; }
     .btn { display: inline-flex; align-items: center; justify-content: center; padding: 10px; font-size: 11px; font-weight: bold; text-transform: uppercase; border: none; cursor: pointer; text-decoration: none; text-align: center; }
     .btn-wa { background: #16a34a; color: white; }
     .btn-call { background: var(--stone-800); color: white; }
@@ -308,6 +503,9 @@ export const generateVendorStorefrontHtml = (
     @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
     .modal-close { position: absolute; top: 12px; right: 12px; width: 32px; height: 32px; background: var(--bg); border: 1px solid var(--stone-200); display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: bold; cursor: pointer; z-index: 10; color: var(--charcoal); }
     .modal-img { width: 100%; height: 300px; object-fit: cover; background: var(--stone-100); }
+    .modal-gallery { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; padding: 8px; border-bottom: 1px solid var(--stone-100); }
+    .modal-thumb { height: 54px; width: 100%; object-fit: cover; border: 2px solid var(--stone-200); background: var(--stone-50); cursor: pointer; }
+    .modal-thumb.active { border-color: var(--orange); }
     .modal-body { padding: 20px; }
     .modal-title { font-size: 20px; font-weight: 900; margin: 0 0 8px; line-height: 1.2; }
     .modal-price { font-size: 24px; font-weight: 900; color: var(--orange); margin-bottom: 16px; }
@@ -317,6 +515,88 @@ export const generateVendorStorefrontHtml = (
     .modal-meta-label { display: block; font-size: 9px; font-weight: bold; text-transform: uppercase; color: var(--stone-400); margin-bottom: 4px; }
     .modal-meta-value { font-weight: 700; color: var(--charcoal); }
     .modal-actions { display: flex; flex-direction: column; gap: 10px; }
+    .icon-action-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+    .icon-btn {
+      width: 44px;
+      height: 44px;
+      min-width: 44px;
+      min-height: 44px;
+      border: 0 !important;
+      box-shadow: none !important;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      text-decoration: none;
+      cursor: pointer;
+      color: var(--charcoal);
+      background: transparent !important;
+      padding: 0;
+      outline: none;
+    }
+    .icon-btn svg, .icon-btn-label svg {
+      width: 22px;
+      height: 22px;
+      display: block;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .icon-btn-whatsapp { background: transparent !important; border: 0 !important; box-shadow: none !important; color: #16a34a; }
+    .icon-btn-call { background: transparent !important; border: 0 !important; box-shadow: none !important; color: #111827; }
+    .icon-btn-orange { background: transparent !important; border: 0 !important; box-shadow: none !important; color: var(--orange); }
+    .icon-btn-ghost { background: transparent !important; color: var(--orange); border: 0 !important; box-shadow: none !important; }
+    .icon-btn:hover {
+      background: transparent !important;
+      border: 0 !important;
+      box-shadow: none !important;
+      opacity: 0.78;
+      transform: scale(1.04);
+    }
+    .icon-btn:focus-visible {
+      outline: 2px solid rgba(249, 115, 22, 0.45);
+      outline-offset: 3px;
+    }
+    .icon-btn-label { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 0 12px; border: 1px solid var(--stone-200); background: #fff; color: var(--charcoal); text-decoration: none; font-size: 10px; font-weight: 900; text-transform: uppercase; }
+    .icon-btn-label .icon-btn, .icon-btn-label > svg { margin-right: 4px; }
+    .cart-add-btn { width: 100%; min-height: 40px; margin-top: 10px; border: 1px solid var(--orange); background: var(--orange); color: #fff; font-size: 10px; font-weight: 900; text-transform: uppercase; cursor: pointer; }
+    .cart-add-btn.disabled, .cart-add-btn:disabled { border-color: var(--stone-200); background: var(--stone-100); color: var(--stone-500); cursor: not-allowed; }
+    .cart-fab { position: fixed; right: 14px; bottom: 78px; z-index: 700; width: 56px; height: 56px; border: 2px solid var(--orange); background: var(--charcoal); color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 10px 24px rgba(0,0,0,0.22); }
+    .cart-fab svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .cart-count { position: absolute; top: -8px; right: -8px; min-width: 24px; height: 24px; padding: 0 6px; background: var(--orange); color: #fff; border: 2px solid #fff; font-size: 11px; font-weight: 900; line-height: 20px; text-align: center; }
+    .cart-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.72); z-index: 1100; align-items: flex-end; justify-content: center; }
+    .cart-overlay.active { display: flex; }
+    .cart-drawer { width: 100%; max-width: 540px; max-height: 92vh; overflow-y: auto; background: #fff; border-top: 4px solid var(--orange); }
+    @media (min-width: 640px) { .cart-overlay { align-items: center; } .cart-drawer { border: 4px solid var(--orange); } }
+    .cart-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--stone-200); }
+    .cart-head h2 { margin: 0; font-size: 16px; font-weight: 900; text-transform: uppercase; }
+    .cart-close { width: 38px; height: 38px; border: 1px solid var(--stone-200); background: #fff; color: var(--charcoal); font-size: 20px; font-weight: 900; cursor: pointer; }
+    .cart-body { padding: 14px 16px 18px; }
+    .cart-empty { padding: 22px; border: 1px dashed var(--stone-200); color: var(--stone-500); font-size: 12px; font-weight: 800; text-align: center; text-transform: uppercase; }
+    .cart-line { display: grid; grid-template-columns: 58px 1fr; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--stone-100); }
+    .cart-line img { width: 58px; height: 58px; object-fit: cover; border: 1px solid var(--stone-200); background: var(--stone-50); }
+    .cart-line-name { margin: 0 0 4px; font-size: 13px; font-weight: 900; line-height: 1.25; }
+    .cart-line-meta { margin: 0 0 8px; font-size: 10px; color: var(--stone-500); font-weight: 800; text-transform: uppercase; }
+    .cart-line-bottom { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .cart-stepper { display: inline-flex; align-items: center; border: 1px solid var(--stone-200); }
+    .cart-stepper button { width: 34px; height: 34px; border: 0; background: var(--stone-100); color: var(--charcoal); font-weight: 900; cursor: pointer; }
+    .cart-stepper span { min-width: 34px; text-align: center; font-size: 12px; font-weight: 900; }
+    .cart-line-total { font-size: 12px; font-weight: 900; color: var(--orange); text-align: right; }
+    .cart-remove { margin-top: 8px; border: 0; background: transparent; color: #dc2626; font-size: 10px; font-weight: 900; text-transform: uppercase; cursor: pointer; padding: 0; }
+    .cart-fields { display: grid; gap: 8px; margin-top: 14px; }
+    .cart-fields input, .cart-fields textarea { width: 100%; border: 1px solid var(--stone-200); background: var(--stone-50); padding: 10px; font-size: 13px; font-weight: 700; outline: none; }
+    .cart-fields textarea { min-height: 74px; resize: vertical; }
+    .cart-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; padding: 12px 0; border-top: 2px solid var(--stone-200); font-size: 14px; font-weight: 900; text-transform: uppercase; }
+    .cart-actions { display: grid; gap: 8px; margin-top: 8px; }
+    .cart-send { min-height: 44px; border: 0; background: #16a34a; color: #fff; font-size: 12px; font-weight: 900; text-transform: uppercase; cursor: pointer; }
+    .cart-clear { min-height: 40px; border: 1px solid var(--stone-300, #d6d3d1); background: #fff; color: var(--stone-600); font-size: 11px; font-weight: 900; text-transform: uppercase; cursor: pointer; }
+    .horizontal-scroll-container { display: flex; gap: 12px; overflow-x: auto; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; padding: 2px 18px 8px 0; scrollbar-width: none; }
+    .horizontal-scroll-container::-webkit-scrollbar { display: none; }
+    .horizontal-scroll-card { flex: 0 0 80%; max-width: 320px; scroll-snap-align: start; }
+    #tab-branches .info-grid, #tab-contact .info-grid, #tab-delivery .info-grid { display: flex; gap: 12px; overflow-x: auto; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; padding-right: 18px; scrollbar-width: none; }
+    #tab-branches .info-grid::-webkit-scrollbar, #tab-contact .info-grid::-webkit-scrollbar, #tab-delivery .info-grid::-webkit-scrollbar { display: none; }
+    #tab-branches .info-card, #tab-contact .info-card, #tab-delivery .info-card { flex: 0 0 80%; max-width: 320px; scroll-snap-align: start; }
     
     .bottom-nav { position: fixed; bottom: 0; left: 0; width: 100%; background: var(--bg); border-top: 1px solid var(--stone-200); display: flex; z-index: 500; box-shadow: 0 -2px 10px rgba(0,0,0,0.05); }
     .nav-btn { flex: 1; padding: 16px 4px; background: none; border: none; border-top: 2px solid transparent; font-size: 10px; font-weight: bold; text-transform: uppercase; color: var(--stone-500); cursor: pointer; transition: all 0.2s; text-align: center; }
@@ -383,16 +663,22 @@ export const generateVendorStorefrontHtml = (
     </div>
 
     <div id="tab-contact" class="tab-pane">
+      <div class="info-grid">
         ${vendorBusinessHtml}
         ${staffRows}
+      </div>
     </div>
 
     <div id="tab-branches" class="tab-pane">
+      <div class="info-grid">
         ${branchRows}
+      </div>
     </div>
 
     <div id="tab-delivery" class="tab-pane">
-        ${deliveryHtml}
+      <div class="info-grid">
+        ${deliveryRows}
+      </div>
     </div>
 
     <div id="tab-terms" class="tab-pane">
@@ -421,7 +707,7 @@ export const generateVendorStorefrontHtml = (
         <p>Join iTred Vendor Network</p>
         <div class="viral-actions">
            <button class="btn btn-wa" onclick="logHubClick('contact_seigen', getFeedbackUrl('I%20want%20a%20storefront'))">Contact seiGEN Commerce</button>
-           <button class="btn btn-outline" onclick="logHubClick('join_cah', '${cahJoinUrl}')">Join Commerce Access Hub</button>
+           ${joinCahCtaHtml}
         </div>
       </div>
     </footer>
@@ -435,10 +721,42 @@ export const generateVendorStorefrontHtml = (
     <button class="nav-btn" onclick="switchTab('terms', this)">Terms</button>
   </nav>
 
+  ${
+    cartEnabled
+      ? `<button id="cart-fab" class="cart-fab" type="button" aria-label="Open cart" title="Open cart" onclick="openCart()">${CART_ICON_SVG}<span id="cart-count" class="cart-count">0</span></button>
+
+  <div id="cart-overlay" class="cart-overlay">
+    <div class="cart-drawer">
+      <div class="cart-head">
+        <h2>Order Cart</h2>
+        <button class="cart-close" type="button" onclick="closeCart()" aria-label="Close cart">x</button>
+      </div>
+      <div class="cart-body">
+        <div id="cart-lines"></div>
+        <div class="cart-fields">
+          <input id="cart-customer-name" type="text" placeholder="Customer Name (optional)" />
+          <input id="cart-location" type="text" placeholder="Location (optional)" />
+          <textarea id="cart-note" placeholder="Note (optional)"></textarea>
+        </div>
+        <div class="cart-summary">
+          <span>Subtotal</span>
+          <span id="cart-subtotal">USD 0.00</span>
+        </div>
+        <div class="cart-actions">
+          <button class="cart-send" type="button" onclick="sendCartOrder()">Send Order on WhatsApp</button>
+          <button class="cart-clear" type="button" onclick="clearCart()">Clear Cart</button>
+        </div>
+      </div>
+    </div>
+  </div>`
+      : ""
+  }
+
   <div id="modal-overlay" class="modal-overlay">
     <div class="modal-content">
       <button class="modal-close" onclick="closeModal()">×</button>
       <img id="m-img" class="modal-img" onerror="this.style.display='none'" />
+      <div id="m-gallery" class="modal-gallery"></div>
       <div class="modal-body">
         <h2 id="m-name" class="modal-title"></h2>
         <div id="m-price" class="modal-price"></div>
@@ -468,11 +786,12 @@ export const generateVendorStorefrontHtml = (
         </div>
 
         <div class="modal-actions">
-          <button id="m-btn-wa" class="btn btn-wa" style="width:100%; padding:14px; font-size:14px;">WhatsApp Order</button>
-          <div style="display:flex; gap:10px;">
-            <button id="m-btn-call" class="btn btn-call" style="flex:1; padding:12px;">Call Vendor</button>
-            <button id="m-btn-share" class="btn btn-outline" style="flex:1; padding:12px; color:var(--charcoal); border-color:var(--stone-200);">Share Product</button>
+          <div class="icon-action-row">
+            <button id="m-btn-wa" class="icon-btn-label icon-btn-whatsapp" aria-label="Order on WhatsApp" title="Order on WhatsApp">${WHATSAPP_ICON_SVG}<span>WhatsApp</span></button>
+            <button id="m-btn-call" class="icon-btn-label icon-btn-call" aria-label="Call Vendor" title="Call Vendor">${CALL_ICON_SVG}<span>Call</span></button>
+            <button id="m-btn-share" class="icon-btn-label icon-btn-ghost" aria-label="Share Product" title="Share Product">${SEARCH_ICON_SVG}<span>Share</span></button>
           </div>
+          ${cartEnabled ? `<button id="m-btn-cart" class="cart-add-btn" type="button">Add to Cart</button>` : ""}
         </div>
       </div>
     </div>
@@ -801,16 +1120,43 @@ export const generateVendorStorefrontHtml = (
       ${vendorProducts
         .map(
           (p) => `
-        "${p.id}": {
+        ${JSON.stringify(p.id)}: {
+          id: ${JSON.stringify(p.id || "").replace(/</g, "\\u003c")},
           name: ${JSON.stringify(p.name || "").replace(/</g, "\\u003c")},
+          vendorId: ${JSON.stringify(p.vendorId || vendor.id || "").replace(/</g, "\\u003c")},
+          vendorName: ${JSON.stringify(p.vendorName || vendor.name || "").replace(/</g, "\\u003c")},
           brand: ${JSON.stringify(p.brand || p.category || "").replace(/</g, "\\u003c")},
-          price: ${p.sellingPrice || 0},
+          price: ${
+            (p as any).sellingPrice !== undefined &&
+            (p as any).sellingPrice !== null &&
+            (p as any).sellingPrice !== "" &&
+            Number.isFinite(Number((p as any).sellingPrice))
+              ? Number((p as any).sellingPrice)
+              : "null"
+          },
+          currency: ${JSON.stringify((p as any).currency || (vendor as any).currency || "USD").replace(/</g, "\\u003c")},
           stock: ${p.stockQuantity || 0},
-          img: ${JSON.stringify(normalizeImageUrl(p.imageUrl)).replace(/</g, "\\u003c")},
+          img: ${JSON.stringify(normalizeImageUrl(getProductGalleryImages(p, 6)[0] || p.imageUrl)).replace(/</g, "\\u003c")},
+          images: ${JSON.stringify(getProductGalleryImages(p, 6).map(normalizeImageUrl)).replace(/</g, "\\u003c")},
           desc: ${JSON.stringify(p.description || "").replace(/</g, "\\u003c")},
           sku: ${JSON.stringify(p.sku || p.productCode || "").replace(/</g, "\\u003c")},
+          branchId: ${JSON.stringify(p.branchId || "").replace(/</g, "\\u003c")},
           branch: ${JSON.stringify(p.branchName || "").replace(/</g, "\\u003c")},
           delivery: ${JSON.stringify(p.deliveryAvailable ? "Available" : "Check with vendor").replace(/</g, "\\u003c")}
+        }
+      `,
+        )
+        .join(",\n")}
+    };
+    const BRANCHES = {
+      ${branches
+        .map(
+          (branch) => `
+        ${JSON.stringify(branch.id)}: {
+          id: ${JSON.stringify(branch.id || "").replace(/</g, "\\u003c")},
+          name: ${JSON.stringify(branch.name || "").replace(/</g, "\\u003c")},
+          phone: ${JSON.stringify(cleanPhone(branch.phone)).replace(/</g, "\\u003c")},
+          whatsapp: ${JSON.stringify(cleanWa(branch.whatsapp)).replace(/</g, "\\u003c")}
         }
       `,
         )
@@ -823,12 +1169,312 @@ export const generateVendorStorefrontHtml = (
     const VENDOR_SECTOR = ${JSON.stringify(vendor.sector || "")};
     const VENDOR_WA = ${JSON.stringify(vendor.whatsappNumber ? vendor.whatsappNumber.replace(/[^0-9]/g, "") : "")};
     const VENDOR_PHONE = ${JSON.stringify(vendor.mainPhone ? vendor.mainPhone.replace(/[^0-9+]/g, "") : "")};
+    const CART_ENABLED = ${cartEnabled ? "true" : "false"};
+    const WHATSAPP_ORDERS_ENABLED = ${allowWhatsappOrders ? "true" : "false"};
+    const CART_KEY = 'itred_storefront_cart_' + (STOREFRONT_ID || VENDOR_ID);
+    const CART_CUSTOMER_KEY = CART_KEY + '_customer';
+
+    function showStorefrontMessage(message) {
+      const toast = document.createElement('div');
+      toast.textContent = message;
+      toast.style.position = 'fixed';
+      toast.style.left = '16px';
+      toast.style.right = '16px';
+      toast.style.bottom = '86px';
+      toast.style.zIndex = '12000';
+      toast.style.background = '#262626';
+      toast.style.color = '#fff';
+      toast.style.borderTop = '4px solid #f97316';
+      toast.style.padding = '14px 16px';
+      toast.style.fontSize = '13px';
+      toast.style.fontWeight = '800';
+      toast.style.textTransform = 'uppercase';
+      toast.style.boxShadow = '0 10px 30px rgba(0,0,0,0.22)';
+      document.body.appendChild(toast);
+      setTimeout(function() {
+        if (toast.parentNode) toast.parentNode.removeChild(toast);
+      }, 3200);
+    }
+
+    function cleanRuntimePhone(value) {
+      return value ? String(value).replace(/[^0-9+]/g, '') : '';
+    }
+
+    function cleanRuntimeWhatsapp(value) {
+      return value ? String(value).replace(/[^0-9]/g, '') : '';
+    }
+
+    function getBranchForProduct(product) {
+      if (!product) return null;
+      if (product.branchId && BRANCHES[product.branchId]) return BRANCHES[product.branchId];
+      const branchName = String(product.branch || '').toLowerCase();
+      if (!branchName) return null;
+      const keys = Object.keys(BRANCHES);
+      for (let i = 0; i < keys.length; i++) {
+        const branch = BRANCHES[keys[i]];
+        if (String(branch.name || '').toLowerCase() === branchName) return branch;
+      }
+      return null;
+    }
+
+    function getProductWhatsapp(product) {
+      const productBranch = getBranchForProduct(product);
+      return cleanRuntimeWhatsapp(productBranch && productBranch.whatsapp) || VENDOR_WA || '';
+    }
+
+    function getProductPhone(product) {
+      const productBranch = getBranchForProduct(product);
+      return cleanRuntimePhone(productBranch && productBranch.phone) || VENDOR_PHONE || '';
+    }
+
+    function safeJsonParse(raw, fallback) {
+      try {
+        const parsed = JSON.parse(raw || '');
+        return parsed === null || parsed === undefined ? fallback : parsed;
+      } catch (e) {
+        return fallback;
+      }
+    }
+
+    function normalizeCartItem(item) {
+      if (!item || !item.productId) return null;
+      const qty = Math.max(1, Number(item.qty) || 1);
+      const price = Number(item.price);
+      return {
+        productId: String(item.productId),
+        productName: String(item.productName || 'Product'),
+        vendorId: String(item.vendorId || VENDOR_ID),
+        vendorName: String(item.vendorName || VENDOR_NAME),
+        sku: item.sku ? String(item.sku) : null,
+        price: Number.isFinite(price) ? price : null,
+        currency: String(item.currency || 'USD'),
+        qty: qty,
+        imageUrl: item.imageUrl || null,
+        branchName: item.branchName || null
+      };
+    }
+
+    function loadCart() {
+      if (!CART_ENABLED) return [];
+      const raw = safeLocalStorageGet(CART_KEY);
+      const parsed = safeJsonParse(raw, []);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.map(normalizeCartItem).filter(Boolean);
+    }
+
+    function saveCart(items) {
+      if (!CART_ENABLED) return;
+      const safeItems = Array.isArray(items)
+        ? items.map(normalizeCartItem).filter(Boolean)
+        : [];
+      safeLocalStorageSet(CART_KEY, JSON.stringify(safeItems));
+      renderCart();
+    }
+
+    function getCartCustomer() {
+      const parsed = safeJsonParse(safeLocalStorageGet(CART_CUSTOMER_KEY), {});
+      return {
+        customerName: String(parsed.customerName || ''),
+        location: String(parsed.location || ''),
+        note: String(parsed.note || '')
+      };
+    }
+
+    function saveCartCustomer() {
+      if (!CART_ENABLED) return;
+      const nameEl = document.getElementById('cart-customer-name');
+      const locationEl = document.getElementById('cart-location');
+      const noteEl = document.getElementById('cart-note');
+      safeLocalStorageSet(CART_CUSTOMER_KEY, JSON.stringify({
+        customerName: nameEl ? nameEl.value : '',
+        location: locationEl ? locationEl.value : '',
+        note: noteEl ? noteEl.value : ''
+      }));
+    }
+
+    function productToCartItem(productId) {
+      const product = PRODUCTS[productId];
+      if (!product) return null;
+      return normalizeCartItem({
+        productId: productId,
+        productName: product.name,
+        vendorId: product.vendorId || VENDOR_ID,
+        vendorName: product.vendorName || VENDOR_NAME,
+        sku: product.sku || null,
+        price: product.price,
+        currency: product.currency || 'USD',
+        qty: 1,
+        imageUrl: product.img || null,
+        branchName: product.branch || null
+      });
+    }
+
+    function addToCart(productId) {
+      if (!CART_ENABLED) return;
+      const item = productToCartItem(productId);
+      if (!item) return;
+      const cart = loadCart();
+      const existing = cart.find(function(line) { return line.productId === item.productId; });
+      if (existing) {
+        existing.qty += 1;
+      } else {
+        cart.push(item);
+      }
+      saveCart(cart);
+      logOfflineEvent({ eventType: 'cart_add', sourceType: 'storefront', storefrontId: STOREFRONT_ID, vendorId: VENDOR_ID, vendorName: VENDOR_NAME, productId: item.productId, productName: item.productName, payload: { qty: existing ? existing.qty : 1 } });
+      showStorefrontMessage('Added to cart.');
+    }
+
+    function removeFromCart(productId) {
+      const cart = loadCart().filter(function(item) { return item.productId !== productId; });
+      saveCart(cart);
+      logOfflineEvent({ eventType: 'cart_remove', sourceType: 'storefront', storefrontId: STOREFRONT_ID, vendorId: VENDOR_ID, vendorName: VENDOR_NAME, productId: productId });
+    }
+
+    function updateCartQty(productId, qty) {
+      const nextQty = Math.max(1, Number(qty) || 1);
+      const cart = loadCart().map(function(item) {
+        if (item.productId === productId) item.qty = nextQty;
+        return item;
+      });
+      saveCart(cart);
+      logOfflineEvent({ eventType: 'cart_update_qty', sourceType: 'storefront', storefrontId: STOREFRONT_ID, vendorId: VENDOR_ID, vendorName: VENDOR_NAME, productId: productId, payload: { qty: nextQty } });
+    }
+
+    function clearCart() {
+      saveCart([]);
+      logOfflineEvent({ eventType: 'cart_clear', sourceType: 'storefront', storefrontId: STOREFRONT_ID, vendorId: VENDOR_ID, vendorName: VENDOR_NAME });
+    }
+
+    function formatMoney(currency, value) {
+      if (!Number.isFinite(Number(value))) return 'Price on enquiry';
+      return String(currency || 'USD') + ' ' + Number(value).toFixed(2);
+    }
+
+    function cartSubtotal(cart) {
+      return cart.reduce(function(sum, item) {
+        return sum + (Number.isFinite(Number(item.price)) ? Number(item.price) * item.qty : 0);
+      }, 0);
+    }
+
+    function renderCart() {
+      if (!CART_ENABLED) return;
+      const cart = loadCart();
+      const count = cart.reduce(function(sum, item) { return sum + item.qty; }, 0);
+      const countEl = document.getElementById('cart-count');
+      if (countEl) countEl.textContent = String(count);
+      const linesEl = document.getElementById('cart-lines');
+      if (!linesEl) return;
+      if (cart.length === 0) {
+        linesEl.innerHTML = '<div class="cart-empty">Your cart is empty.</div>';
+      } else {
+        linesEl.innerHTML = cart.map(function(item) {
+          const lineTotal = Number.isFinite(Number(item.price)) ? Number(item.price) * item.qty : null;
+          return '<div class="cart-line">' +
+            '<img src="' + escapeHtml(item.imageUrl || '') + '" alt="' + escapeHtml(item.productName) + '" onerror="this.style.display=\\'none\\'" />' +
+            '<div>' +
+              '<p class="cart-line-name">' + escapeHtml(item.productName) + '</p>' +
+              '<p class="cart-line-meta">SKU: ' + escapeHtml(item.sku || 'N/A') + ' | ' + escapeHtml(item.branchName || 'Main') + '</p>' +
+              '<div class="cart-line-bottom">' +
+                '<div class="cart-stepper">' +
+                  '<button type="button" onclick="updateCartQty(\\'' + escapeHtml(item.productId) + '\\',' + Math.max(1, item.qty - 1) + ')">-</button>' +
+                  '<span>' + item.qty + '</span>' +
+                  '<button type="button" onclick="updateCartQty(\\'' + escapeHtml(item.productId) + '\\',' + (item.qty + 1) + ')">+</button>' +
+                '</div>' +
+                '<div class="cart-line-total">' + escapeHtml(lineTotal === null ? 'Price on enquiry' : formatMoney(item.currency, lineTotal)) + '</div>' +
+              '</div>' +
+              '<button class="cart-remove" type="button" onclick="removeFromCart(\\'' + escapeHtml(item.productId) + '\\')">Remove</button>' +
+            '</div>' +
+          '</div>';
+        }).join('');
+      }
+      const subtotalEl = document.getElementById('cart-subtotal');
+      const currency = cart[0] ? cart[0].currency : 'USD';
+      if (subtotalEl) subtotalEl.textContent = formatMoney(currency, cartSubtotal(cart));
+    }
+
+    function hydrateCartCustomerFields() {
+      if (!CART_ENABLED) return;
+      const customer = getCartCustomer();
+      const nameEl = document.getElementById('cart-customer-name');
+      const locationEl = document.getElementById('cart-location');
+      const noteEl = document.getElementById('cart-note');
+      if (nameEl) nameEl.value = customer.customerName;
+      if (locationEl) locationEl.value = customer.location;
+      if (noteEl) noteEl.value = customer.note;
+      [nameEl, locationEl, noteEl].forEach(function(el) {
+        if (el) el.addEventListener('input', saveCartCustomer);
+      });
+    }
+
+    function openCart() {
+      if (!CART_ENABLED) return;
+      renderCart();
+      const overlay = document.getElementById('cart-overlay');
+      if (overlay) overlay.classList.add('active');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeCart() {
+      const overlay = document.getElementById('cart-overlay');
+      if (overlay) overlay.classList.remove('active');
+      document.body.style.overflow = '';
+    }
+
+    function buildCartOrderMessage(cart, customer) {
+      const currency = cart[0] ? cart[0].currency : 'USD';
+      const lines = [
+        'Hi ' + VENDOR_NAME + ', I want to enquire/order these products from your iTred storefront:',
+        ''
+      ];
+      cart.forEach(function(item, index) {
+        const lineTotal = Number.isFinite(Number(item.price)) ? Number(item.price) * item.qty : null;
+        lines.push((index + 1) + '. ' + item.productName);
+        lines.push('   SKU: ' + (item.sku || 'N/A'));
+        lines.push('   Qty: ' + item.qty);
+        lines.push('   Price: ' + (item.price === null ? 'Price on enquiry' : formatMoney(item.currency, item.price)));
+        lines.push('   Line Total: ' + (lineTotal === null ? 'Price on enquiry' : formatMoney(item.currency, lineTotal)));
+        lines.push('');
+      });
+      lines.push('Subtotal: ' + formatMoney(currency, cartSubtotal(cart)));
+      lines.push('');
+      if (customer.customerName) lines.push('Customer Name: ' + customer.customerName);
+      if (customer.location) lines.push('Location: ' + customer.location);
+      if (customer.note) lines.push('Note: ' + customer.note);
+      lines.push('');
+      lines.push('Storefront: ' + (VENDOR_NAME || STOREFRONT_ID));
+      lines.push('Powered by seiGEN Commerce');
+      return lines.join('\\n');
+    }
+
+    function sendCartOrder() {
+      if (!CART_ENABLED || !WHATSAPP_ORDERS_ENABLED) return;
+      const cart = loadCart();
+      if (cart.length === 0) {
+        showStorefrontMessage('Cart is empty.');
+        return;
+      }
+      const num = VENDOR_WA;
+      if (!num) {
+        showStorefrontMessage('WhatsApp number not available for this vendor.');
+        return;
+      }
+      saveCartCustomer();
+      const customer = getCartCustomer();
+      const message = buildCartOrderMessage(cart, customer);
+      logOfflineEvent({ eventType: 'order_created', sourceType: 'storefront', storefrontId: STOREFRONT_ID, vendorId: VENDOR_ID, vendorName: VENDOR_NAME, payload: { itemCount: cart.length, subtotal: cartSubtotal(cart) } });
+      logOfflineEvent({ eventType: 'whatsapp_order_click', sourceType: 'storefront', storefrontId: STOREFRONT_ID, vendorId: VENDOR_ID, vendorName: VENDOR_NAME, payload: { itemCount: cart.length } });
+      window.open('https://wa.me/' + num + '?text=' + encodeURIComponent(message), '_blank', 'noopener,noreferrer');
+    }
     
     function orderWhatsApp(productId) {
       const p = PRODUCTS[productId];
       if (!p) return;
-      const num = VENDOR_WA;
-      if (!num) { alert("WhatsApp number not provided by vendor."); return; }
+      const num = getProductWhatsapp(p);
+      if (!num) {
+        showStorefrontMessage("WhatsApp number not available for this product/vendor.");
+        return;
+      }
       
       const leadRef = 'ITRED-' + STOREFRONT_ID + '-' + VENDOR_ID + '-' + productId;
       
@@ -859,14 +1505,17 @@ export const generateVendorStorefrontHtml = (
         payload: { price: p.price, waNumber: num }
       });
 
-      const text = "Hi " + VENDOR_NAME + ", I saw this product on iTred powered by seiGEN Commerce.\\n\\nProduct: " + p.name + "\\nPrice: USD " + p.price.toFixed(2) + "\\nRef: " + leadRef + "\\n\\nPlease confirm availability.";
+      const text = "Hi " + VENDOR_NAME + ", I saw this product on iTred powered by seiGEN Commerce.\\n\\nProduct: " + p.name + "\\nPrice: " + formatMoney(p.currency, p.price) + "\\nRef: " + leadRef + "\\n\\nPlease confirm availability.";
       window.open("https://wa.me/" + num + "?text=" + encodeURIComponent(text), "_blank");
     }
 
     function callVendor(productId) {
       const p = PRODUCTS[productId];
-      const num = VENDOR_PHONE;
-      if (!num) { alert("Phone number not provided by vendor."); return; }
+      const num = getProductPhone(p);
+      if (!num) {
+        showStorefrontMessage("Phone number not available for this product/vendor.");
+        return;
+      }
 
       const leadRef = 'ITRED-' + STOREFRONT_ID + '-' + VENDOR_ID + '-' + productId;
 
@@ -933,9 +1582,25 @@ export const generateVendorStorefrontHtml = (
         payload: { price: p.price, brand: p.brand }
       });
       
-      document.getElementById('m-img').src = p.img;
+      const gallery = Array.isArray(p.images) && p.images.length ? p.images : [p.img];
+      document.getElementById('m-img').src = gallery[0] || p.img;
+      const galleryEl = document.getElementById('m-gallery');
+      if (galleryEl) {
+        galleryEl.innerHTML = gallery.length > 1
+          ? gallery.map(function(src, index) {
+              return '<img src="' + escapeHtml(src) + '" class="modal-thumb ' + (index === 0 ? 'active' : '') + '" data-src="' + escapeHtml(src) + '" loading="lazy" />';
+            }).join('')
+          : '';
+        galleryEl.querySelectorAll('.modal-thumb').forEach(function(img) {
+          img.addEventListener('click', function() {
+            document.getElementById('m-img').src = img.getAttribute('data-src') || '';
+            galleryEl.querySelectorAll('.modal-thumb').forEach(function(item) { item.classList.remove('active'); });
+            img.classList.add('active');
+          });
+        });
+      }
       document.getElementById('m-name').innerText = p.name;
-      document.getElementById('m-price').innerText = 'USD ' + p.price.toFixed(2);
+      document.getElementById('m-price').innerText = formatMoney(p.currency, p.price);
       document.getElementById('m-desc').innerText = p.desc;
       document.getElementById('m-sku').innerText = p.sku;
       document.getElementById('m-stock').innerText = p.stock > 0 ? 'In Stock' : 'Out of Stock';
@@ -948,9 +1613,26 @@ export const generateVendorStorefrontHtml = (
         setTimeout(triggerHelpfulnessSurvey, 2000);
       }
 
-      document.getElementById('m-btn-wa').onclick = function() { orderWhatsApp(productId); };
-      document.getElementById('m-btn-call').onclick = function() { callVendor(productId); };
+      const waBtn = document.getElementById('m-btn-wa');
+      const productWhatsapp = getProductWhatsapp(p);
+      if (waBtn) {
+        waBtn.style.display = productWhatsapp ? 'inline-flex' : 'none';
+        waBtn.onclick = productWhatsapp ? function() { orderWhatsApp(productId); } : null;
+      }
+
+      const callBtn = document.getElementById('m-btn-call');
+      const productPhone = getProductPhone(p);
+      if (callBtn) {
+        callBtn.style.display = productPhone ? 'inline-flex' : 'none';
+        callBtn.onclick = productPhone ? function() { callVendor(productId); } : null;
+      }
+
       document.getElementById('m-btn-share').onclick = function() { shareProduct(productId); };
+      const cartBtn = document.getElementById('m-btn-cart');
+      if (cartBtn) {
+        cartBtn.style.display = CART_ENABLED ? 'block' : 'none';
+        cartBtn.onclick = function() { addToCart(productId); };
+      }
       
       document.getElementById('modal-overlay').classList.add('active');
       document.body.style.overflow = 'hidden';
@@ -1041,6 +1723,10 @@ export const generateVendorStorefrontHtml = (
       });
       
       setTimeout(syncOfflineEvents, 2000);
+      if (CART_ENABLED) {
+        hydrateCartCustomerFields();
+        renderCart();
+      }
 
       setTimeout(() => {
         let shown = checkExpiry();
@@ -1049,6 +1735,23 @@ export const generateVendorStorefrontHtml = (
           triggerWelcomeBack();
         }
       }, 2500);
+
+      document.querySelectorAll('[data-action][data-product-id]').forEach(function(btn) {
+        btn.addEventListener('click', function(event) {
+          event.stopPropagation();
+          const productId = btn.getAttribute('data-product-id');
+          const action = btn.getAttribute('data-action');
+          if (action === 'whatsapp') orderWhatsApp(productId);
+          if (action === 'call') callVendor(productId);
+          if (action === 'view') openProductModal(productId);
+          if (action === 'cart') addToCart(productId);
+        });
+        btn.addEventListener('keydown', function(event) {
+          if (event.key !== 'Enter' && event.key !== ' ') return;
+          event.preventDefault();
+          btn.click();
+        });
+      });
     });
 
     function logHubClick(linkId, url) {

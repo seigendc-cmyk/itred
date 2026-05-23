@@ -4,6 +4,7 @@
  */
 
 import { getStorageAdapter } from "./storageService.ts";
+import { generateCAHLinkId } from "../utils/idGenerator.ts";
 
 export type WhatsAppGroupStatus = "active" | "full" | "dormant" | "hidden";
 
@@ -102,7 +103,7 @@ const safeNumber = (value: unknown, fallback = 0): number => {
 const nowIso = (): string => new Date().toISOString();
 
 const createId = (prefix: string): string => {
-  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+  return generateCAHLinkId().replace("CAH", prefix.toUpperCase());
 };
 
 const cleanPhoneNumber = (value: string): string => {

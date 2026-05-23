@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
@@ -18,10 +18,11 @@ import {
   Search,
   X,
 } from "lucide-react";
-import { PageHeader } from "../components/CommonUI.tsx";
+import { BrandedAlertModal, PageHeader } from "../components/CommonUI.tsx";
 import { notificationService } from "../services/notificationService.ts";
 import { permissionService } from "../services/permissionService.ts";
 import { staffService } from "../services/staffService.ts";
+import { staffAuditService } from "../services/staffAuditService.ts";
 import {
   ITredNotification,
   NotificationPriority,
@@ -98,6 +99,17 @@ export const Notifications: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [processingNotificationId, setProcessingNotificationId] = useState<string | null>(null);
+  const suppressNextNotificationEvent = useRef(false);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [alertConfig, setAlertConfig] = useState<{
+    isOpen: boolean;
+    title?: string;
+    message: string;
+    type?: "success" | "error" | "warning" | "info";
+  }>({ isOpen: false, title: "seiGEN Commerce", message: "", type: "info" });
   const [filters, setFilters] = useState<Filters>({
     status: "all",
     priority: "all",
@@ -114,21 +126,30 @@ export const Notifications: React.FC = () => {
   const canResolve = permissionService.canResolveNotification();
   const canArchive = permissionService.canArchiveNotification();
 
-  const loadData = async () => {
+  const showBrandedAlert = (config: {
+    title?: string;
+    message: string;
+    type?: "success" | "error" | "warning" | "info";
+  }) => setAlertConfig({ title: "seiGEN Commerce", ...config, isOpen: true });
+
+  const loadData = async (nextPage = 0, append = false) => {
     setIsLoading(true);
     setError(null);
     try {
       const [rows, remoteStaff] = await Promise.all([
-        notificationService.getAll(),
-        staffService.loadStaffFromFirebase().catch(() => staffService.getAllStaff()),
+        notificationService.getPage(nextPage, 50),
+        Promise.resolve(staffService.getAllStaff()),
       ]);
-      setNotifications(
-        safeArray(rows).sort(
+      const sortedRows = safeArray(rows.items).sort(
           (a, b) =>
             new Date(b.createdAt || 0).getTime() -
             new Date(a.createdAt || 0).getTime(),
-        ),
+        );
+      setNotifications((current) =>
+        append ? [...current, ...sortedRows] : sortedRows,
       );
+      setHasMore(rows.hasMore);
+      setPage(nextPage);
       const fallbackStaff = safeArray(staffService.getAllStaff());
       setStaff(safeArray(remoteStaff).length > 0 ? safeArray(remoteStaff) : fallbackStaff);
     } catch (loadError) {
@@ -145,6 +166,10 @@ export const Notifications: React.FC = () => {
     void loadData();
 
     const onUpdate = () => {
+      if (suppressNextNotificationEvent.current) {
+        suppressNextNotificationEvent.current = false;
+        return;
+      }
       void loadData();
     };
     window.addEventListener("itred_notifications_updated", onUpdate);
@@ -203,31 +228,92 @@ export const Notifications: React.FC = () => {
     status: NotificationStatus,
   ) => {
     const isOwn = notification.assignedToStaffId === currentStaffId;
-    if (!canViewAll && !isOwn) return;
-    if ((status === "read" || status === "unread") && !canMarkRead) return;
-    if (status === "resolved" && !canResolve) return;
-    if (status === "archived" && !canArchive) return;
+    const denied = (message: string) => {
+      setActionError(message);
+      showBrandedAlert({ message, type: "warning" });
+    };
+    if (!canViewAll && !isOwn) {
+      denied("You do not have permission to manage another staff member's notifications.");
+      return;
+    }
+    if ((status === "read" || status === "unread") && !canMarkRead) {
+      denied("You do not have permission to acknowledge notifications.");
+      return;
+    }
+    if (status === "resolved" && !canResolve) {
+      denied("You do not have permission to resolve notifications.");
+      return;
+    }
+    if (status === "archived" && !canArchive) {
+      denied("You do not have permission to archive notifications.");
+      return;
+    }
 
     setIsSaving(true);
+    setProcessingNotificationId(notification.id);
     setError(null);
+    setActionError(null);
     try {
+      suppressNextNotificationEvent.current = true;
       if (status === "read") await notificationService.markRead(notification.id);
       else if (status === "unread") await notificationService.markUnread(notification.id);
       else if (status === "resolved") await notificationService.resolve(notification.id);
       else if (status === "archived") await notificationService.archive(notification.id);
-      await loadData();
-      setSelected((prev) =>
-        prev?.id === notification.id ? { ...prev, status } : prev,
+
+      const now = new Date().toISOString();
+      const updatedNotification = { ...notification, status, updatedAt: now };
+      setNotifications((prev) =>
+        prev.map((item) =>
+          item.id === notification.id ? { ...item, status, updatedAt: now } : item,
+        ),
       );
+      setSelected((prev) =>
+        prev?.id === notification.id ? { ...prev, status, updatedAt: now } : prev,
+      );
+      void staffAuditService.logAction({
+        eventType: "RECORD_UPDATED",
+        module: "notifications",
+        severity: status === "archived" ? "warning" : "info",
+        action:
+          status === "read"
+            ? "Acknowledged notification"
+            : status === "resolved"
+              ? "Resolved notification"
+              : status === "archived"
+                ? "Archived notification"
+                : "Updated notification status",
+        recordType: "notification",
+        recordId: notification.id,
+        recordName: notification.title,
+        beforeSnapshot: notification,
+        afterSnapshot: updatedNotification,
+      });
+      const message =
+        status === "read"
+          ? "Notification acknowledged."
+          : status === "resolved"
+            ? "Notification resolved."
+            : status === "archived"
+              ? "Notification archived."
+              : "Notification updated.";
+      notificationService.toast(message);
+      showBrandedAlert({ message, type: "success" });
     } catch (saveError) {
       console.error("Failed to update notification", saveError);
-      setError(
+      const message =
         saveError instanceof Error
           ? saveError.message
-          : "Notification could not be updated.",
-      );
+          : "Failed to process notification.";
+      setError(message);
+      setActionError(message);
+      showBrandedAlert({
+        title: "seiGEN Commerce",
+        message,
+        type: "error",
+      });
     } finally {
       setIsSaving(false);
+      setProcessingNotificationId(null);
     }
   };
 
@@ -238,6 +324,10 @@ export const Notifications: React.FC = () => {
 
   return (
     <div className="space-y-6 pb-20">
+      <BrandedAlertModal
+        {...alertConfig}
+        onClose={() => setAlertConfig((prev) => ({ ...prev, isOpen: false }))}
+      />
       <PageHeader
         title="Notifications"
         subtitle="System alerts, approval alerts, staff task alerts, and operational follow-ups."
@@ -383,8 +473,21 @@ export const Notifications: React.FC = () => {
               <tbody className="divide-y divide-stone-100">
                 {filtered.map((notification) => {
                   const route = relatedRoute(notification);
+                  const isProcessing = processingNotificationId === notification.id;
                   return (
-                    <tr key={notification.id} className="hover:bg-stone-50">
+                    <tr
+                      key={notification.id}
+                      className={`hover:bg-stone-50 transition-colors ${
+                        notification.status === "unread"
+                          ? "bg-orange-50/30"
+                          : notification.status === "resolved"
+                            ? "bg-emerald-50/20"
+                            : notification.status === "archived" ||
+                                notification.status === "dismissed"
+                              ? "opacity-60"
+                              : ""
+                      }`}
+                    >
                       <td className="px-5 py-4 min-w-[280px]">
                         <button
                           onClick={() => setSelected(notification)}
@@ -399,6 +502,9 @@ export const Notifications: React.FC = () => {
                           <p className="text-[9px] font-mono text-stone-400 mt-2">
                             {notification.type} / {notification.recordType}:{notification.recordId}
                           </p>
+                          <p className="text-[9px] font-mono text-stone-400 mt-1">
+                            Last updated: {notification.updatedAt ? new Date(notification.updatedAt).toLocaleString() : "None"}
+                          </p>
                         </button>
                       </td>
                       <td className="px-5 py-4">
@@ -412,7 +518,7 @@ export const Notifications: React.FC = () => {
                         </span>
                       </td>
                       <td className="px-5 py-4 text-[10px] font-bold uppercase text-stone-500">
-                        {notification.assignedToName || notification.assignedToStaffId || "Team"}
+                        {notification.assignedToName || notification.assignedToStaffId || "Unassigned"}
                       </td>
                       <td className="px-5 py-4 text-[10px] font-mono text-stone-500">
                         {notification.createdAt
@@ -427,40 +533,40 @@ export const Notifications: React.FC = () => {
                           >
                             View
                           </button>
-                          {notification.status !== "read" && canMarkRead && (
+                          {notification.status !== "read" && (
                             <button
                               onClick={() => void handleStatus(notification, "read")}
-                              disabled={isSaving}
+                              disabled={isSaving || isProcessing}
                               className="px-2 py-1 bg-brand-charcoal text-white text-[9px] uppercase font-bold disabled:opacity-50"
                             >
-                              Read
+                              {isProcessing ? "Acknowledging..." : "Acknowledge"}
                             </button>
                           )}
-                          {notification.status === "read" && canMarkRead && (
+                          {notification.status === "read" && (
                             <button
                               onClick={() => void handleStatus(notification, "unread")}
-                              disabled={isSaving}
+                              disabled={isSaving || isProcessing}
                               className="px-2 py-1 bg-stone-200 text-stone-700 text-[9px] uppercase font-bold disabled:opacity-50"
                             >
                               Unread
                             </button>
                           )}
-                          {notification.status !== "resolved" && canResolve && (
+                          {notification.status !== "resolved" && (
                             <button
                               onClick={() => void handleStatus(notification, "resolved")}
-                              disabled={isSaving}
+                              disabled={isSaving || isProcessing}
                               className="px-2 py-1 bg-emerald-700 text-white text-[9px] uppercase font-bold disabled:opacity-50"
                             >
-                              Resolve
+                              {isProcessing ? "Resolving..." : "Resolve"}
                             </button>
                           )}
-                          {canArchive && notification.status !== "archived" && (
+                          {notification.status !== "archived" && (
                             <button
                               onClick={() => void handleStatus(notification, "archived")}
-                              disabled={isSaving}
+                              disabled={isSaving || isProcessing}
                               className="px-2 py-1 bg-red-700 text-white text-[9px] uppercase font-bold disabled:opacity-50"
                             >
-                              Archive
+                              {isProcessing ? "Archiving..." : "Archive"}
                             </button>
                           )}
                           {route && (
@@ -489,6 +595,18 @@ export const Notifications: React.FC = () => {
         )}
       </section>
 
+      {hasMore && !isLoading && (
+        <div className="flex justify-center">
+          <button
+            type="button"
+            onClick={() => void loadData(page + 1, true)}
+            className="border-2 border-brand-orange px-5 py-3 text-xs font-black uppercase text-brand-orange"
+          >
+            Load More Notifications
+          </button>
+        </div>
+      )}
+
       {selected && (
         <div className="fixed inset-0 z-50 flex justify-end bg-brand-charcoal/40 backdrop-blur-sm">
           <div className="w-full max-w-xl bg-white h-full shadow-2xl border-l-4 border-brand-orange flex flex-col">
@@ -509,6 +627,11 @@ export const Notifications: React.FC = () => {
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-5 space-y-5">
+              {actionError && (
+                <div className="border-l-4 border-red-600 bg-red-50 p-3 text-xs font-bold text-red-700 flex items-center gap-2">
+                  <AlertTriangle size={14} /> {actionError}
+                </div>
+              )}
               <div className="flex flex-wrap gap-2">
                 <span className={`px-2 py-1 text-[9px] font-black uppercase tracking-widest ${priorityClass(selected.priority)}`}>
                   {selected.priority}
@@ -525,7 +648,7 @@ export const Notifications: React.FC = () => {
                   Record: <span className="text-brand-charcoal">{selected.recordType}:{selected.recordId}</span>
                 </p>
                 <p className="bg-stone-50 border border-stone-100 p-3">
-                  Assigned: <span className="text-brand-charcoal">{selected.assignedToName || selected.assignedToStaffId || "Team"}</span>
+                  Assigned: <span className="text-brand-charcoal">{selected.assignedToName || selected.assignedToStaffId || "Unassigned"}</span>
                 </p>
                 <p className="bg-stone-50 border border-stone-100 p-3">
                   Created: <span className="text-brand-charcoal">{new Date(selected.createdAt).toLocaleString()}</span>
@@ -541,40 +664,40 @@ export const Notifications: React.FC = () => {
               )}
             </div>
             <div className="p-5 border-t border-stone-200 bg-white flex flex-wrap gap-2">
-              {canMarkRead && selected.status !== "read" && (
+              {selected.status !== "read" && (
                 <button
                   onClick={() => void handleStatus(selected, "read")}
-                  disabled={isSaving}
+                  disabled={isSaving || processingNotificationId === selected.id}
                   className="px-3 py-2 bg-brand-charcoal text-white text-[10px] uppercase font-black tracking-widest flex items-center gap-2 disabled:opacity-50"
                 >
-                  <MailOpen size={14} /> Mark Read
+                  <MailOpen size={14} /> {processingNotificationId === selected.id ? "Acknowledging..." : "Acknowledge"}
                 </button>
               )}
-              {canMarkRead && selected.status === "read" && (
+              {selected.status === "read" && (
                 <button
                   onClick={() => void handleStatus(selected, "unread")}
-                  disabled={isSaving}
+                  disabled={isSaving || processingNotificationId === selected.id}
                   className="px-3 py-2 bg-stone-200 text-stone-700 text-[10px] uppercase font-black tracking-widest flex items-center gap-2 disabled:opacity-50"
                 >
                   <Bell size={14} /> Mark Unread
                 </button>
               )}
-              {canResolve && selected.status !== "resolved" && (
+              {selected.status !== "resolved" && (
                 <button
                   onClick={() => void handleStatus(selected, "resolved")}
-                  disabled={isSaving}
+                  disabled={isSaving || processingNotificationId === selected.id}
                   className="px-3 py-2 bg-emerald-700 text-white text-[10px] uppercase font-black tracking-widest flex items-center gap-2 disabled:opacity-50"
                 >
-                  <Check size={14} /> Resolve
+                  <Check size={14} /> {processingNotificationId === selected.id ? "Resolving..." : "Resolve"}
                 </button>
               )}
-              {canArchive && selected.status !== "archived" && (
+              {selected.status !== "archived" && (
                 <button
                   onClick={() => void handleStatus(selected, "archived")}
-                  disabled={isSaving}
+                  disabled={isSaving || processingNotificationId === selected.id}
                   className="px-3 py-2 bg-red-700 text-white text-[10px] uppercase font-black tracking-widest flex items-center gap-2 disabled:opacity-50"
                 >
-                  <Archive size={14} /> Archive
+                  <Archive size={14} /> {processingNotificationId === selected.id ? "Archiving..." : "Archive"}
                 </button>
               )}
               {relatedRoute(selected) && (

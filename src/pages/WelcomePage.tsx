@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   Eye,
@@ -21,7 +21,7 @@ interface WelcomePageProps {
 }
 
 const WelcomePage: React.FC<WelcomePageProps> = ({
-  googleEmail = "user@example.com",
+  googleEmail = "seiGEN Commerce",
   onLoginSuccess,
   sessionMessage,
 }) => {
@@ -84,16 +84,13 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
       }
     }
 
-    if (
-      staffToLogin.status === "suspended" ||
-      staffToLogin.status === "inactive"
-    ) {
+    if (staffToLogin.status !== "active") {
       setLoginError(
-        "This staff account is suspended or inactive. Contact SysAdmin.",
+        "This staff account is not active. Contact SysAdmin.",
       );
       try {
         analyticsService.logEvent({
-          eventType: "STAFF_LOGIN_BLOCKED_SUSPENDED",
+          eventType: "STAFF_LOGIN_BLOCKED_INACTIVE",
           actorType: "system",
           actorName: "Login System",
           result: "blocked",
@@ -355,20 +352,24 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
 
   const isSelectedStaffBlocked =
     !!selectedStaff &&
-    (selectedStaff.status === "suspended" || selectedStaff.isLocked);
+    (selectedStaff.status !== "active" || selectedStaff.isLocked);
 
-  const selectableStaff = allStaff.filter((s) => {
-    const status = (s.status || "").toLowerCase();
-    const role = (s.role || "").toLowerCase();
-    const desk = (s.desk || "").toLowerCase();
+  const selectableStaff = useMemo(() => {
+    const activeById = new Map<string, Staff>();
 
-    return (
-      status === "active" ||
-      role === "admin" ||
-      role === "sysadmin" ||
-      desk === "sysadmin desk"
+    allStaff.forEach((staff) => {
+      if (staff.status !== "active" || staff.isLocked) return;
+      const key = staff.id || staff.staffCode || staff.email || staff.fullName;
+      if (!key || activeById.has(key)) return;
+      activeById.set(key, staff);
+    });
+
+    return Array.from(activeById.values()).sort((a, b) =>
+      (a.fullName || a.displayName || a.email || a.staffCode || "").localeCompare(
+        b.fullName || b.displayName || b.email || b.staffCode || "",
+      ),
     );
-  });
+  }, [allStaff]);
 
   return (
     <div style={styles.page}>
@@ -408,20 +409,21 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
                   <option value="">-- Select Staff --</option>
                   {selectableStaff.map((staff) => (
                     <option key={staff.id} value={staff.id}>
-                      {staff.displayName ||
-                        staff.fullName ||
-                        staff.email ||
-                        staff.staffCode ||
-                        staff.id}
+                      {`${staff.fullName || staff.displayName || staff.email || staff.staffCode || staff.id}${staff.role || staff.desk ? ` — ${[staff.role, staff.desk].filter(Boolean).join(" / ")}` : ""}`}
                     </option>
                   ))}
                 </>
               ) : (
                 <option value="" disabled>
-                  No active staff profiles found. Create SysAdmin profile first.
+                  No active staff profiles available.
                 </option>
               )}
             </select>
+            {!isSetupMode && selectableStaff.length === 0 && (
+              <div style={styles.emptyStaffState}>
+                No active staff profiles available.
+              </div>
+            )}
             <div
               style={{
                 fontSize: "10px",
@@ -843,6 +845,7 @@ const styles: { [key: string]: React.CSSProperties } = {
   },
   select: {
     width: "100%",
+    boxSizing: "border-box",
     padding: "12px",
     border: "1px solid #D0D0D0",
     backgroundColor: "#FFFFFF",
@@ -854,6 +857,16 @@ const styles: { [key: string]: React.CSSProperties } = {
     backgroundRepeat: "no-repeat",
     backgroundPosition: "right 12px center",
     cursor: "pointer",
+  },
+  emptyStaffState: {
+    marginTop: "8px",
+    padding: "10px",
+    border: "1px solid #E0E0E0",
+    backgroundColor: "#F8F8F8",
+    color: "#666666",
+    fontSize: "12px",
+    fontWeight: "bold",
+    textTransform: "uppercase",
   },
   loginForm: {
     marginTop: "25px",

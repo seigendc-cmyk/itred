@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Vendor } from "../types.ts";
+import { Vendor, VendorListItem } from "../types.ts";
 import { asArray } from "../utils/safeData.ts";
 import { getStorageAdapter } from "./storageService.ts";
 import { analyticsService } from "./analyticsService.ts";
@@ -11,6 +11,9 @@ import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { storage } from "../lib/firebase.ts";
 import { notificationService } from "./notificationService.ts";
 import { settingsService } from "./settingsService.ts";
+import { CACHE_TTL, dataCacheService } from "./dataCacheService.ts";
+import { readDiagnosticsService } from "./readDiagnosticsService.ts";
+import { getSession, getSessionRole, getSessionStaffName } from "../utils/session.ts";
 
 const VENDORS_KEY = "itred_vendors";
 
@@ -31,13 +34,88 @@ const assignedRpnId = (vendor: Vendor) =>
 
 export const vendorService = {
   getVendors: async (): Promise<Vendor[]> => {
+    return dataCacheService.getOrFetch("vendors-full", CACHE_TTL.VENDORS, async () => {
     try {
       const data = await getStorageAdapter().getItem<Vendor[]>(VENDORS_KEY);
-      return asArray<Vendor>(data);
+      const vendors = asArray<Vendor>(data);
+      readDiagnosticsService.track("vendorService", VENDORS_KEY, "getVendors", vendors.length);
+      return vendors;
     } catch (error) {
       console.warn("Firebase Error: Failed to get vendors", error);
       return [];
     }
+    });
+  },
+
+  toListItem: (vendor: Vendor): VendorListItem => ({
+    id: vendor.id,
+    name: vendor.name,
+    tradingName: vendor.tradingName,
+    status: vendor.status,
+    planId: vendor.planId,
+    sector: vendor.sector,
+    category: vendor.category,
+    province: vendor.province,
+    cityTown: vendor.cityTown,
+    district: vendor.district,
+    suburb: vendor.suburb,
+    rpnId: assignedRpnId(vendor),
+    readinessScore: (vendor as any).readinessScore,
+    productCount: (vendor as any).productCount,
+    branchCount: Array.isArray(vendor.branches) ? vendor.branches.length : 0,
+    updatedAt: vendor.updatedAt,
+  }),
+
+  getList: async (limit = 100): Promise<VendorListItem[]> => {
+    return dataCacheService.getOrFetch(`vendors-list:${limit}`, CACHE_TTL.VENDORS, async () => {
+      const vendors = await vendorService.getVendors();
+      return vendors
+        .map(vendorService.toListItem)
+        .sort(
+          (a, b) =>
+            new Date(b.updatedAt || 0).getTime() -
+            new Date(a.updatedAt || 0).getTime(),
+        )
+        .slice(0, limit);
+    });
+  },
+
+  getActiveList: async (limit = 100): Promise<VendorListItem[]> => {
+    return dataCacheService.getOrFetch(`vendors-active-list:${limit}`, CACHE_TTL.VENDORS, async () => {
+      const vendors = await vendorService.getVendors();
+      return vendors
+        .filter((vendor) => vendor.status === "active")
+        .map(vendorService.toListItem)
+        .slice(0, limit);
+    });
+  },
+
+  getActive: async (): Promise<Vendor[]> => {
+    const vendors = await vendorService.getVendors();
+    return vendors.filter((vendor) => vendor.status === "active");
+  },
+
+  getVendorsBySector: async (sector: string): Promise<Vendor[]> => {
+    const normalizedSector = String(sector || "").trim().toLowerCase();
+    if (!normalizedSector) return [];
+    const vendors = await vendorService.getVendors();
+    return vendors.filter(
+      (vendor) =>
+        String(vendor.sector || "").trim().toLowerCase() === normalizedSector,
+    );
+  },
+
+  getByRpnId: async (rpnId: string): Promise<Vendor[]> => {
+    const vendors = await vendorService.getVendors();
+    return vendors.filter((vendor) => assignedRpnId(vendor) === rpnId);
+  },
+
+  getByDateRange: async (from: string, to: string): Promise<Vendor[]> => {
+    const vendors = await vendorService.getVendors();
+    return vendors.filter((vendor) => {
+      const date = (vendor.updatedAt || vendor.createdAt || "").slice(0, 10);
+      return (!from || date >= from) && (!to || date <= to);
+    });
   },
 
   generateSystemCode: (vendors: Vendor[]): string => {
@@ -68,7 +146,7 @@ export const vendorService = {
         v.systemCode = vendorService.generateSystemCode(vendors);
         changed = true;
 
-        await analyticsService.logEvent({
+        void analyticsService.logEvent({
           eventType: "VENDOR_SYSTEM_CODE_GENERATED",
           actorType: "system",
           actorName: "Migration Helper",
@@ -86,6 +164,7 @@ export const vendorService = {
 
   saveVendors: async (vendors: Vendor[]): Promise<void> => {
     await getStorageAdapter().setItem(VENDORS_KEY, vendors);
+    dataCacheService.clearCache();
   },
 
   getVendorById: async (id: string): Promise<Vendor | undefined> => {
@@ -96,6 +175,9 @@ export const vendorService = {
   updateVendor: async (vendor: Vendor): Promise<void> => {
     console.log("Saving vendor to itred_vendors");
     try {
+      const session = getSession();
+      const actorName = getSessionStaffName(session, "Unknown staff");
+      const actorType = getSessionRole(session);
       const vendors = await vendorService.getVendors();
       const index = vendors.findIndex((v) => v.id === vendor.id);
       const oldVendor = index >= 0 ? vendors[index] : null;
@@ -108,10 +190,10 @@ export const vendorService = {
           oldVendor.assignedRPNId !== vendor.assignedRPNId &&
           vendor.assignedRPNId
         ) {
-          await analyticsService.logEvent({
+          void analyticsService.logEvent({
             eventType: "VENDOR_ASSIGNED_TO_RPN",
-            actorType: "admin",
-            actorName: "System Admin",
+            actorType,
+            actorName,
             vendorId: vendor.id,
             vendorName: vendor.name,
             details: { rpnId: vendor.assignedRPNId },
@@ -124,7 +206,7 @@ export const vendorService = {
           oldVendor.subscriptionStatus !== vendor.subscriptionStatus
         ) {
           if (vendor.subscriptionStatus === "due") {
-            await analyticsService.logEvent({
+            void analyticsService.logEvent({
               eventType: "SUBSCRIPTION_DUE",
               actorType: "system",
               actorName: "Subscription Engine",
@@ -133,7 +215,7 @@ export const vendorService = {
               details: { status: "due" },
             });
           } else if (vendor.subscriptionStatus === "overdue") {
-            await analyticsService.logEvent({
+            void analyticsService.logEvent({
               eventType: "SUBSCRIPTION_OVERDUE",
               actorType: "system",
               actorName: "Subscription Engine",
@@ -146,10 +228,10 @@ export const vendorService = {
       } else {
         if (!vendor.systemCode) {
           vendor.systemCode = vendorService.generateSystemCode(vendors);
-          await analyticsService.logEvent({
+          void analyticsService.logEvent({
             eventType: "VENDOR_SYSTEM_CODE_GENERATED",
-            actorType: "admin",
-            actorName: "System Admin",
+            actorType,
+            actorName,
             vendorId: vendor.id,
             vendorName: vendor.name,
             details: {
@@ -159,16 +241,17 @@ export const vendorService = {
           });
         }
         vendors.push(vendor);
-        await analyticsService.logEvent({
+        void analyticsService.logEvent({
           eventType: "VENDOR_CREATED",
-          actorType: "admin",
-          actorName: "System Admin",
+          actorType,
+          actorName,
           vendorId: vendor.id,
           vendorName: vendor.name,
           details: { name: vendor.name, tradingName: vendor.tradingName },
         });
       }
       await vendorService.saveVendors(vendors);
+      dataCacheService.clearCache();
       console.log("Vendor saved successfully");
     } catch (error) {
       console.error("Vendor save failed", error);
@@ -180,6 +263,7 @@ export const vendorService = {
     const vendors = await vendorService.getVendors();
     const filtered = vendors.filter((v) => v.id !== id);
     await vendorService.saveVendors(filtered);
+    dataCacheService.clearCache();
   },
 
   uploadVendorLogo: async (vendorId: string, file: Blob): Promise<string> => {
@@ -191,6 +275,21 @@ export const vendorService = {
   uploadVendorBanner: async (vendorId: string, file: Blob): Promise<string> => {
     const storageRef = ref(storage, `vendor-assets/${vendorId}/banner.webp`);
     await uploadBytes(storageRef, file, { contentType: "image/webp" });
+    return getDownloadURL(storageRef);
+  },
+
+  uploadDeliveryProviderDocument: async (
+    vendorId: string,
+    providerId: string,
+    file: Blob,
+    fileName: string,
+  ): Promise<string> => {
+    const extension = fileName.split(".").pop() || "upload";
+    const storageRef = ref(
+      storage,
+      `vendor-assets/${vendorId}/ideliver/${providerId}/police-clearance.${extension}`,
+    );
+    await uploadBytes(storageRef, file, { contentType: file.type || "application/octet-stream" });
     return getDownloadURL(storageRef);
   },
 

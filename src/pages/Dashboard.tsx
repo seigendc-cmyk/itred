@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo } from 'react'
 import {
   FileCode,
   Activity,
@@ -18,19 +18,20 @@ import {
   RotateCcw,
   Wallet,
   Zap,
-} from "lucide-react";
+  Loader2
+} from 'lucide-react'
 import {
   StatCard,
   DataPanel,
   TablePanel,
   StatusBadge,
   ActivityTimeline,
-  PrimaryButton,
-} from "../components/CommonUI.tsx";
-import { vendorService } from "../services/vendorService.ts";
-import { productService } from "../services/productService.ts";
-import { rpnService } from "../services/rpnService.ts";
-import { logService } from "../services/logService.ts";
+  PrimaryButton
+} from '../components/CommonUI.tsx'
+import { vendorService } from '../services/vendorService.ts'
+import { productService } from '../services/productService.ts'
+import { rpnService } from '../services/rpnService.ts'
+import { logService } from '../services/logService.ts'
 import {
   Vendor,
   Product,
@@ -42,27 +43,27 @@ import {
   InventorySpotCheck,
   FieldCollectionRecord,
   PricingPlan,
-  DeskType,
-} from "../types.ts";
-import { catalogueService } from "../services/catalogueService.ts";
-import { subscriptionService } from "../services/subscriptionService.ts";
-import { inventorySpotCheckService } from "../services/inventorySpotCheckService.ts";
-import { pricingPlanService } from "../services/pricingPlanService.ts";
-import { biService } from "../services/biService.ts";
-import { permissionService } from "../services/permissionService.ts";
-import { asArray } from "../utils/safeData.ts";
+  DeskType
+} from '../types.ts'
+import { catalogueService } from '../services/catalogueService.ts'
+import { subscriptionService } from '../services/subscriptionService.ts'
+import { inventorySpotCheckService } from '../services/inventorySpotCheckService.ts'
+import { pricingPlanService } from '../services/pricingPlanService.ts'
+import { biService } from '../services/biService.ts'
+import { permissionService } from '../services/permissionService.ts'
+import { asArray } from '../utils/safeData.ts'
 
 type DashboardData = {
-  vendors: Vendor[];
-  products: Product[];
-  rpns: RPN[];
-  logs: ActivityLog[];
-  catalogues: CatalogueGeneration[];
-  subscriptions: Subscription[];
-  spotChecks: InventorySpotCheck[];
-  fieldCollections: FieldCollectionRecord[];
-  plans: PricingPlan[];
-};
+  vendors: Vendor[]
+  products: Product[]
+  rpns: RPN[]
+  logs: ActivityLog[]
+  catalogues: CatalogueGeneration[]
+  subscriptions: Subscription[]
+  spotChecks: InventorySpotCheck[]
+  fieldCollections: FieldCollectionRecord[]
+  plans: PricingPlan[]
+}
 
 const EMPTY_DASHBOARD_DATA: DashboardData = {
   vendors: [],
@@ -73,44 +74,46 @@ const EMPTY_DASHBOARD_DATA: DashboardData = {
   subscriptions: [],
   spotChecks: [],
   fieldCollections: [],
-  plans: [],
-};
+  plans: []
+}
 
 const safeLoadArray = async <T,>(
   label: string,
-  loader: () => T[] | Promise<T[]>,
+  loader: () => T[] | Promise<T[]>
 ): Promise<T[]> => {
   try {
-    const result = await Promise.resolve(loader());
-    return asArray<T>(result);
+    const result = await Promise.resolve(loader())
+    return asArray<T>(result)
   } catch (error) {
-    console.warn(
-      `Dashboard could not load ${label}. Using empty array.`,
-      error,
-    );
-    return [];
+    console.warn(`Dashboard could not load ${label}. Using empty array.`, error)
+    return []
   }
-};
+}
 
 export const Dashboard: React.FC = () => {
-  console.log("Dashboard mounted successfully");
-  const [data, setData] = useState<DashboardData>(EMPTY_DASHBOARD_DATA);
+  console.log('Dashboard mounted successfully')
+  const [data, setData] = useState<DashboardData>(EMPTY_DASHBOARD_DATA)
+  const [isLoadingData, setIsLoadingData] = useState(true)
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === 'undefined') return
 
-    let mounted = true;
+    let mounted = true
 
     const loadDashboardData = async () => {
+      setIsLoadingData(true)
+      const startMs = performance.now()
       try {
-        await Promise.resolve(catalogueService.checkExpirations()).catch(
-          (error) => {
-            console.warn(
-              "Catalogue expiration check failed. Dashboard will continue.",
-              error,
-            );
-          },
-        );
+        if (typeof (catalogueService as any).checkExpirations === 'function') {
+          await Promise.resolve((catalogueService as any).checkExpirations()).catch(
+            error => {
+              console.warn(
+                'Catalogue expiration check failed. Dashboard will continue.',
+                error
+              )
+            }
+          )
+        }
 
         const [
           vendors,
@@ -121,36 +124,36 @@ export const Dashboard: React.FC = () => {
           subscriptions,
           spotChecks,
           fieldCollections,
-          plans,
+          plans
         ] = await Promise.all([
-          safeLoadArray<Vendor>("itred_vendors", () =>
-            vendorService.getVendors(),
+          safeLoadArray<Vendor>('itred_vendors', () =>
+            vendorService.getVendors()
           ),
-          safeLoadArray<Product>("itred_products", () =>
-            productService.getProducts(),
+          safeLoadArray<Product>('itred_products', () =>
+            productService.getProducts()
           ),
-          safeLoadArray<RPN>("RPNs", () => rpnService.getAll()),
-          safeLoadArray<ActivityLog>("activity logs", () =>
-            logService.getAll(),
+          safeLoadArray<RPN>('RPNs', () => rpnService.getAll()),
+          safeLoadArray<ActivityLog>('activity logs', () =>
+            logService.getAll()
           ),
-          safeLoadArray<CatalogueGeneration>("itred_catalogues", () =>
-            catalogueService.getHistory(),
+          safeLoadArray<CatalogueGeneration>('itred_catalogues', () =>
+            catalogueService.getHistory()
           ),
-          safeLoadArray<Subscription>("itred_subscriptions", () =>
-            subscriptionService.getAllSubscriptions(),
+          safeLoadArray<Subscription>('itred_subscriptions', () =>
+            subscriptionService.getAllSubscriptions()
           ),
-          safeLoadArray<InventorySpotCheck>("spot checks", () =>
-            inventorySpotCheckService.getSpotChecks(),
+          safeLoadArray<InventorySpotCheck>('spot checks', () =>
+            inventorySpotCheckService.getSpotChecks()
           ),
-          safeLoadArray<FieldCollectionRecord>("field collections", () =>
-            rpnService.getCollections(),
+          safeLoadArray<FieldCollectionRecord>('field collections', () =>
+            rpnService.getCollections()
           ),
-          safeLoadArray<PricingPlan>("pricing plans", () =>
-            pricingPlanService.getPlans(),
-          ),
-        ]);
+          safeLoadArray<PricingPlan>('pricing plans', () =>
+            pricingPlanService.getPlans()
+          )
+        ])
 
-        if (!mounted) return;
+        if (!mounted) return
 
         setData({
           vendors,
@@ -161,186 +164,190 @@ export const Dashboard: React.FC = () => {
           subscriptions,
           spotChecks,
           fieldCollections,
-          plans,
-        });
+          plans
+        })
       } catch (error) {
-        console.warn("Dashboard data load failed. Using safe defaults.", error);
+        console.warn('Dashboard data load failed. Using safe defaults.', error)
 
         if (mounted) {
-          setData(EMPTY_DASHBOARD_DATA);
+          setData(EMPTY_DASHBOARD_DATA)
+        }
+      } finally {
+        if (mounted) {
+          setIsLoadingData(false)
+          console.info('Data load completed', {
+            page: 'Dashboard',
+            elapsedMs: Math.round(performance.now() - startMs)
+          })
         }
       }
-    };
+    }
 
-    void loadDashboardData();
+    void loadDashboardData()
 
     return () => {
-      mounted = false;
-    };
-  }, []);
+      mounted = false
+    }
+  }, [])
 
-  const vendors = asArray<Vendor>(data.vendors);
-  const products = asArray<Product>(data.products);
-  const rpns = asArray<RPN>(data.rpns);
-  const logs = asArray<ActivityLog>(data.logs);
-  const catalogues = asArray<CatalogueGeneration>(data.catalogues);
-  const subscriptions = asArray<Subscription>(data.subscriptions);
-  const spotChecks = asArray<InventorySpotCheck>(data.spotChecks);
-  const fieldCollections = asArray<FieldCollectionRecord>(
-    data.fieldCollections,
-  );
-  const plans = asArray<PricingPlan>(data.plans);
+  const vendors = asArray<Vendor>(data.vendors)
+  const products = asArray<Product>(data.products)
+  const rpns = asArray<RPN>(data.rpns)
+  const logs = asArray<ActivityLog>(data.logs)
+  const catalogues = asArray<CatalogueGeneration>(data.catalogues)
+  const subscriptions = asArray<Subscription>(data.subscriptions)
+  const spotChecks = asArray<InventorySpotCheck>(data.spotChecks)
+  const fieldCollections = asArray<FieldCollectionRecord>(data.fieldCollections)
+  const plans = asArray<PricingPlan>(data.plans)
 
   const navigateTo = (path: string) => {
-    if (typeof window !== "undefined") {
-      window.location.href = path;
+    if (typeof window !== 'undefined') {
+      window.location.href = path
     }
-  };
+  }
 
   const reminders = useMemo(() => {
-    const now = new Date();
-    const todayStr = now.toISOString().split("T")[0];
+    const now = new Date()
+    const todayStr = now.toISOString().split('T')[0]
 
-    const twoDaysFromNow = new Date(now);
-    twoDaysFromNow.setDate(now.getDate() + 2);
-    const twoDaysStr = twoDaysFromNow.toISOString().split("T")[0];
+    const twoDaysFromNow = new Date(now)
+    twoDaysFromNow.setDate(now.getDate() + 2)
+    const twoDaysStr = twoDaysFromNow.toISOString().split('T')[0]
 
-    const startOfWeek = new Date(now);
-    startOfWeek.setDate(now.getDate() - now.getDay());
-    const endOfWeek = new Date(startOfWeek);
-    endOfWeek.setDate(startOfWeek.getDate() + 6);
-    const endOfWeekStr = endOfWeek.toISOString().split("T")[0];
+    const startOfWeek = new Date(now)
+    startOfWeek.setDate(now.getDate() - now.getDay())
+    const endOfWeek = new Date(startOfWeek)
+    endOfWeek.setDate(startOfWeek.getDate() + 6)
+    const endOfWeekStr = endOfWeek.toISOString().split('T')[0]
 
     // 1. Catalogue Reminders
     const catReminders = {
       expiringToday: catalogues.filter(
-        (c) => c.status === "deployed" && c.expiryDate?.startsWith(todayStr),
+        c => c.status === 'deployed' && c.expiryDate?.startsWith(todayStr)
       ),
       expiringSoon: catalogues.filter(
-        (c) =>
-          c.status === "deployed" &&
+        c =>
+          c.status === 'deployed' &&
           c.expiryDate &&
           c.expiryDate > todayStr &&
-          c.expiryDate <= twoDaysStr,
+          c.expiryDate <= twoDaysStr
       ),
-      expired: catalogues.filter((c) => c.status === "expired"),
-      needingFresh: [] as string[],
-    };
+      expired: catalogues.filter(c => c.status === 'expired'),
+      needingFresh: [] as string[]
+    }
 
-    const sectors = [...new Set(vendors.map((v) => v.sector).filter(Boolean))];
+    const sectors = [...new Set(vendors.map(v => v.sector).filter(Boolean))]
 
-    catReminders.needingFresh = sectors.filter((s) => {
+    catReminders.needingFresh = sectors.filter(s => {
       const activeInSector = catalogues.some(
-        (c) => c.sector === s && c.status === "deployed",
-      );
-      return !activeInSector;
-    });
+        c => c.sector === s && c.status === 'deployed'
+      )
+      return !activeInSector
+    })
 
     // 2. Subscription Reminders
     const subReminders = {
       dueToday: subscriptions.filter(
-        (s) => s.status !== "paid" && s.dueDate?.startsWith(todayStr),
+        s => s.status !== 'paid' && s.dueDate?.startsWith(todayStr)
       ),
       dueThisWeek: subscriptions.filter(
-        (s) =>
-          s.status !== "paid" &&
+        s =>
+          s.status !== 'paid' &&
           s.dueDate &&
           s.dueDate > todayStr &&
-          s.dueDate <= endOfWeekStr,
+          s.dueDate <= endOfWeekStr
       ),
-      overdue: subscriptions.filter((s) => s.status === "overdue"),
+      overdue: subscriptions.filter(s => s.status === 'overdue'),
       promised: subscriptions.filter(
-        (s) => s.followUpStatus === "promised to pay",
+        s => s.followUpStatus === 'promised to pay'
       ),
-      suspended: vendors.filter((v) => v.status === "suspended"),
-    };
+      suspended: vendors.filter(v => v.status === 'suspended')
+    }
 
     // 3. RPN Reminders
     const rpnReminders = {
-      followUpsToday: subscriptions.filter((s) =>
-        s.nextFollowUpDate?.startsWith(todayStr),
+      followUpsToday: subscriptions.filter(s =>
+        s.nextFollowUpDate?.startsWith(todayStr)
       ),
       pendingEntries: fieldCollections.filter(
-        (c) => c.status === "pending backend entry",
+        c => c.status === 'pending backend entry'
       ),
-      notContacted: vendors.filter((v) => {
+      notContacted: vendors.filter(v => {
         const lastActivity = logs
-          .filter((l) => l.vendorId === v.id)
-          .sort((a, b) => b.timestamp.localeCompare(a.timestamp))[0];
+          .filter(l => l.vendorId === v.id)
+          .sort((a, b) => b.timestamp.localeCompare(a.timestamp))[0]
 
-        if (!lastActivity) return true;
+        if (!lastActivity) return true
 
-        const lastDate = new Date(lastActivity.timestamp);
+        const lastDate = new Date(lastActivity.timestamp)
         const daysSince =
-          (now.getTime() - lastDate.getTime()) / (1000 * 3600 * 24);
+          (now.getTime() - lastDate.getTime()) / (1000 * 3600 * 24)
 
-        return daysSince > 30;
+        return daysSince > 30
       }),
       overdueFollowUps: subscriptions.filter(
-        (s) =>
+        s =>
           s.nextFollowUpDate &&
           s.nextFollowUpDate < todayStr &&
-          s.followUpStatus !== "paid",
-      ),
-    };
+          s.followUpStatus !== 'paid'
+      )
+    }
 
     // 4. Spot Check Reminders
     const spotReminders = {
       dueToday: spotChecks.filter(
-        (s) => s.status === "scheduled" && s.checkDate?.startsWith(todayStr),
+        s => s.status === 'scheduled' && s.checkDate?.startsWith(todayStr)
       ),
       overdue: spotChecks.filter(
-        (s) => s.status === "scheduled" && s.checkDate < todayStr,
+        s => s.status === 'scheduled' && s.checkDate < todayStr
       ),
-      biRecommended: vendors.filter((v) => {
-        const insight = biService.calculateVendorReadiness(v, products);
-        return insight.score < 60;
+      biRecommended: vendors.filter(v => {
+        const insight = biService.calculateVendorReadiness(v, products)
+        return insight.score < 60
       }),
-      entitlementExceeded: vendors.filter((v) => {
-        const plan = plans.find((p) => p.id === v.planId);
+      entitlementExceeded: vendors.filter(v => {
+        const plan = plans.find(p => p.id === v.planId)
 
-        if (!plan || !plan.isInventorySpotCheckIncluded) return false;
+        if (!plan || !plan.isInventorySpotCheckIncluded) return false
 
         const monthChecks = inventorySpotCheckService.getSpotChecksByMonth(
           v.id,
           now.getMonth(),
-          now.getFullYear(),
-        );
+          now.getFullYear()
+        )
 
-        return monthChecks.length > plan.inventorySpotChecksPerMonth;
-      }),
-    };
+        return monthChecks.length > plan.inventorySpotChecksPerMonth
+      })
+    }
 
     // 5. Data Quality
     const qualityWarnings = {
-      missingImages: products.filter(
-        (p) => p.status === "active" && !p.imageUrl,
-      ).length,
-      missingPrice: products.filter(
-        (p) =>
-          p.status === "active" && (!p.sellingPrice || p.sellingPrice === 0),
-      ).length,
-      missingLocation: vendors.filter((v) => !v.streetAddress || !v.cityTown)
+      missingImages: products.filter(p => p.status === 'active' && !p.imageUrl)
         .length,
-      missingWhatsApp: vendors.filter((v) => !v.whatsappNumber).length,
+      missingPrice: products.filter(
+        p => p.status === 'active' && (!p.sellingPrice || p.sellingPrice === 0)
+      ).length,
+      missingLocation: vendors.filter(v => !v.streetAddress || !v.cityTown)
+        .length,
+      missingWhatsApp: vendors.filter(v => !v.whatsappNumber).length,
       stockOutPublished: products.filter(
-        (p) => p.publishToCatalogue && p.stockQuantity <= 0,
+        p => p.publishToCatalogue && p.stockQuantity <= 0
       ).length,
       expiredDeployed: catalogues.filter(
-        (c) =>
-          c.status === "deployed" &&
+        c =>
+          c.status === 'deployed' &&
           c.expiryDate &&
-          new Date(c.expiryDate) < now,
-      ).length,
-    };
+          new Date(c.expiryDate) < now
+      ).length
+    }
 
     return {
       catReminders,
       subReminders,
       rpnReminders,
       spotReminders,
-      qualityWarnings,
-    };
+      qualityWarnings
+    }
   }, [
     vendors,
     products,
@@ -349,67 +356,80 @@ export const Dashboard: React.FC = () => {
     subscriptions,
     spotChecks,
     fieldCollections,
-    plans,
-  ]);
+    plans
+  ])
 
   const stats = useMemo(() => {
     return [
       {
-        label: "Active Reminders",
+        label: 'Active Reminders',
         value:
           reminders.catReminders.expired.length +
           reminders.subReminders.overdue.length +
           reminders.rpnReminders.pendingEntries.length,
         icon: Activity,
-        variant: "warning",
+        variant: 'warning'
       },
       {
-        label: "Pending Audit",
+        label: 'Pending Audit',
         value:
           reminders.spotReminders.dueToday.length +
           reminders.spotReminders.overdue.length,
         icon: ClipboardCheck,
-        variant: "neutral",
+        variant: 'neutral'
       },
       {
-        label: "Overdue Collections",
+        label: 'Overdue Collections',
         value: reminders.subReminders.overdue.length,
         icon: Wallet,
-        variant: "error",
+        variant: 'error'
       },
       {
-        label: "Quality Alerts",
+        label: 'Quality Alerts',
         value: Object.values(reminders.qualityWarnings).reduce(
           (a, b) => a + b,
-          0,
+          0
         ),
         icon: AlertTriangle,
-        variant: "info",
-      },
-    ];
-  }, [reminders]);
+        variant: 'info'
+      }
+    ]
+  }, [reminders])
+
+  if (isLoadingData) {
+    return (
+      <div className='pb-20 min-w-0 max-w-full flex items-center justify-center pt-20'>
+        <div className='text-center text-stone-400'>
+          <Loader2 className='w-8 h-8 animate-spin mx-auto mb-4' />
+          <p className='text-xs font-bold uppercase tracking-widest'>
+            Loading Dashboard...
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   return (
-    <div className="space-y-8 pb-10">
+    <div className='space-y-8 pb-10'>
       {/* Header Info */}
-      <div className="flex justify-between items-end">
+      <div className='flex justify-between items-end'>
         {/* This header will be replaced by desk-specific headers */}
       </div>
 
       {/* Quick Actions */}
-      <div className="flex gap-3">
-        {permissionService.canCreate("createCatalogue") && (
+      <div className='flex gap-3'>
+        {permissionService.canCreate('createCatalogue') && (
           <PrimaryButton
             onClick={() => navigateTo(`/${AppRoute.CATALOGUE_GEN}`)}
-            className="bg-brand-orange"
+            className='bg-brand-orange'
           >
-            Create Catalogue <Zap size={14} className="ml-2" />
+            Create Catalogue <Zap size={14} className='ml-2' />
           </PrimaryButton>
         )}
       </div>
 
       {/* Top Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6'>
         {stats.map((stat, i) => (
           <StatCard
             key={i}
@@ -424,66 +444,66 @@ export const Dashboard: React.FC = () => {
       {/* Desk-specific content */}
       {(() => {
         const staffSession = JSON.parse(
-          localStorage.getItem("activeStaffSession") || "{}",
-        );
-        const desk = staffSession.desk as DeskType;
+          localStorage.getItem('activeStaffSession') || '{}'
+        )
+        const desk = staffSession.desk as DeskType
 
         const commonDeskHeader = (deskName: string) => (
-          <div className="flex justify-between items-end mb-6">
+          <div className='flex justify-between items-end mb-6'>
             <div>
-              <h1 className="text-2xl font-black uppercase text-brand-charcoal tracking-tight">
+              <h1 className='text-2xl font-black uppercase text-brand-charcoal tracking-tight'>
                 {deskName}
               </h1>
-              <p className="text-xs font-bold text-stone-400 mt-1 uppercase tracking-wider">
-                Welcome, {staffSession.staffName || "User"} (
-                {staffSession.role || "No Role"})
+              <p className='text-xs font-bold text-stone-400 mt-1 uppercase tracking-wider'>
+                Welcome, {staffSession.staffName || 'User'} (
+                {staffSession.role || 'No Role'})
               </p>
             </div>
           </div>
-        );
+        )
 
         switch (desk) {
-          case "SysAdmin Desk":
+          case 'SysAdmin Desk':
             return (
               <>
-                {commonDeskHeader("SysAdmin Desk")}
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                  <div className="lg:col-span-2 space-y-8">
+                {commonDeskHeader('SysAdmin Desk')}
+                <div className='grid grid-cols-1 lg:grid-cols-3 gap-8'>
+                  <div className='lg:col-span-2 space-y-8'>
                     <DataPanel
-                      title="Priority Operational Queue"
-                      className="border-l-4 border-l-red-500"
+                      title='Priority Operational Queue'
+                      className='border-l-4 border-l-red-500'
                     >
-                      <div className="p-0 border-t border-stone-100">
-                        <div className="divide-y divide-stone-100">
+                      <div className='p-0 border-t border-stone-100'>
+                        <div className='divide-y divide-stone-100'>
                           {reminders.catReminders.expired.length > 0 && (
-                            <div className="p-4 flex items-center justify-between hover:bg-stone-50 transition-colors">
-                              <div className="flex items-center gap-4">
-                                <div className="w-10 h-10 rounded-lg bg-red-100 flex items-center justify-center text-red-600">
+                            <div className='p-4 flex items-center justify-between hover:bg-stone-50 transition-colors'>
+                              <div className='flex items-center gap-4'>
+                                <div className='w-10 h-10 rounded-lg bg-red-100 flex items-center justify-center text-red-600'>
                                   <History size={20} />
                                 </div>
                                 <div>
-                                  <p className="text-xs font-bold uppercase text-brand-charcoal">
+                                  <p className='text-xs font-bold uppercase text-brand-charcoal'>
                                     Expired Catalogues Detected
                                   </p>
-                                  <p className="text-[10px] text-stone-400 font-bold">
-                                    {reminders.catReminders.expired.length}{" "}
+                                  <p className='text-[10px] text-stone-400 font-bold'>
+                                    {reminders.catReminders.expired.length}{' '}
                                     sectors are running on dead assets.
                                   </p>
                                 </div>
                               </div>
-                              <div className="flex items-center gap-3">
+                              <div className='flex items-center gap-3'>
                                 <StatusBadge
-                                  status="High Priority"
-                                  variant="error"
+                                  status='High Priority'
+                                  variant='error'
                                 />
                                 {permissionService.canCreate(
-                                  "createCatalogue",
+                                  'createCatalogue'
                                 ) && (
                                   <button
                                     onClick={() =>
                                       navigateTo(`/${AppRoute.CATALOGUE_GEN}`)
                                     }
-                                    className="p-2 text-stone-400 hover:text-brand-orange"
+                                    className='p-2 text-stone-400 hover:text-brand-orange'
                                   >
                                     <RotateCcw size={16} />
                                   </button>
@@ -493,35 +513,35 @@ export const Dashboard: React.FC = () => {
                           )}
 
                           {reminders.subReminders.overdue.length > 0 && (
-                            <div className="p-4 flex items-center justify-between hover:bg-stone-50 transition-colors">
-                              <div className="flex items-center gap-4">
-                                <div className="w-10 h-10 rounded-lg bg-orange-100 flex items-center justify-center text-orange-600">
+                            <div className='p-4 flex items-center justify-between hover:bg-stone-50 transition-colors'>
+                              <div className='flex items-center gap-4'>
+                                <div className='w-10 h-10 rounded-lg bg-orange-100 flex items-center justify-center text-orange-600'>
                                   <Wallet size={20} />
                                 </div>
                                 <div>
-                                  <p className="text-xs font-bold uppercase text-brand-charcoal">
+                                  <p className='text-xs font-bold uppercase text-brand-charcoal'>
                                     Subscription Arrears
                                   </p>
-                                  <p className="text-[10px] text-stone-400 font-bold">
-                                    {reminders.subReminders.overdue.length}{" "}
+                                  <p className='text-[10px] text-stone-400 font-bold'>
+                                    {reminders.subReminders.overdue.length}{' '}
                                     Vendors are past due with no payment
                                     recorded.
                                   </p>
                                 </div>
                               </div>
-                              <div className="flex items-center gap-3">
+                              <div className='flex items-center gap-3'>
                                 <StatusBadge
-                                  status="Collection Due"
-                                  variant="warning"
+                                  status='Collection Due'
+                                  variant='warning'
                                 />
                                 {permissionService.canEdit(
-                                  "subscriptionsCollections",
+                                  'subscriptionsCollections'
                                 ) && (
                                   <button
                                     onClick={() =>
                                       navigateTo(`/${AppRoute.SUBSCRIPTIONS}`)
                                     }
-                                    className="p-2 text-stone-400 hover:text-brand-orange"
+                                    className='p-2 text-stone-400 hover:text-brand-orange'
                                   >
                                     <MessageSquare size={16} />
                                   </button>
@@ -531,32 +551,32 @@ export const Dashboard: React.FC = () => {
                           )}
 
                           {reminders.rpnReminders.pendingEntries.length > 0 && (
-                            <div className="p-4 flex items-center justify-between hover:bg-stone-50 transition-colors">
-                              <div className="flex items-center gap-4">
-                                <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600">
+                            <div className='p-4 flex items-center justify-between hover:bg-stone-50 transition-colors'>
+                              <div className='flex items-center gap-4'>
+                                <div className='w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600'>
                                   <LayoutGrid size={20} />
                                 </div>
                                 <div>
-                                  <p className="text-xs font-bold uppercase text-brand-charcoal">
+                                  <p className='text-xs font-bold uppercase text-brand-charcoal'>
                                     Pending Field Entry
                                   </p>
-                                  <p className="text-[10px] text-stone-400 font-bold">
+                                  <p className='text-[10px] text-stone-400 font-bold'>
                                     {
                                       reminders.rpnReminders.pendingEntries
                                         .length
-                                    }{" "}
+                                    }{' '}
                                     field packets awaiting backend digitisation.
                                   </p>
                                 </div>
                               </div>
-                              <div className="flex items-center gap-3">
-                                <StatusBadge status="Moderate" variant="info" />
-                                {permissionService.canEdit("rpnManagement") && (
+                              <div className='flex items-center gap-3'>
+                                <StatusBadge status='Moderate' variant='info' />
+                                {permissionService.canEdit('rpnManagement') && (
                                   <button
                                     onClick={() =>
                                       navigateTo(`/${AppRoute.RPN_MGMT}`)
                                     }
-                                    className="p-2 text-stone-400 hover:text-brand-orange"
+                                    className='p-2 text-stone-400 hover:text-brand-orange'
                                   >
                                     <ArrowUpRight size={16} />
                                   </button>
@@ -566,34 +586,34 @@ export const Dashboard: React.FC = () => {
                           )}
 
                           {reminders.spotReminders.dueToday.length > 0 && (
-                            <div className="p-4 flex items-center justify-between hover:bg-stone-50 transition-colors">
-                              <div className="flex items-center gap-4">
-                                <div className="w-10 h-10 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-600">
+                            <div className='p-4 flex items-center justify-between hover:bg-stone-50 transition-colors'>
+                              <div className='flex items-center gap-4'>
+                                <div className='w-10 h-10 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-600'>
                                   <ShieldCheck size={20} />
                                 </div>
                                 <div>
-                                  <p className="text-xs font-bold uppercase text-brand-charcoal">
+                                  <p className='text-xs font-bold uppercase text-brand-charcoal'>
                                     Spot Checks Due Today
                                   </p>
-                                  <p className="text-[10px] text-stone-400 font-bold">
-                                    {reminders.spotReminders.dueToday.length}{" "}
+                                  <p className='text-[10px] text-stone-400 font-bold'>
+                                    {reminders.spotReminders.dueToday.length}{' '}
                                     inventory verification audits scheduled.
                                   </p>
                                 </div>
                               </div>
-                              <div className="flex items-center gap-3">
+                              <div className='flex items-center gap-3'>
                                 <StatusBadge
-                                  status="Action Today"
-                                  variant="success"
+                                  status='Action Today'
+                                  variant='success'
                                 />
                                 {permissionService.canEdit(
-                                  "inventorySpotChecks",
+                                  'inventorySpotChecks'
                                 ) && (
                                   <button
                                     onClick={() =>
                                       navigateTo(`/${AppRoute.SPOT_CHECKS}`)
                                     }
-                                    className="p-2 text-stone-400 hover:text-brand-orange"
+                                    className='p-2 text-stone-400 hover:text-brand-orange'
                                   >
                                     <ArrowUpRight size={16} />
                                   </button>
@@ -605,45 +625,45 @@ export const Dashboard: React.FC = () => {
                       </div>
                     </DataPanel>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <div className='grid grid-cols-1 md:grid-cols-2 gap-8'>
                       <TablePanel
-                        title="Subscription Recovery"
-                        headers={["Vendor", "Due", "Priority", "Action"]}
+                        title='Subscription Recovery'
+                        headers={['Vendor', 'Due', 'Priority', 'Action']}
                       >
                         {subscriptions
                           .filter(
-                            (s) =>
-                              s.status === "overdue" ||
-                              s.followUpStatus === "promised to pay",
+                            s =>
+                              s.status === 'overdue' ||
+                              s.followUpStatus === 'promised to pay'
                           )
                           .slice(0, 5)
-                          .map((sub) => (
-                            <tr key={sub.id} className="text-[11px]">
-                              <td className="px-4 py-3 font-bold uppercase text-brand-charcoal">
+                          .map(sub => (
+                            <tr key={sub.id} className='text-[11px]'>
+                              <td className='px-4 py-3 font-bold uppercase text-brand-charcoal'>
                                 {sub.vendorNameSnapshot}
                               </td>
-                              <td className="px-4 py-3 font-mono font-bold text-red-600">
+                              <td className='px-4 py-3 font-mono font-bold text-red-600'>
                                 {sub.dueDate}
                               </td>
-                              <td className="px-4 py-3">
+                              <td className='px-4 py-3'>
                                 <StatusBadge
                                   status={sub.followUpStatus}
                                   variant={
-                                    sub.followUpStatus === "promised to pay"
-                                      ? "warning"
-                                      : "error"
+                                    sub.followUpStatus === 'promised to pay'
+                                      ? 'warning'
+                                      : 'error'
                                   }
                                 />
                               </td>
-                              <td className="px-4 py-3 text-right">
+                              <td className='px-4 py-3 text-right'>
                                 {permissionService.canEdit(
-                                  "subscriptionsCollections",
+                                  'subscriptionsCollections'
                                 ) && (
                                   <button
                                     onClick={() =>
                                       navigateTo(`/${AppRoute.SUBSCRIPTIONS}`)
                                     }
-                                    className="text-brand-orange"
+                                    className='text-brand-orange'
                                   >
                                     <MessageSquare size={14} />
                                   </button>
@@ -652,12 +672,12 @@ export const Dashboard: React.FC = () => {
                             </tr>
                           ))}
 
-                        {subscriptions.filter((s) => s.status === "overdue")
+                        {subscriptions.filter(s => s.status === 'overdue')
                           .length === 0 && (
                           <tr>
                             <td
                               colSpan={4}
-                              className="p-8 text-center text-[10px] font-bold text-stone-300 italic uppercase"
+                              className='p-8 text-center text-[10px] font-bold text-stone-300 italic uppercase'
                             >
                               Recovery queue empty
                             </td>
@@ -666,109 +686,109 @@ export const Dashboard: React.FC = () => {
                       </TablePanel>
 
                       <TablePanel
-                        title="RPN Field Activity"
-                        headers={["Agent Packet", "Type", "Status", "Digitise"]}
+                        title='RPN Field Activity'
+                        headers={['Agent Packet', 'Type', 'Status', 'Digitise']}
                       >
                         {reminders.rpnReminders.pendingEntries
                           .slice(0, 5)
-                          .map((packet) => {
-                            const rpn = rpns.find((r) => r.id === packet.rpnId);
+                          .map(packet => {
+                            const rpn = rpns.find(r => r.id === packet.rpnId)
 
                             return (
-                              <tr key={packet.id} className="text-[11px]">
-                                <td className="px-4 py-3 font-bold uppercase text-brand-charcoal">
-                                  {rpn?.name || "Unknown"}
+                              <tr key={packet.id} className='text-[11px]'>
+                                <td className='px-4 py-3 font-bold uppercase text-brand-charcoal'>
+                                  {rpn?.name || 'Unknown'}
                                 </td>
-                                <td className="px-4 py-3 font-bold text-stone-400 uppercase">
+                                <td className='px-4 py-3 font-bold text-stone-400 uppercase'>
                                   {packet.type}
                                 </td>
-                                <td className="px-4 py-3">
+                                <td className='px-4 py-3'>
                                   <StatusBadge
-                                    status="Pending"
-                                    variant="info"
+                                    status='Pending'
+                                    variant='info'
                                   />
                                 </td>
-                                <td className="px-4 py-3 text-right">
+                                <td className='px-4 py-3 text-right'>
                                   {permissionService.canEdit(
-                                    "rpnManagement",
+                                    'rpnManagement'
                                   ) && (
                                     <button
                                       onClick={() =>
                                         navigateTo(`/${AppRoute.RPN_MGMT}`)
                                       }
-                                      className="text-brand-orange"
+                                      className='text-brand-orange'
                                     >
                                       <FileCode size={14} />
                                     </button>
                                   )}
                                 </td>
                               </tr>
-                            );
+                            )
                           })}
                       </TablePanel>
                     </div>
                   </div>
 
-                  <div className="space-y-8">
+                  <div className='space-y-8'>
                     <DataPanel
-                      title="Data Quality Auditor"
-                      subtitle="Automated sanity checks"
+                      title='Data Quality Auditor'
+                      subtitle='Automated sanity checks'
                     >
-                      <div className="p-4 space-y-3">
-                        <div className="flex justify-between items-center p-3 bg-stone-50 rounded">
-                          <span className="text-[10px] font-bold uppercase text-stone-500">
+                      <div className='p-4 space-y-3'>
+                        <div className='flex justify-between items-center p-3 bg-stone-50 rounded'>
+                          <span className='text-[10px] font-bold uppercase text-stone-500'>
                             Missing Product Images
                           </span>
                           <span
                             className={`text-xs font-black ${
                               reminders.qualityWarnings.missingImages > 0
-                                ? "text-red-600"
-                                : "text-stone-300"
+                                ? 'text-red-600'
+                                : 'text-stone-300'
                             }`}
                           >
                             {reminders.qualityWarnings.missingImages}
                           </span>
                         </div>
 
-                        <div className="flex justify-between items-center p-3 bg-stone-50 rounded">
-                          <span className="text-[10px] font-bold uppercase text-stone-500">
+                        <div className='flex justify-between items-center p-3 bg-stone-50 rounded'>
+                          <span className='text-[10px] font-bold uppercase text-stone-500'>
                             Zero-Price Assets
                           </span>
                           <span
                             className={`text-xs font-black ${
                               reminders.qualityWarnings.missingPrice > 0
-                                ? "text-orange-600"
-                                : "text-stone-300"
+                                ? 'text-orange-600'
+                                : 'text-stone-300'
                             }`}
                           >
                             {reminders.qualityWarnings.missingPrice}
                           </span>
                         </div>
 
-                        <div className="flex justify-between items-center p-3 bg-stone-50 rounded">
-                          <span className="text-[10px] font-bold uppercase text-stone-500">
+                        <div className='flex justify-between items-center p-3 bg-stone-50 rounded'>
+                          <span className='text-[10px] font-bold uppercase text-stone-500'>
                             Vendors No Location
                           </span>
                           <span
                             className={`text-xs font-black ${
                               reminders.qualityWarnings.missingLocation > 0
-                                ? "text-amber-600"
-                                : "text-stone-300"
+                                ? 'text-amber-600'
+                                : 'text-stone-300'
                             }`}
                           >
                             {reminders.qualityWarnings.missingLocation}
                           </span>
                         </div>
 
-                        <div className="flex justify-between items-center p-3 bg-stone-50 rounded">
-                          <span className="text-[10px] font-bold uppercase text-stone-500">
+                        <div className='flex justify-between items-center p-3 bg-stone-50 rounded'>
+                          <span className='text-[10px] font-bold uppercase text-stone-500'>
                             Published Ghost Stock
                           </span>
                           <span
                             className={`text-xs font-black ${
                               reminders.qualityWarnings.stockOutPublished > 0
-                                ? "text-red-700"
-                                : "text-stone-300"
+                                ? 'text-red-700'
+                                : 'text-stone-300'
                             }`}
                           >
                             {reminders.qualityWarnings.stockOutPublished}
@@ -776,11 +796,11 @@ export const Dashboard: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className="p-4 pt-0">
-                        {permissionService.canView("analytics") && (
+                      <div className='p-4 pt-0'>
+                        {permissionService.canView('analytics') && (
                           <button
                             onClick={() => navigateTo(`/${AppRoute.ANALYTICS}`)}
-                            className="w-full py-3 text-[10px] font-black uppercase text-center border-t border-stone-100 text-brand-orange hover:bg-stone-50"
+                            className='w-full py-3 text-[10px] font-black uppercase text-center border-t border-stone-100 text-brand-orange hover:bg-stone-50'
                           >
                             Run Full Data Sanitation Audit
                           </button>
@@ -788,35 +808,35 @@ export const Dashboard: React.FC = () => {
                       </div>
                     </DataPanel>
 
-                    <DataPanel title="RPN Follow-Up Priority">
-                      <div className="p-4 space-y-4">
+                    <DataPanel title='RPN Follow-Up Priority'>
+                      <div className='p-4 space-y-4'>
                         {reminders.rpnReminders.followUpsToday.length > 0 ? (
                           reminders.rpnReminders.followUpsToday
                             .slice(0, 3)
-                            .map((sub) => (
+                            .map(sub => (
                               <div
                                 key={sub.id}
-                                className="p-3 border border-stone-100 rounded flex gap-3 relative overflow-hidden group"
+                                className='p-3 border border-stone-100 rounded flex gap-3 relative overflow-hidden group'
                               >
-                                <div className="absolute left-0 top-0 bottom-0 w-1 bg-amber-400"></div>
-                                <div className="flex-1">
-                                  <p className="text-[10px] font-black uppercase text-brand-charcoal">
+                                <div className='absolute left-0 top-0 bottom-0 w-1 bg-amber-400'></div>
+                                <div className='flex-1'>
+                                  <p className='text-[10px] font-black uppercase text-brand-charcoal'>
                                     {sub.vendorNameSnapshot}
                                   </p>
-                                  <p className="text-[9px] font-bold text-stone-400 mt-0.5 whitespace-nowrap overflow-hidden text-ellipsis">
+                                  <p className='text-[9px] font-bold text-stone-400 mt-0.5 whitespace-nowrap overflow-hidden text-ellipsis'>
                                     Sub Collection Follow-up Duty
                                   </p>
                                 </div>
                                 {permissionService.canEdit(
-                                  "vendorManagement",
+                                  'vendorManagement'
                                 ) && (
                                   <button
                                     onClick={() =>
                                       navigateTo(
-                                        `/${AppRoute.VENDOR_MGMT}?id=${sub.vendorId}`,
+                                        `/${AppRoute.VENDOR_MGMT}?id=${sub.vendorId}`
                                       )
                                     }
-                                    className="w-8 h-8 rounded-full bg-stone-100 flex items-center justify-center text-stone-400 group-hover:bg-brand-orange group-hover:text-white transition-all shadow-sm"
+                                    className='w-8 h-8 rounded-full bg-stone-100 flex items-center justify-center text-stone-400 group-hover:bg-brand-orange group-hover:text-white transition-all shadow-sm'
                                   >
                                     <Phone size={12} />
                                   </button>
@@ -824,8 +844,8 @@ export const Dashboard: React.FC = () => {
                               </div>
                             ))
                         ) : (
-                          <div className="py-8 text-center">
-                            <p className="text-[10px] font-bold text-stone-300 uppercase italic">
+                          <div className='py-8 text-center'>
+                            <p className='text-[10px] font-bold text-stone-300 uppercase italic'>
                               Follow-up Duty Clear
                             </p>
                           </div>
@@ -834,16 +854,16 @@ export const Dashboard: React.FC = () => {
                     </DataPanel>
 
                     <DataPanel
-                      title="Recent Activity"
-                      subtitle="Terminal Events"
+                      title='Recent Activity'
+                      subtitle='Terminal Events'
                     >
-                      <div className="p-4 max-h-[300px] overflow-y-auto">
+                      <div className='p-4 max-h-[300px] overflow-y-auto'>
                         <ActivityTimeline
-                          items={logs.slice(0, 5).map((l) => ({
+                          items={logs.slice(0, 5).map(l => ({
                             id: l.id,
                             timestamp: l.timestamp,
                             eventType: l.eventType,
-                            details: l.details,
+                            details: l.details
                           }))}
                         />
                       </div>
@@ -851,105 +871,105 @@ export const Dashboard: React.FC = () => {
                   </div>
                 </div>
               </>
-            );
+            )
 
-          case "Backoffice Desk":
+          case 'Backoffice Desk':
             return (
               <>
-                {commonDeskHeader("Backoffice Desk")}
+                {commonDeskHeader('Backoffice Desk')}
                 <p>
                   Backoffice specific content here. Vendor reminders, product
                   updates, etc.
                 </p>
               </>
-            );
+            )
 
-          case "Product Data Desk":
+          case 'Product Data Desk':
             return (
               <>
-                {commonDeskHeader("Product Data Desk")}
+                {commonDeskHeader('Product Data Desk')}
                 <p>
                   Product Data specific content here. Product entry queue, image
                   warnings, missing prices.
                 </p>
               </>
-            );
+            )
 
-          case "Catalogue Deployment Desk":
+          case 'Catalogue Deployment Desk':
             return (
               <>
-                {commonDeskHeader("Catalogue Deployment Desk")}
+                {commonDeskHeader('Catalogue Deployment Desk')}
                 <p>
                   Catalogue Deployment specific content here. Expiring
                   catalogues, catalogue generation queue, storefront queue.
                 </p>
               </>
-            );
+            )
 
-          case "Collections Desk":
+          case 'Collections Desk':
             return (
               <>
-                {commonDeskHeader("Collections Desk")}
+                {commonDeskHeader('Collections Desk')}
                 <p>
                   Collections specific content here. Due subscriptions, overdue
                   subscriptions, collection calendar.
                 </p>
               </>
-            );
+            )
 
-          case "RPN Management Desk":
+          case 'RPN Management Desk':
             return (
               <>
-                {commonDeskHeader("RPN Management Desk")}
+                {commonDeskHeader('RPN Management Desk')}
                 <p>
                   RPN Management specific content here. RPN field collection
                   queue, assigned vendors, follow-ups, spot checks.
                 </p>
               </>
-            );
+            )
 
-          case "CAH Operations Desk":
+          case 'CAH Operations Desk':
             return (
               <>
-                {commonDeskHeader("CAH Operations Desk")}
+                {commonDeskHeader('CAH Operations Desk')}
                 <p>
                   CAH Operations specific content here. Access Hub links, CAH
                   booths, follower count updates.
                 </p>
               </>
-            );
+            )
 
-          case "BI & Analytics Desk":
+          case 'BI & Analytics Desk':
             return (
               <>
-                {commonDeskHeader("BI & Analytics Desk")}
+                {commonDeskHeader('BI & Analytics Desk')}
                 <p>
                   BI & Analytics specific content here. Analytics, BI scores,
                   performance metrics.
                 </p>
               </>
-            );
+            )
 
-          case "Viewer Desk":
+          case 'Viewer Desk':
             return (
               <>
-                {commonDeskHeader("Viewer Desk")}
+                {commonDeskHeader('Viewer Desk')}
                 <p>Viewer specific content here. Read-only summary.</p>
               </>
-            );
+            )
 
           default:
             return (
               <>
-                {commonDeskHeader("Dashboard")}
+                {commonDeskHeader('Dashboard')}
                 <p>
                   Default dashboard view. Select a desk or contact SysAdmin for
                   assignment.
                 </p>
               </>
-            );
+            )
         }
       })()}
     </div>
-  );
-};
+  )
+}

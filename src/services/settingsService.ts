@@ -6,6 +6,8 @@
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { getStorageAdapter } from "./storageService.ts";
 import { SystemSettings } from "../types.ts";
+import { CACHE_TTL, dataCacheService } from "./dataCacheService.ts";
+import { readDiagnosticsService } from "./readDiagnosticsService.ts";
 
 const SETTINGS_KEY = "itred_system_settings";
 const DEFAULT_RPN_PERFORMANCE_SETTINGS = {
@@ -33,6 +35,12 @@ const DEFAULT_RPN_PERFORMANCE_SETTINGS = {
   subscriptionOverdueEscalationDays: 2,
   enableThresholdAlerts: true,
   requireApprovalForThresholdChange: false,
+  rpnOnboardingCommissionAmount: 4.5,
+  rpnRecurringCommissionPercent: 5,
+  rpnRecurringCommissionAfterMonths: 0,
+  rpnSalaryDropAfterMonths: 5,
+  rpnPostSalaryRecurringCommissionPercent: 15,
+  rpnCommissionCurrency: "USD",
   updatedAt: new Date().toISOString(),
 };
 
@@ -47,12 +55,21 @@ const DEFAULT_BI_MARKET_SETTINGS = {
 
 export const settingsService = {
   getSettings: async (): Promise<SystemSettings> => {
+    return dataCacheService.getOrFetch("system-settings", CACHE_TTL.SETTINGS, async () => {
     try {
       const data =
         await getStorageAdapter().getItem<SystemSettings>(SETTINGS_KEY);
+      readDiagnosticsService.track("settingsService", SETTINGS_KEY, "getSettings", data ? 1 : 0);
       return {
         enableSessionTimeout: true,
         sessionTimeoutMinutes: 30,
+        catalogueArchiveRetentionDays: 21,
+        catalogueSupportTitle: "Need help with this catalogue?",
+        catalogueSupportMessage:
+          "Use vendor WhatsApp or call buttons for product questions. Contact seiGEN Commerce support if you cannot find a product, vendor, or working contact route.",
+        customBusinessTypes: [],
+        customSectors: [],
+        customProductCategories: {},
         ...DEFAULT_BI_MARKET_SETTINGS,
         ...(data || {}),
         rpnPerformanceSettings: {
@@ -65,10 +82,18 @@ export const settingsService = {
       return {
         enableSessionTimeout: true,
         sessionTimeoutMinutes: 30,
+        catalogueArchiveRetentionDays: 21,
+        catalogueSupportTitle: "Need help with this catalogue?",
+        catalogueSupportMessage:
+          "Use vendor WhatsApp or call buttons for product questions. Contact seiGEN Commerce support if you cannot find a product, vendor, or working contact route.",
+        customBusinessTypes: [],
+        customSectors: [],
+        customProductCategories: {},
         ...DEFAULT_BI_MARKET_SETTINGS,
         rpnPerformanceSettings: DEFAULT_RPN_PERFORMANCE_SETTINGS,
       };
     }
+    });
   },
 
   saveSettings: async (settings: SystemSettings): Promise<void> => {
@@ -76,6 +101,7 @@ export const settingsService = {
       ...settings,
       updatedAt: new Date().toISOString(),
     });
+    dataCacheService.clearCache("system-settings");
   },
 
   uploadLogo: async (blob: Blob): Promise<string> => {

@@ -1,5 +1,5 @@
 import jsPDF from "jspdf";
-import "jspdf-autotable";
+import autoTable from "jspdf-autotable";
 import {
   Vendor,
   Subscription,
@@ -9,13 +9,11 @@ import {
   Staff,
   ActivityLog,
 } from "../types.ts";
+import { generateDocumentSerial } from "../utils/idGenerator.ts";
 
-// Add type support for autotable
-declare module "jspdf" {
-  interface jsPDF {
-    autoTable: (options: any) => jsPDF;
-  }
-}
+const getFinalY = (doc: jsPDF, fallback = 100): number => {
+  return (doc as any).lastAutoTable?.finalY ?? fallback;
+};
 
 export type ReportType =
   | "due"
@@ -100,7 +98,7 @@ export const pdfService = {
       ];
     });
 
-    doc.autoTable({
+    autoTable(doc, {
       startY: 75,
       head: tableHeaders,
       body: tableRows,
@@ -117,7 +115,7 @@ export const pdfService = {
       doc.setFontSize(8);
       doc.setTextColor(150, 150, 150);
       doc.text(
-        `PRIVACY SAFE REPORT - NO PHONE NUMBERS EXPOSED - ID: ${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
+        `PRIVACY SAFE REPORT - NO PHONE NUMBERS EXPOSED - ID: ${generateDocumentSerial()}`,
         14,
         285,
       );
@@ -179,7 +177,7 @@ export const pdfService = {
       s.status.toUpperCase(),
     ]);
 
-    doc.autoTable({
+    autoTable(doc, {
       startY: 100,
       head: subHeaders,
       body: subRows,
@@ -191,7 +189,7 @@ export const pdfService = {
     const totalDue = vendorSubs
       .filter((s) => s.status !== "paid")
       .reduce((sum, s) => sum + s.amountDue, 0);
-    const finalY = (doc as any).lastAutoTable.finalY + 15;
+    const finalY = getFinalY(doc, 150) + 15;
 
     doc.setFontSize(12);
     doc.text("Outstanding Balance:", 14, finalY);
@@ -267,7 +265,7 @@ export const pdfService = {
       ];
     });
 
-    doc.autoTable({
+    autoTable(doc, {
       startY: 85,
       head: tableHeaders,
       body: tableRows,
@@ -308,11 +306,7 @@ export const pdfService = {
     // 1. Header (Meta Data)
     doc.setTextColor(50, 50, 50);
     doc.setFontSize(10);
-    doc.text(
-      `Form serial number: ${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
-      14,
-      yPosition,
-    );
+    doc.text(`Form serial number: ${generateDocumentSerial()}`, 14, yPosition);
     doc.text(`Date: ${new Date().toLocaleDateString()}`, 120, yPosition);
     yPosition += 10;
 
@@ -453,7 +447,7 @@ export const pdfService = {
       "",
     ]);
 
-    doc.autoTable({
+    autoTable(doc, {
       startY: yPosition,
       head: productHeaders,
       body: productRows,
@@ -474,7 +468,7 @@ export const pdfService = {
       margin: { left: 14, right: 14 },
     });
 
-    yPosition = (doc as any).lastAutoTable.finalY + 15;
+    yPosition = getFinalY(doc, yPosition) + 15;
 
     // 7. Farm Producer Section
     addSection("7. Farm Producer Section");
@@ -598,7 +592,7 @@ export const pdfService = {
         <div class="orange-bar"></div>
         
         <div class="meta-header">
-          <div>Form serial number: ${Math.random().toString(36).substr(2, 9).toUpperCase()}</div>
+          <div>Form serial number: ${generateDocumentSerial()}</div>
           <div>Date: ${new Date().toLocaleDateString()}</div>
           <div>RPN name: _________________________________</div>
           <div>RPN code: ________________________</div>

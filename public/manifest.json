@@ -1,0 +1,17 @@
+{
+  "name": "seiGEN Commerce",
+  "short_name": "seiGEN",
+  "description": "SCI / iTred commerce operating system powered by seiGEN Commerce.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FFFFFF",
+  "theme_color": "#FF6B00",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

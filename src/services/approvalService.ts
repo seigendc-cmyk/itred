@@ -12,6 +12,7 @@ import { vendorService } from "./vendorService.ts";
 import { productService } from "./productService.ts";
 import { catalogueService } from "./catalogueService.ts";
 import { rpnService } from "./rpnService.ts";
+import { generateApprovalId } from "../utils/idGenerator.ts";
 
 const STORAGE_KEY = "itred_approval_requests";
 
@@ -33,6 +34,16 @@ export const approvalService = {
   },
 
   create: async (request: ApprovalRequest): Promise<void> => {
+    if (
+      !request.id ||
+      !request.requestType ||
+      !request.recordType ||
+      !request.recordId ||
+      !request.submittedByStaffId ||
+      !request.submittedByName
+    ) {
+      throw new Error("Approval request is missing required operational fields.");
+    }
     const all = await approvalService.getAll();
     all.push(request);
     await getStorageAdapter().setItem(STORAGE_KEY, all);
@@ -63,7 +74,7 @@ export const approvalService = {
   ): Promise<void> => {
     const newReq: ApprovalRequest = {
       ...request,
-      id: `APP-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      id: generateApprovalId(),
       status: "pending",
       submittedAt: new Date().toISOString(),
     };
@@ -158,8 +169,14 @@ export const approvalService = {
       } catch (err) {}
 
       await notificationService.createNotification({
-        title: "Approval Granted",
-        message: `Your ${req.requestType} request was approved.`,
+        title:
+          req.requestType === "finance_report_print"
+            ? "Finance Report Print Approved"
+            : "Approval Granted",
+        message:
+          req.requestType === "finance_report_print"
+            ? `Your finance report print/PDF request for ${req.recordName || req.recordId} was approved.`
+            : `Your ${req.requestType} request was approved.`,
         type: "approval_request",
         priority: "low",
         recordType: "approval_request",
@@ -200,8 +217,14 @@ export const approvalService = {
       await getStorageAdapter().setItem(STORAGE_KEY, all);
 
       await notificationService.createNotification({
-        title: "Approval Rejected",
-        message: `Your ${req.requestType} request was rejected by ${managerName}.`,
+        title:
+          req.requestType === "finance_report_print"
+            ? "Finance Report Print Rejected"
+            : "Approval Rejected",
+        message:
+          req.requestType === "finance_report_print"
+            ? `Your finance report print/PDF request for ${req.recordName || req.recordId} was rejected by ${managerName}.`
+            : `Your ${req.requestType} request was rejected by ${managerName}.`,
         type: "approval_request",
         priority: "high",
         recordType: "approval_request",
