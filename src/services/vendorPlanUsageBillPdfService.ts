@@ -1,5 +1,5 @@
 import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
+import { runAutoTable } from "../utils/pdfAutoTable.ts";
 
 export interface VendorPlanUsageBill {
   vendorId: string;
@@ -58,7 +58,7 @@ export const generateVendorPlanUsageBillPdf = (bill: VendorPlanUsageBill) => {
   doc.text(`Vendor: ${bill.vendorName} (${bill.vendorCode})`, 14, 62);
   doc.text(`Period: ${bill.periodFrom} to ${bill.periodTo}`, 14, 67);
 
-  autoTable(doc, {
+  runAutoTable(doc, {
     startY: 75,
     head: [["Item", "Details"]],
     body: [

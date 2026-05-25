@@ -5,8 +5,8 @@
 
 import { GoogleGenAI } from "@google/genai";
 import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
 import { sanitizeForFirestore } from "../utils/firestoreSanitize.ts";
+import { runAutoTable } from "../utils/pdfAutoTable.ts";
 import { getStorageAdapter } from "./storageService.ts";
 import { whatsappActivityService } from "./whatsappActivityService.ts";
 
@@ -862,7 +862,7 @@ export const marketIntelligenceService = {
     doc.text(`Current: ${report.reportData.currentPeriod.dateFrom} to ${report.reportData.currentPeriod.dateTo}`, 14, 48);
     doc.text(`Previous: ${report.reportData.previousPeriod.dateFrom} to ${report.reportData.previousPeriod.dateTo}`, 14, 55);
 
-    autoTable(doc, {
+    runAutoTable(doc, {
       startY: 64,
       head: [["Metric", "Previous", "Current", "Change", "%", "Trend"]],
       body: Object.values(report.reportData.comparisonMetrics).map((metric) => [
@@ -878,7 +878,7 @@ export const marketIntelligenceService = {
       styles: { fontSize: 7, cellPadding: 2 },
     });
 
-    autoTable(doc, {
+    runAutoTable(doc, {
       startY: ((doc as any).lastAutoTable?.finalY || 90) + 8,
       head: [["Prediction", "Finding", "Confidence", "Action"]],
       body: report.reportData.predictions.slice(0, 10).map((prediction) => [

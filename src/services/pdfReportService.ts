@@ -4,9 +4,9 @@
  */
 
 import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
 import { ConsoleAnalyticsResult, AnalyticsMetricRow } from "./analyticsService.ts";
 import { AiReportOutput } from "./aiReportService.ts";
+import { runAutoTable } from "../utils/pdfAutoTable.ts";
 
 export interface PdfReportInput {
   title: string;
@@ -60,7 +60,7 @@ export const pdfReportService = {
 
     const filters = filterLines(input.filters);
     if (filters.length > 0) {
-      autoTable(doc, {
+      runAutoTable(doc, {
         startY: 72,
         head: [["Filters"]],
         body: filters.map((line) => [line]),
@@ -70,7 +70,7 @@ export const pdfReportService = {
       });
     }
 
-    autoTable(doc, {
+    runAutoTable(doc, {
       startY: finalY(doc, 72) + 8,
       head: [["Metric", "Value"]],
       body: [
@@ -97,7 +97,7 @@ export const pdfReportService = {
 
     sections.forEach(([title, rows]) => {
       if (rows.length === 0) return;
-      autoTable(doc, {
+      runAutoTable(doc, {
         startY: finalY(doc, 90) + 8,
         head: [[title, "Views", "Clicks", "WA", "Orders", "Subs", "RPN", "Total"]],
         body: metricRows(rows),

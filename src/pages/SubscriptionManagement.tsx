@@ -7,713 +7,665 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   PageHeader,
   DataPanel,
-  TablePanel,
   StatusBadge,
   EmptyState,
   PrimaryButton,
+  SecondaryButton,
+  StatCard,
 } from "../components/CommonUI.tsx";
 import {
   AlertTriangle,
-  Calendar,
+  CalendarClock,
+  CheckCircle2,
   Download,
-  FileText,
+  MessageCircle,
   Receipt,
-  RefreshCw,
   Send,
+  Users,
   Wallet,
-  Loader2,
 } from "lucide-react";
 import { vendorService } from "../services/vendorService.ts";
 import { pricingPlanService } from "../services/pricingPlanService.ts";
-import { pdfService } from "../services/pdfService.ts";
 import { rpnService } from "../services/rpnService.ts";
 import { subscriptionService } from "../services/subscriptionService.ts";
-import { permissionService } from "../services/permissionService.ts";
+import { vendorBillingService } from "../services/vendorBillingService.ts";
+import { staffService } from "../services/staffService.ts";
 import {
-  CollectionMethod,
   PricingPlan,
   RPN,
+  Staff,
   Subscription,
   Vendor,
-  VendorSubscriptionPayment,
+  VendorInvoice,
+  VendorInvoiceStatus,
 } from "../types.ts";
-import { asArray } from "../utils/safeData.ts";
+import { printVendorInvoice } from "../utils/vendorInvoicePrint.ts";
 
-type PaymentStatusFilter =
-  | "all"
-  | "unpaid"
-  | "partial"
-  | "paid"
-  | "overdue"
-  | "waived"
-  | "cancelled";
+type AgeingBucketId =
+  | "due_14_8"
+  | "due_7_1"
+  | "due_today"
+  | "overdue_1_7"
+  | "overdue_8_14"
+  | "overdue_15_30"
+  | "overdue_31_plus"
+  | "future"
+  | "unknown";
+
+type StatusFilter = "active" | "due_soon" | "due_today" | "overdue" | "all" | "paid" | "void" | "cancelled";
+type GroupMode = "rpn" | "staff";
+
+type CollectionSource = "invoice" | "subscription";
 
 type CollectionRow = {
-  vendor: Vendor;
-  plan?: PricingPlan;
-  rpn?: RPN;
-  latestPayment?: VendorSubscriptionPayment;
-  amountDue: number;
-  amountPaid: number;
-  balanceDue: number;
+  id: string;
+  source: CollectionSource;
+  vendorId: string;
+  vendorName: string;
+  vendorWhatsapp: string;
+  invoiceNumber: string;
+  invoiceDate: string;
   dueDate: string;
-  overdueDays: number;
-  paymentStatus: VendorSubscriptionPayment["paymentStatus"];
+  daysDelta: number | null;
+  bucketId: AgeingBucketId;
+  bucketLabel: string;
+  amountDue: number;
+  status: VendorInvoiceStatus | Subscription["status"];
+  planId?: string;
+  planName?: string;
+  rpnId?: string;
+  rpnName: string;
+  rpnWhatsapp: string;
+  staffId?: string;
+  staffName: string;
+  staffWhatsapp: string;
+  invoice?: VendorInvoice;
+  subscription?: Subscription;
 };
 
+type WhatsAppGroup = {
+  id: string;
+  name: string;
+  whatsapp: string;
+  rows: CollectionRow[];
+  total: number;
+  message: string;
+};
+
+const dayMs = 24 * 60 * 60 * 1000;
 const todayKey = () => new Date().toISOString().slice(0, 10);
+const money = (value: unknown) => {
+  const amount = Number(value || 0);
+  return `$${Number.isFinite(amount) ? Math.round(amount).toLocaleString("en-US") : "0"}`;
+};
+const dateLabel = (dateKey?: string) => {
+  if (!dateKey) return "Not supplied";
+  const parsed = new Date(`${dateKey}T00:00:00`);
+  return Number.isNaN(parsed.getTime()) ? dateKey : parsed.toLocaleDateString();
+};
+const parseDate = (dateKey?: string) => {
+  if (!dateKey) return null;
+  const parsed = new Date(`${dateKey}T00:00:00`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+const cleanPhone = (value?: string) =>
+  String(value || "")
+    .replace(/\D/g, "")
+    .replace(/^0+/, "");
+const vendorDisplayName = (vendor?: Vendor, fallback = "Unknown vendor") =>
+  vendor?.tradingName || vendor?.name || fallback;
+const staffDisplayName = (staff?: Staff, fallback = "No staff assigned") =>
+  staff?.fullName || staff?.displayName || staff?.staffName || fallback;
+const getVendorRpnId = (vendor?: Vendor, subscription?: Subscription) =>
+  vendor?.assignedRPNId || vendor?.rpnId || subscription?.assignedRPNId || "";
+const getVendorStaffId = (vendor?: Vendor) =>
+  vendor?.assignedStaffId || vendor?.assignedMemberId || vendor?.onboardedByStaffId || "";
 
-const dateInPeriod = (dateValue: string, period: string) => {
-  if (!dateValue || period === "lifetime") return true;
-  const date = new Date(dateValue);
-  const now = new Date();
-  if (Number.isNaN(date.getTime())) return true;
-  if (period === "today") return date.toDateString() === now.toDateString();
-  if (period === "this-week") {
-    const start = new Date(now);
-    start.setDate(now.getDate() - now.getDay());
-    start.setHours(0, 0, 0, 0);
-    return date >= start;
-  }
-  if (period === "this-month") {
-    return (
-      date.getFullYear() === now.getFullYear() &&
-      date.getMonth() === now.getMonth()
-    );
-  }
-  if (period === "this-year") {
-    return date.getFullYear() === now.getFullYear();
-  }
-  return true;
+const bucketMeta: Record<AgeingBucketId, { label: string; active: boolean }> = {
+  due_14_8: { label: "Due in 14-8 days", active: true },
+  due_7_1: { label: "Due in 7-1 days", active: true },
+  due_today: { label: "Due today", active: true },
+  overdue_1_7: { label: "Overdue 1-7 days", active: true },
+  overdue_8_14: { label: "Overdue 8-14 days", active: true },
+  overdue_15_30: { label: "Overdue 15-30 days", active: true },
+  overdue_31_plus: { label: "Overdue 31+ days", active: true },
+  future: { label: "Due beyond 14 days", active: false },
+  unknown: { label: "No due date", active: false },
 };
 
-const getVendorRpnId = (vendor: Vendor) =>
-  vendor.rpnId ||
-  vendor.assignedRPNId ||
-  vendor.assignedStaffId ||
-  vendor.onboardedByStaffId ||
-  "";
-
-const paymentStatusFromRow = (
-  vendor: Vendor,
-  latestPayment: VendorSubscriptionPayment | undefined,
-  amountDue: number,
-): VendorSubscriptionPayment["paymentStatus"] => {
-  if (latestPayment?.paymentStatus) return latestPayment.paymentStatus;
-  if (vendor.subscriptionStatus === "paid" || vendor.subscriptionStatus === "active") {
-    return "paid";
-  }
-  if (vendor.subscriptionStatus === "overdue") return "overdue";
-  if (vendor.subscriptionStatus === "cancelled") return "cancelled";
-  if (amountDue <= 0) return "unpaid";
-  return "unpaid";
+const ageingBucketFor = (dueDate?: string): { id: AgeingBucketId; daysDelta: number | null } => {
+  const due = parseDate(dueDate);
+  if (!due) return { id: "unknown", daysDelta: null };
+  const today = parseDate(todayKey()) || new Date();
+  const daysDelta = Math.ceil((due.getTime() - today.getTime()) / dayMs);
+  if (daysDelta >= 8 && daysDelta <= 14) return { id: "due_14_8", daysDelta };
+  if (daysDelta >= 1 && daysDelta <= 7) return { id: "due_7_1", daysDelta };
+  if (daysDelta === 0) return { id: "due_today", daysDelta };
+  const overdueDays = Math.abs(daysDelta);
+  if (daysDelta < 0 && overdueDays <= 7) return { id: "overdue_1_7", daysDelta };
+  if (daysDelta < 0 && overdueDays <= 14) return { id: "overdue_8_14", daysDelta };
+  if (daysDelta < 0 && overdueDays <= 30) return { id: "overdue_15_30", daysDelta };
+  if (daysDelta < 0) return { id: "overdue_31_plus", daysDelta };
+  return { id: "future", daysDelta };
 };
 
-const statusVariant = (status: string) => {
-  if (status === "paid") return "success";
-  if (status === "overdue" || status === "cancelled") return "error";
-  if (status === "partial" || status === "unpaid") return "warning";
+const daysPhrase = (row: CollectionRow) => {
+  if (row.daysDelta === null) return "Due date missing";
+  if (row.daysDelta === 0) return "Due today";
+  if (row.daysDelta > 0) return `Due in ${row.daysDelta} day${row.daysDelta === 1 ? "" : "s"}`;
+  const overdue = Math.abs(row.daysDelta);
+  return `${overdue} day${overdue === 1 ? "" : "s"} overdue`;
+};
+
+const isClosedInvoiceStatus = (status: string) =>
+  status === "paid" || status === "void" || status === "cancelled";
+
+const collectionStatusLabel = (row: CollectionRow) => {
+  if (row.status === "paid") return "paid";
+  if (row.status === "void") return "void";
+  if (row.status === "cancelled") return "cancelled";
+  if (row.bucketId === "due_today") return "due today";
+  if (String(row.bucketId).startsWith("overdue")) return "overdue";
+  if (row.bucketId === "due_14_8" || row.bucketId === "due_7_1") return "due soon";
+  return String(row.status || "open").replace(/_/g, " ");
+};
+
+const statusVariant = (row: CollectionRow) => {
+  if (row.status === "paid") return "success";
+  if (row.status === "void" || row.status === "cancelled" || row.bucketId.toString().startsWith("overdue")) return "danger";
+  if (row.bucketId === "due_today" || row.bucketId === "due_7_1" || row.bucketId === "due_14_8") return "warning";
   return "neutral";
+};
+
+const buildVendorReminderMessage = (row: CollectionRow) => {
+  const dueDate = dateLabel(row.dueDate);
+  if (row.daysDelta !== null && row.daysDelta < 0) {
+    return [
+      `Hello ${row.vendorName}, invoice ${row.invoiceNumber} for ${money(row.amountDue)} is overdue since ${dueDate}.`,
+      "",
+      "Please arrange payment or send proof of payment for activation/payment confirmation.",
+      "",
+      "Powered by seiGEN Commerce",
+    ].join("\n");
+  }
+  return [
+    `Hello ${row.vendorName}, this is a reminder that invoice ${row.invoiceNumber} for ${money(row.amountDue)} is due on ${dueDate}.`,
+    "",
+    "Please arrange payment or send proof of payment for activation/payment confirmation.",
+    "",
+    "Powered by seiGEN Commerce",
+  ].join("\n");
+};
+
+const buildCollectorMessage = (name: string, bucketLabel: string, rows: CollectionRow[]) => {
+  const total = rows.reduce((sum, row) => sum + row.amountDue, 0);
+  return [
+    "Collections follow-up list",
+    "",
+    `Collector: ${name}`,
+    `Ageing period: ${bucketLabel}`,
+    "",
+    ...rows.map(
+      (row, index) =>
+        `${index + 1}. ${row.vendorName} - Invoice ${row.invoiceNumber} - ${money(row.amountDue)} - Due ${dateLabel(row.dueDate)} - ${daysPhrase(row)}`,
+    ),
+    "",
+    `Total collection value: ${money(total)}`,
+    "",
+    "Please follow up with vendors and update payment/POP status in the console.",
+    "",
+    "Powered by seiGEN Commerce",
+  ].join("\n");
 };
 
 export const SubscriptionManagement: React.FC = () => {
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [plans, setPlans] = useState<PricingPlan[]>([]);
   const [rpns, setRpns] = useState<RPN[]>([]);
-  const [payments, setPayments] = useState<VendorSubscriptionPayment[]>([]);
-  const [selectedVendorId, setSelectedVendorId] = useState("");
-  const [periodFilter, setPeriodFilter] = useState("lifetime");
-  const [vendorFilter, setVendorFilter] = useState("");
-  const [planFilter, setPlanFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState<PaymentStatusFilter>("all");
-  const [rpnFilter, setRpnFilter] = useState("all");
-  const [overdueOnly, setOverdueOnly] = useState(false);
-  const [amountPaid, setAmountPaid] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState<CollectionMethod>("manual");
-  const [paymentReference, setPaymentReference] = useState("");
+  const [staff, setStaff] = useState<Staff[]>([]);
+  const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
+  const [invoices, setInvoices] = useState<VendorInvoice[]>([]);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [groupMode, setGroupMode] = useState<GroupMode | null>(null);
   const [message, setMessage] = useState("");
-  const [isLoadingData, setIsLoadingData] = useState(true);
-
-  const canRecordPayment = permissionService.hasActionPermission(
-    "subscriptions.recordPayment",
-  );
-  const canWaive = permissionService.hasActionPermission("subscriptions.waive");
-  const canPostFinance = permissionService.hasActionPermission(
-    "subscriptions.postToFinance",
-  );
-  const canGenerateCommission = permissionService.hasActionPermission(
-    "subscriptions.generateRpnCommission",
-  );
+  const [filters, setFilters] = useState({
+    bucket: "active",
+    rpnId: "all",
+    staffId: "all",
+    vendor: "",
+    status: "active" as StatusFilter,
+    planId: "all",
+  });
 
   const loadData = async () => {
-    setIsLoadingData(true);
-    const startMs = performance.now();
-    try {
-      const rawVendors = await Promise.resolve(vendorService.getVendors());
-      void vendorService.evaluateSubscriptionRpnAlerts();
-      void subscriptionService.generateOverdueAlerts();
-      const rawPlans = await Promise.resolve(pricingPlanService.getPlans());
-      const rawRpns = await Promise.resolve(rpnService.getAll());
-      setVendors(asArray<Vendor>(rawVendors));
-      setPlans(asArray<PricingPlan>(rawPlans));
-      setRpns(asArray<RPN>(rawRpns));
-      setPayments(subscriptionService.getAllPayments());
-    } catch (error) {
-      console.error("Failed to load collections data", error);
-      setMessage("Failed to load collections data.");
-    } finally {
-      setIsLoadingData(false);
-      console.info("Data load completed", {
-        page: "SubscriptionManagement",
-        elapsedMs: Math.round(performance.now() - startMs)
-      });
-    }
+    const [nextVendors, nextPlans] = await Promise.all([
+      vendorService.getVendors(),
+      pricingPlanService.getPlans(),
+    ]);
+    setVendors(Array.isArray(nextVendors) ? nextVendors : []);
+    setPlans(Array.isArray(nextPlans) ? nextPlans : []);
+    setRpns(rpnService.getAll());
+    setStaff(staffService.getAllStaff());
+    setSubscriptions(subscriptionService.getAllSubscriptions());
+    setInvoices(vendorBillingService.getInvoices());
   };
 
   useEffect(() => {
     void loadData();
   }, []);
 
+  const vendorById = useMemo(() => new Map(vendors.map((vendor) => [vendor.id, vendor])), [vendors]);
+  const planById = useMemo(() => new Map(plans.map((plan) => [plan.id, plan])), [plans]);
+  const rpnById = useMemo(() => new Map(rpns.map((rpn) => [rpn.id, rpn])), [rpns]);
+  const staffById = useMemo(() => new Map(staff.map((item) => [item.id, item])), [staff]);
+
   const rows = useMemo<CollectionRow[]>(() => {
-    return vendors
-      .filter(
-        (vendor) =>
-          vendor.subscriptionStatus === "due" ||
-          vendor.subscriptionStatus === "overdue" ||
-          vendor.subscriptionStatus === "active" ||
-          vendor.subscriptionStatus === "paid" ||
-          vendor.subscriptionStatus === "suspended",
-      )
-      .map((vendor) => {
-        const plan = plans.find((item) => item.id === vendor.planId);
-        const rpnId = getVendorRpnId(vendor);
-        const rpn = rpns.find((item) => item.id === rpnId);
-        const vendorPayments = payments
-          .filter((payment) => payment.vendorId === vendor.id)
-          .sort(
-            (a, b) =>
-              new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
-          );
-        const latestPayment = vendorPayments[0];
-        const amountDue = latestPayment?.amountDue ?? plan?.monthlyPrice ?? 0;
-        const amountPaid = latestPayment?.amountPaid ?? 0;
-        const balanceDue = latestPayment?.balanceDue ?? Math.max(amountDue - amountPaid, 0);
-        const dueDate = latestPayment?.dueDate || vendor.subscriptionDueDate || "";
-        const dueTime = dueDate ? new Date(dueDate).getTime() : NaN;
-        const overdueDays = Number.isNaN(dueTime)
-          ? 0
-          : Math.max(
-              Math.floor((Date.now() - dueTime) / (24 * 60 * 60 * 1000)),
-              0,
-            );
+    const invoiceRows = invoices.map((invoice) => {
+      const vendor = vendorById.get(invoice.vendorId);
+      const plan = invoice.planId ? planById.get(invoice.planId) : undefined;
+      const rpnId = getVendorRpnId(vendor);
+      const rpn = rpnId ? rpnById.get(rpnId) : undefined;
+      const staffId = getVendorStaffId(vendor);
+      const assignedStaff = staffId ? staffById.get(staffId) : undefined;
+      const ageing = ageingBucketFor(invoice.dueDate);
+      return {
+        id: `invoice:${invoice.id}`,
+        source: "invoice" as const,
+        vendorId: invoice.vendorId,
+        vendorName: invoice.vendorName || vendorDisplayName(vendor),
+        vendorWhatsapp: cleanPhone(vendor?.whatsappNumber || vendor?.whatsapp || vendor?.mainPhone || vendor?.phone),
+        invoiceNumber: invoice.invoiceNumber,
+        invoiceDate: invoice.invoiceDate || invoice.issueDate || invoice.createdAt?.slice(0, 10) || "",
+        dueDate: invoice.dueDate || "",
+        daysDelta: ageing.daysDelta,
+        bucketId: ageing.id,
+        bucketLabel: bucketMeta[ageing.id].label,
+        amountDue: Number(invoice.balanceDue || invoice.totalAmount || 0),
+        status: invoice.status,
+        planId: invoice.planId || undefined,
+        planName: invoice.planName || plan?.name,
+        rpnId,
+        rpnName: rpn?.name || vendor?.rpnName || "No RPN assigned",
+        rpnWhatsapp: cleanPhone(rpn?.whatsapp || rpn?.phone),
+        staffId,
+        staffName: staffDisplayName(assignedStaff, vendor?.assignedStaffName || vendor?.assignedMemberName || "No staff assigned"),
+        staffWhatsapp: cleanPhone(assignedStaff?.whatsapp || assignedStaff?.phone),
+        invoice,
+      };
+    });
+
+    const activeInvoiceVendorIds = new Set(
+      invoices.filter((invoice) => !isClosedInvoiceStatus(invoice.status)).map((invoice) => invoice.vendorId),
+    );
+    const subscriptionRows = subscriptions
+      .filter((subscription) => !activeInvoiceVendorIds.has(subscription.vendorId))
+      .map((subscription) => {
+        const vendor = vendorById.get(subscription.vendorId);
+        const plan = planById.get(subscription.planId || vendor?.planId || "");
+        const rpnId = getVendorRpnId(vendor, subscription);
+        const rpn = rpnId ? rpnById.get(rpnId) : undefined;
+        const staffId = getVendorStaffId(vendor);
+        const assignedStaff = staffId ? staffById.get(staffId) : undefined;
+        const ageing = ageingBucketFor(subscription.dueDate || vendor?.subscriptionDueDate);
         return {
-          vendor,
-          plan,
-          rpn,
-          latestPayment,
-          amountDue,
-          amountPaid,
-          balanceDue,
-          dueDate,
-          overdueDays,
-          paymentStatus: paymentStatusFromRow(vendor, latestPayment, amountDue),
+          id: `subscription:${subscription.id}`,
+          source: "subscription" as const,
+          vendorId: subscription.vendorId,
+          vendorName: vendorDisplayName(vendor, subscription.vendorNameSnapshot),
+          vendorWhatsapp: cleanPhone(vendor?.whatsappNumber || vendor?.whatsapp || vendor?.mainPhone || vendor?.phone),
+          invoiceNumber: subscription.id,
+          invoiceDate: subscription.startDate || subscription.createdAt?.slice(0, 10) || "",
+          dueDate: subscription.dueDate || vendor?.subscriptionDueDate || "",
+          daysDelta: ageing.daysDelta,
+          bucketId: ageing.id,
+          bucketLabel: bucketMeta[ageing.id].label,
+          amountDue: Number(subscription.amountDue || plan?.monthlyPrice || vendor?.monthlyPlanValue || 0),
+          status: subscription.status,
+          planId: subscription.planId || vendor?.planId,
+          planName: plan?.name || subscription.planId || vendor?.planId,
+          rpnId,
+          rpnName: rpn?.name || vendor?.rpnName || "No RPN assigned",
+          rpnWhatsapp: cleanPhone(rpn?.whatsapp || rpn?.phone),
+          staffId,
+          staffName: staffDisplayName(assignedStaff, vendor?.assignedStaffName || vendor?.assignedMemberName || "No staff assigned"),
+          staffWhatsapp: cleanPhone(assignedStaff?.whatsapp || assignedStaff?.phone),
+          subscription,
         };
       });
-  }, [vendors, plans, rpns, payments]);
+
+    return [...invoiceRows, ...subscriptionRows].sort((a, b) => {
+      const aTime = parseDate(a.dueDate)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+      const bTime = parseDate(b.dueDate)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+      return aTime - bTime;
+    });
+  }, [invoices, subscriptions, vendorById, planById, rpnById, staffById]);
 
   const filteredRows = useMemo(() => {
     return rows.filter((row) => {
+      const isClosed = isClosedInvoiceStatus(String(row.status));
+      const isActiveBucket = bucketMeta[row.bucketId].active;
+      const status = String(row.status);
+      const statusMatch =
+        filters.status === "all" ||
+        (filters.status === "active" && !isClosed && isActiveBucket) ||
+        (filters.status === "due_soon" && (row.bucketId === "due_14_8" || row.bucketId === "due_7_1")) ||
+        (filters.status === "due_today" && row.bucketId === "due_today") ||
+        (filters.status === "overdue" && row.daysDelta !== null && row.daysDelta < 0) ||
+        filters.status === status;
+
       return (
-        (!vendorFilter ||
-          row.vendor.name.toLowerCase().includes(vendorFilter.toLowerCase())) &&
-        (planFilter === "all" || row.vendor.planId === planFilter) &&
-        (statusFilter === "all" || row.paymentStatus === statusFilter) &&
-        (rpnFilter === "all" || getVendorRpnId(row.vendor) === rpnFilter) &&
-        (!overdueOnly || row.overdueDays > 0 || row.paymentStatus === "overdue") &&
-        dateInPeriod(row.dueDate || row.latestPayment?.paymentDate || "", periodFilter)
+        statusMatch &&
+        (filters.bucket === "active" ? isActiveBucket && !isClosed : filters.bucket === "all" || row.bucketId === filters.bucket) &&
+        (filters.rpnId === "all" || row.rpnId === filters.rpnId) &&
+        (filters.staffId === "all" || row.staffId === filters.staffId) &&
+        (!filters.vendor || row.vendorName.toLowerCase().includes(filters.vendor.toLowerCase())) &&
+        (filters.planId === "all" || row.planId === filters.planId)
       );
     });
-  }, [rows, vendorFilter, planFilter, statusFilter, rpnFilter, overdueOnly, periodFilter]);
+  }, [rows, filters]);
 
-  const selectedRow = rows.find((row) => row.vendor.id === selectedVendorId);
+  const activeRows = rows.filter((row) => bucketMeta[row.bucketId].active && !isClosedInvoiceStatus(String(row.status)));
+  const selectedRows = filteredRows.filter((row) => selectedIds.includes(row.id));
+  const allVisibleSelected = filteredRows.length > 0 && filteredRows.every((row) => selectedIds.includes(row.id));
 
-  const totals = filteredRows.reduce(
-    (acc, row) => {
-      acc.amountDue += row.amountDue;
-      acc.amountPaid += row.amountPaid;
-      acc.balanceDue += row.balanceDue;
-      if (row.overdueDays > 0 || row.paymentStatus === "overdue") acc.overdue += 1;
-      return acc;
-    },
-    { amountDue: 0, amountPaid: 0, balanceDue: 0, overdue: 0 },
-  );
+  const summaryByBucket = useMemo(() => {
+    const activeBucketIds: AgeingBucketId[] = [
+      "due_14_8",
+      "due_7_1",
+      "due_today",
+      "overdue_1_7",
+      "overdue_8_14",
+      "overdue_15_30",
+      "overdue_31_plus",
+    ];
+    return activeBucketIds.map((bucketId) => {
+      const bucketRows = activeRows.filter((row) => row.bucketId === bucketId);
+      return {
+        bucketId,
+        label: bucketMeta[bucketId].label,
+        count: bucketRows.length,
+        total: bucketRows.reduce((sum, row) => sum + row.amountDue, 0),
+      };
+    });
+  }, [activeRows]);
 
-  const handleExportPDF = () => {
-    const subs: Subscription[] = filteredRows.map((row) => ({
-      id: row.latestPayment?.id || row.vendor.id,
-      vendorId: row.vendor.id,
-      vendorNameSnapshot: row.vendor.name,
-      assignedRPNId: getVendorRpnId(row.vendor),
-      planId: row.vendor.planId,
-      amountDue: row.amountDue,
-      currency: row.plan?.currency || row.latestPayment?.currency || "USD",
-      billingPeriod: "monthly",
-      startDate: row.latestPayment?.billingPeriodStart || row.vendor.subscriptionStartDate || "",
-      dueDate: row.dueDate,
-      gracePeriodDays: 7,
-      status: row.vendor.subscriptionStatus,
-      followUpStatus: "not started",
-      createdBy: "system",
-      updatedBy: "system",
-      createdAt: row.vendor.createdAt,
-      updatedAt: row.vendor.updatedAt,
-    }));
-
-    pdfService.generateSubscriptionReport(
-      { type: "statement", title: "Collections Report" },
-      { subs, collections: [], vendors, plans, rpns },
-    );
+  const totals = {
+    activeCount: activeRows.length,
+    activeAmount: activeRows.reduce((sum, row) => sum + row.amountDue, 0),
+    overdueAmount: activeRows.filter((row) => row.daysDelta !== null && row.daysDelta < 0).reduce((sum, row) => sum + row.amountDue, 0),
+    vendors: new Set(activeRows.map((row) => row.vendorId)).size,
   };
 
-  const handleRecordPayment = async () => {
-    if (!selectedRow) {
-      setMessage("Select a vendor first.");
-      return;
-    }
-    const paid = Number(amountPaid || selectedRow.balanceDue || selectedRow.amountDue);
-    if (!Number.isFinite(paid) || paid <= 0) {
-      setMessage("Enter a valid amount paid.");
-      return;
-    }
-    const rpnId = getVendorRpnId(selectedRow.vendor);
-    const periodStart =
-      selectedRow.latestPayment?.billingPeriodStart ||
-      selectedRow.vendor.subscriptionStartDate ||
-      todayKey();
-    const periodEnd = selectedRow.dueDate || todayKey();
+  const groupedMessages = useMemo<WhatsAppGroup[]>(() => {
+    if (!groupMode || selectedRows.length === 0) return [];
+    const grouped = new Map<string, CollectionRow[]>();
+    selectedRows.forEach((row) => {
+      const key = groupMode === "rpn" ? row.rpnId || "unassigned-rpn" : row.staffId || "unassigned-staff";
+      grouped.set(key, [...(grouped.get(key) || []), row]);
+    });
+    const selectedBucketLabels = Array.from(new Set(selectedRows.map((row) => row.bucketLabel)));
+    const ageingLabel = selectedBucketLabels.length === 1 ? selectedBucketLabels[0] : "Mixed";
+    return Array.from(grouped.entries()).map(([id, groupRows]) => {
+      const first = groupRows[0];
+      const name = groupMode === "rpn" ? first.rpnName : first.staffName;
+      const whatsapp = groupMode === "rpn" ? first.rpnWhatsapp : first.staffWhatsapp;
+      const total = groupRows.reduce((sum, row) => sum + row.amountDue, 0);
+      return {
+        id,
+        name,
+        whatsapp,
+        rows: groupRows,
+        total,
+        message: buildCollectorMessage(name, ageingLabel, groupRows),
+      };
+    });
+  }, [groupMode, selectedRows]);
 
-    try {
-      const saved = await subscriptionService.recordSubscriptionPayment(
-        {
-          id: "",
-          vendorId: selectedRow.vendor.id,
-          vendorName: selectedRow.vendor.name,
-          rpnId: rpnId || undefined,
-          rpnName: selectedRow.rpn?.name || selectedRow.vendor.rpnName,
-          planId: selectedRow.vendor.planId,
-          planName: selectedRow.plan?.name || selectedRow.vendor.planId,
-          billingPeriodStart: periodStart,
-          billingPeriodEnd: periodEnd,
-          dueDate: selectedRow.dueDate || todayKey(),
-          amountDue: selectedRow.amountDue,
-          amountPaid: paid,
-          balanceDue: Math.max(selectedRow.amountDue - paid, 0),
-          currency: selectedRow.plan?.currency || "USD",
-          paymentStatus:
-            paid >= selectedRow.amountDue
-              ? "paid"
-              : paid > 0
-                ? "partial"
-                : "unpaid",
-          paymentDate: todayKey(),
-          paymentMethod,
-          paymentReference,
-          createdAt: "",
-          updatedAt: "",
-        },
-        {
-          postToFinance: canPostFinance,
-          generateRpnCommission: canGenerateCommission,
-        },
-      );
-      setMessage(
-        `Payment saved. Receipt ${saved.receiptNumber || "pending"}${
-          saved.financeTransactionId
-            ? " and posted to finance ledger."
-            : ". Finance posting pending until Cash/Bank Ledger is configured."
-        }${!rpnId ? " No RPN assigned to this vendor." : ""}`,
-      );
-      setAmountPaid("");
-      setPaymentReference("");
-      await loadData();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Payment save failed.");
-    }
+  const toggleRow = (rowId: string) => {
+    setSelectedIds((prev) => (prev.includes(rowId) ? prev.filter((id) => id !== rowId) : [...prev, rowId]));
+    setGroupMode(null);
   };
 
-  const handleWaive = async (paymentId?: string) => {
-    if (!paymentId) {
-      setMessage("No payment record selected to waive.");
+  const toggleVisibleRows = () => {
+    setSelectedIds(allVisibleSelected ? [] : filteredRows.map((row) => row.id));
+    setGroupMode(null);
+  };
+
+  const notifyVendor = (row: CollectionRow) => {
+    if (!row.vendorWhatsapp) {
+      setMessage("Vendor WhatsApp number is missing.");
+      return;
+    }
+    const reminderMessage = buildVendorReminderMessage(row);
+    if (row.invoice) {
+      const saved = vendorBillingService.recordCollectionReminder({
+        invoiceId: row.invoice.id,
+        channel: "whatsapp",
+        message: reminderMessage,
+      });
+      if (saved) setInvoices(vendorBillingService.getInvoices());
+    }
+    window.open(`https://wa.me/${row.vendorWhatsapp}?text=${encodeURIComponent(reminderMessage)}`, "_blank", "noopener,noreferrer");
+    setMessage(`WhatsApp reminder opened for ${row.vendorName}.`);
+  };
+
+  const downloadInvoice = (row: CollectionRow) => {
+    if (!row.invoice) {
+      setMessage("Invoice download is available once a vendor bill has been generated.");
+      return;
+    }
+    const opened = printVendorInvoice(row.invoice, vendorById.get(row.vendorId));
+    setMessage(opened ? `Invoice view opened for ${row.invoice.invoiceNumber}.` : "Popup blocked. Allow popups to download/print the invoice.");
+  };
+
+  const recordPayment = async (row: CollectionRow) => {
+    if (!row.invoice) {
+      setMessage("Record payment is available for generated vendor bills.");
+      return;
+    }
+    const amountText = window.prompt(`Record payment for ${row.invoice.invoiceNumber}`, String(Math.round(row.amountDue)));
+    if (amountText === null) return;
+    const amount = Number(amountText);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setMessage("Enter a valid payment amount.");
       return;
     }
     try {
-      subscriptionService.markPaymentWaived(paymentId);
-      setMessage("Payment balance waived.");
-      await loadData();
+      vendorBillingService.recordPayment({
+        invoiceId: row.invoice.id,
+        amount,
+        paymentMethod: "manual",
+        paymentDate: todayKey(),
+        notes: "Recorded from Collections operations desk.",
+      });
+      setInvoices(vendorBillingService.getInvoices());
+      setMessage(`Payment recorded for ${row.invoice.invoiceNumber}.`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Waive action failed.");
+      setMessage(error instanceof Error ? error.message : "Failed to record payment.");
     }
   };
 
-  const handleSendFollowUp = async (row: CollectionRow) => {
-    setMessage(
-      `Follow-up noted for ${row.vendor.name}. Notification routing is active through overdue alerts.`,
-    );
+  const openCollectorWhatsapp = (group: WhatsAppGroup) => {
+    if (!group.whatsapp) {
+      setMessage(`${group.name} WhatsApp number is missing.`);
+      return;
+    }
+    window.open(`https://wa.me/${group.whatsapp}?text=${encodeURIComponent(group.message)}`, "_blank", "noopener,noreferrer");
+    setMessage(`WhatsApp follow-up list opened for ${group.name}.`);
   };
-
-  const renderTableRows = (data: CollectionRow[]) => {
-    return data.map((row) => (
-      <tr key={row.vendor.id} className="hover:bg-stone-50">
-        <td className="px-4 py-4">
-          <p className="font-bold text-xs uppercase text-brand-charcoal">
-            {row.vendor.name}
-          </p>
-          <p className="text-[10px] text-stone-500 font-mono">
-            {row.vendor.systemCode}
-          </p>
-        </td>
-        <td className="px-4 py-4 text-xs font-bold uppercase">
-          {row.plan?.name || row.vendor.planId || "No plan"}
-        </td>
-        <td className="px-4 py-4 text-xs">{row.rpn?.name || "No RPN assigned"}</td>
-        <td className="px-4 py-4 font-mono text-xs">
-          {row.plan?.currency || row.latestPayment?.currency || "USD"}{" "}
-          {row.amountDue.toFixed(2)}
-        </td>
-        <td className="px-4 py-4 font-mono text-xs">
-          {row.amountPaid.toFixed(2)}
-        </td>
-        <td className="px-4 py-4 font-mono text-xs font-bold">
-          {row.balanceDue.toFixed(2)}
-        </td>
-        <td className="px-4 py-4 text-xs">
-          {row.dueDate ? new Date(row.dueDate).toLocaleDateString() : "N/A"}
-          {row.overdueDays > 0 && (
-            <span className="ml-2 text-[10px] font-bold text-red-600">
-              {row.overdueDays}d overdue
-            </span>
-          )}
-        </td>
-        <td className="px-4 py-4">
-          <StatusBadge
-            status={row.paymentStatus}
-            variant={statusVariant(row.paymentStatus)}
-          />
-        </td>
-        <td className="px-4 py-4">
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedVendorId(row.vendor.id);
-                setAmountPaid(String(row.balanceDue || row.amountDue));
-              }}
-              disabled={!canRecordPayment}
-              className="border border-brand-orange px-2 py-1 text-[10px] font-bold uppercase text-brand-orange disabled:opacity-40"
-            >
-              Record Payment
-            </button>
-            <button
-              type="button"
-              onClick={() => handleSendFollowUp(row)}
-              className="border border-stone-300 px-2 py-1 text-[10px] font-bold uppercase text-stone-700"
-            >
-              Follow-up
-            </button>
-            <button
-              type="button"
-              onClick={() => handleWaive(row.latestPayment?.id)}
-              disabled={!canWaive || !row.latestPayment}
-              className="border border-stone-300 px-2 py-1 text-[10px] font-bold uppercase text-stone-700 disabled:opacity-40"
-            >
-              Waive
-            </button>
-          </div>
-        </td>
-      </tr>
-    ));
-  };
-
-  if (isLoadingData) {
-    return (
-      <div className="pb-20 min-w-0 max-w-full flex items-center justify-center pt-20">
-        <div className="text-center text-stone-400">
-          <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4" />
-          <p className="text-xs font-bold uppercase tracking-widest">Loading Subscriptions...</p>
-        </div>
-      </div>
-    );
-  }
 
   return (
-    <div className="pb-20">
+    <div className="space-y-6 pb-20">
       <PageHeader
-        title="Collections & Subscriptions"
-        subtitle="Manage vendor subscriptions, record collections, issue receipt references, and feed finance/RPN commission ledgers."
-        actions={
-          <PrimaryButton
-            onClick={handleExportPDF}
-            disabled={filteredRows.length === 0}
-          >
-            <Download size={14} className="mr-2" /> Export Report
-          </PrimaryButton>
-        }
+        title="Collections"
+        subtitle="Vendor subscription and bill follow-up desk for RPN/staff collections coordination."
       />
 
       {message && (
-        <div className="mb-4 border-l-4 border-brand-orange bg-white p-4 text-sm font-semibold text-brand-charcoal shadow-sm">
+        <div className="border-l-4 border-brand-orange bg-white p-4 text-sm font-semibold text-brand-charcoal shadow-sm">
           {message}
         </div>
       )}
 
-      <div className="grid gap-4 md:grid-cols-4">
-        {[
-          ["Amount Due", totals.amountDue],
-          ["Amount Paid", totals.amountPaid],
-          ["Balance", totals.balanceDue],
-          ["Overdue Accounts", totals.overdue],
-        ].map(([label, value]) => (
-          <DataPanel key={label as string}>
-            <div className="p-4">
-              <p className="text-[10px] font-black uppercase tracking-widest text-stone-500">
-                {label}
-              </p>
-              <p className="mt-2 text-2xl font-black text-brand-charcoal">
-                {typeof value === "number" && label !== "Overdue Accounts"
-                  ? value.toFixed(2)
-                  : value}
-              </p>
-            </div>
+      <div className="grid gap-3 md:grid-cols-4">
+        <StatCard label="Active Collections" value={totals.activeCount} icon={Receipt} />
+        <StatCard label="Active Value" value={money(totals.activeAmount)} icon={Wallet} variant="warning" />
+        <StatCard label="Overdue Value" value={money(totals.overdueAmount)} icon={AlertTriangle} variant="danger" />
+        <StatCard label="Vendors In Follow-up" value={totals.vendors} icon={Users} />
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-7">
+        {summaryByBucket.map((bucket) => (
+          <DataPanel key={bucket.bucketId}>
+            <button
+              type="button"
+              onClick={() => setFilters((prev) => ({ ...prev, bucket: bucket.bucketId }))}
+              className="block w-full p-4 text-left hover:bg-stone-50"
+            >
+              <p className="text-[10px] font-black uppercase tracking-widest text-stone-500">{bucket.label}</p>
+              <p className="mt-2 text-lg font-black text-brand-charcoal">{bucket.count} invoices</p>
+              <p className="text-sm font-black text-brand-orange">{money(bucket.total)}</p>
+            </button>
           </DataPanel>
         ))}
       </div>
 
-      <DataPanel className="mt-6">
+      <DataPanel title="Collections filters">
         <div className="grid gap-3 p-4 md:grid-cols-6">
-          <select
-            value={periodFilter}
-            onChange={(event) => setPeriodFilter(event.target.value)}
-            className="border border-stone-300 bg-white px-3 py-2 text-xs"
-          >
-            <option value="lifetime">Lifetime</option>
-            <option value="today">Today</option>
-            <option value="this-week">This Week</option>
-            <option value="this-month">This Month</option>
-            <option value="this-year">This Year</option>
-          </select>
-          <input
-            value={vendorFilter}
-            onChange={(event) => setVendorFilter(event.target.value)}
-            placeholder="Vendor"
-            className="border border-stone-300 px-3 py-2 text-xs"
-          />
-          <select
-            value={planFilter}
-            onChange={(event) => setPlanFilter(event.target.value)}
-            className="border border-stone-300 bg-white px-3 py-2 text-xs"
-          >
-            <option value="all">All plans</option>
-            {plans.map((plan) => (
-              <option key={plan.id} value={plan.id}>
-                {plan.name}
-              </option>
+          <select value={filters.bucket} onChange={(event) => setFilters((prev) => ({ ...prev, bucket: event.target.value }))} className="border border-stone-300 bg-white px-3 py-2 text-xs font-bold">
+            <option value="active">Active ageing buckets</option>
+            <option value="all">All ageing buckets</option>
+            {Object.entries(bucketMeta).map(([id, meta]) => (
+              <option key={id} value={id}>{meta.label}</option>
             ))}
           </select>
-          <select
-            value={statusFilter}
-            onChange={(event) =>
-              setStatusFilter(event.target.value as PaymentStatusFilter)
-            }
-            className="border border-stone-300 bg-white px-3 py-2 text-xs"
-          >
-            <option value="all">All statuses</option>
-            <option value="unpaid">Unpaid</option>
-            <option value="partial">Partial</option>
-            <option value="paid">Paid</option>
+          <select value={filters.status} onChange={(event) => setFilters((prev) => ({ ...prev, status: event.target.value as StatusFilter }))} className="border border-stone-300 bg-white px-3 py-2 text-xs font-bold">
+            <option value="active">Active</option>
+            <option value="due_soon">Due soon</option>
+            <option value="due_today">Due today</option>
             <option value="overdue">Overdue</option>
-            <option value="waived">Waived</option>
+            <option value="all">All</option>
+            <option value="paid">Paid</option>
+            <option value="void">Voided</option>
             <option value="cancelled">Cancelled</option>
           </select>
-          <select
-            value={rpnFilter}
-            onChange={(event) => setRpnFilter(event.target.value)}
-            className="border border-stone-300 bg-white px-3 py-2 text-xs"
-          >
+          <select value={filters.rpnId} onChange={(event) => setFilters((prev) => ({ ...prev, rpnId: event.target.value }))} className="border border-stone-300 bg-white px-3 py-2 text-xs font-bold">
             <option value="all">All RPNs</option>
-            {rpns.map((rpn) => (
-              <option key={rpn.id} value={rpn.id}>
-                {rpn.name}
-              </option>
-            ))}
+            {rpns.map((rpn) => <option key={rpn.id} value={rpn.id}>{rpn.name}</option>)}
           </select>
-          <label className="flex items-center gap-2 border border-stone-300 px-3 py-2 text-xs font-bold uppercase">
-            <input
-              type="checkbox"
-              checked={overdueOnly}
-              onChange={(event) => setOverdueOnly(event.target.checked)}
-            />
-            Overdue only
-          </label>
+          <select value={filters.staffId} onChange={(event) => setFilters((prev) => ({ ...prev, staffId: event.target.value }))} className="border border-stone-300 bg-white px-3 py-2 text-xs font-bold">
+            <option value="all">All staff</option>
+            {staff.map((item) => <option key={item.id} value={item.id}>{staffDisplayName(item)}</option>)}
+          </select>
+          <select value={filters.planId} onChange={(event) => setFilters((prev) => ({ ...prev, planId: event.target.value }))} className="border border-stone-300 bg-white px-3 py-2 text-xs font-bold">
+            <option value="all">All plans</option>
+            {plans.map((plan) => <option key={plan.id} value={plan.id}>{plan.name}</option>)}
+          </select>
+          <input value={filters.vendor} onChange={(event) => setFilters((prev) => ({ ...prev, vendor: event.target.value }))} placeholder="Search vendor" className="border border-stone-300 px-3 py-2 text-xs font-bold" />
         </div>
       </DataPanel>
 
-      <DataPanel className="mt-6">
-        <div className="grid gap-4 p-4 lg:grid-cols-[1.3fr_1fr]">
-          <div>
-            <div className="mb-3 flex items-center gap-2">
-              <Receipt size={18} className="text-brand-orange" />
-              <h3 className="text-sm font-black uppercase text-brand-charcoal">
-                Record Payment
-              </h3>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              <select
-                value={selectedVendorId}
-                onChange={(event) => {
-                  setSelectedVendorId(event.target.value);
-                  const row = rows.find(
-                    (item) => item.vendor.id === event.target.value,
-                  );
-                  setAmountPaid(row ? String(row.balanceDue || row.amountDue) : "");
-                }}
-                className="border border-stone-300 bg-white px-3 py-2 text-sm"
-              >
-                <option value="">Select vendor</option>
-                {rows.map((row) => (
-                  <option key={row.vendor.id} value={row.vendor.id}>
-                    {row.vendor.name}
-                  </option>
-                ))}
-              </select>
-              <input
-                value={amountPaid}
-                onChange={(event) => setAmountPaid(event.target.value)}
-                placeholder="Amount paid"
-                className="border border-stone-300 px-3 py-2 text-sm"
-              />
-              <select
-                value={paymentMethod}
-                onChange={(event) =>
-                  setPaymentMethod(event.target.value as CollectionMethod)
-                }
-                className="border border-stone-300 bg-white px-3 py-2 text-sm"
-              >
-                <option value="cash">Cash</option>
-                <option value="EcoCash">EcoCash</option>
-                <option value="InnBucks">InnBucks</option>
-                <option value="Mukuru">Mukuru</option>
-                <option value="bank transfer">Bank transfer</option>
-                <option value="manual">Manual</option>
-                <option value="other">Other</option>
-              </select>
-              <input
-                value={paymentReference}
-                onChange={(event) => setPaymentReference(event.target.value)}
-                placeholder="Reference"
-                className="border border-stone-300 px-3 py-2 text-sm"
-              />
-            </div>
-            <button
-              type="button"
-              onClick={handleRecordPayment}
-              disabled={!canRecordPayment}
-              className="mt-3 flex items-center gap-2 bg-brand-orange px-4 py-2 text-xs font-black uppercase text-white disabled:opacity-40"
-            >
-              <Wallet size={14} /> Record Payment
-            </button>
-          </div>
-          <div className="border-l border-stone-200 pl-4 text-xs text-stone-600">
-            <p className="font-black uppercase text-brand-charcoal">
-              Finance connection
-            </p>
-            <p className="mt-2">
-              Paid records generate a receipt number and can post a receipt to
-              Cash/Bank Ledger when a cash/bank account and Subscription Revenue
-              COA exist.
-            </p>
-            <p className="mt-2">
-              If the vendor has an assigned RPN, paid records can generate a
-              recurring commission in RPN Payments Ledger.
-            </p>
-          </div>
+      <DataPanel title="Bulk follow-up">
+        <div className="flex flex-wrap items-center gap-3 p-4">
+          <SecondaryButton onClick={toggleVisibleRows} disabled={filteredRows.length === 0}>
+            {allVisibleSelected ? "Clear selection" : "Select visible"}
+          </SecondaryButton>
+          <PrimaryButton onClick={() => setGroupMode("rpn")} disabled={selectedRows.length === 0}>
+            <Send size={14} className="mr-2" /> Send selected to assigned RPNs
+          </PrimaryButton>
+          <PrimaryButton onClick={() => setGroupMode("staff")} disabled={selectedRows.length === 0}>
+            <Users size={14} className="mr-2" /> Send selected to assigned staff
+          </PrimaryButton>
+          <span className="text-xs font-bold uppercase text-stone-500">{selectedRows.length} selected</span>
         </div>
+        {groupedMessages.length > 0 && (
+          <div className="grid gap-3 border-t border-stone-100 p-4 md:grid-cols-2 xl:grid-cols-3">
+            {groupedMessages.map((group) => (
+              <div key={group.id} className="border border-stone-200 bg-stone-50 p-4">
+                <p className="text-xs font-black uppercase text-brand-charcoal">{group.name}</p>
+                <p className="mt-1 text-[11px] font-semibold text-stone-500">{group.rows.length} invoices / {money(group.total)}</p>
+                <p className="mt-1 text-[11px] text-stone-500">{group.whatsapp || "WhatsApp number missing"}</p>
+                <button type="button" onClick={() => openCollectorWhatsapp(group)} className="mt-3 inline-flex items-center gap-2 bg-brand-charcoal px-3 py-2 text-[10px] font-black uppercase text-white">
+                  <MessageCircle size={13} /> Open WhatsApp
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </DataPanel>
 
-      {filteredRows.length === 0 ? (
-        <DataPanel className="mt-6">
+      <DataPanel title="Active collections list">
+        {filteredRows.length === 0 ? (
           <div className="p-12">
-            <EmptyState
-              title="No Collections"
-              description="No subscription collection records match the selected filters."
-              icon={Wallet}
-            />
+            <EmptyState title="No Collections" description="No vendor bills or subscriptions match the selected filters." icon={Wallet} />
           </div>
-        </DataPanel>
-      ) : (
-        <div className="mt-6 space-y-8">
-          {totals.overdue > 0 && (
-            <div className="flex items-center gap-2 border-l-4 border-red-600 bg-white p-4 text-sm font-semibold text-red-700">
-              <AlertTriangle size={16} />
-              {totals.overdue} overdue account(s) require follow-up.
-            </div>
-          )}
-          <TablePanel
-            title="Subscription Collections"
-            subtitle="Payment records, balances, due dates, RPN linkage and collection actions"
-            headers={[
-              "Vendor",
-              "Plan",
-              "RPN",
-              "Amount Due",
-              "Paid",
-              "Balance",
-              "Due Date",
-              "Status",
-              "Actions",
-            ]}
-          >
-            {renderTableRows(filteredRows)}
-          </TablePanel>
-          <div className="grid gap-4 md:grid-cols-3">
-            <DataPanel>
-              <div className="p-4">
-                <FileText className="mb-2 text-brand-orange" size={20} />
-                <p className="text-xs font-black uppercase text-brand-charcoal">
-                  Receipt Numbering
-                </p>
-                <p className="mt-2 text-xs text-stone-600">
-                  Receipts use SCI-RCT-YYYYMM-0001 format when payment is
-                  recorded.
-                </p>
-              </div>
-            </DataPanel>
-            <DataPanel>
-              <div className="p-4">
-                <RefreshCw className="mb-2 text-brand-orange" size={20} />
-                <p className="text-xs font-black uppercase text-brand-charcoal">
-                  Ledger Posting
-                </p>
-                <p className="mt-2 text-xs text-stone-600">
-                  Debit cash/bank and credit Subscription Revenue when finance
-                  setup is available.
-                </p>
-              </div>
-            </DataPanel>
-            <DataPanel>
-              <div className="p-4">
-                <Send className="mb-2 text-brand-orange" size={20} />
-                <p className="text-xs font-black uppercase text-brand-charcoal">
-                  RPN Commission
-                </p>
-                <p className="mt-2 text-xs text-stone-600">
-                  Paid subscriptions feed recurring commission entries where RPN
-                  assignment exists.
-                </p>
-              </div>
-            </DataPanel>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="border-b border-stone-200 bg-stone-50 text-[9px] uppercase tracking-widest text-stone-500">
+                  <th className="px-4 py-3"><input type="checkbox" checked={allVisibleSelected} onChange={toggleVisibleRows} /></th>
+                  <th className="px-4 py-3">Vendor</th>
+                  <th className="px-4 py-3">Collector</th>
+                  <th className="px-4 py-3">Invoice/subscription</th>
+                  <th className="px-4 py-3">Dates</th>
+                  <th className="px-4 py-3 text-right">Amount</th>
+                  <th className="px-4 py-3">Ageing</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-stone-100">
+                {filteredRows.map((row) => (
+                  <tr key={row.id} className="hover:bg-stone-50">
+                    <td className="px-4 py-4 align-top">
+                      <input type="checkbox" checked={selectedIds.includes(row.id)} onChange={() => toggleRow(row.id)} />
+                    </td>
+                    <td className="px-4 py-4 align-top">
+                      <p className="text-xs font-black uppercase text-brand-charcoal">{row.vendorName}</p>
+                      <p className="mt-1 text-[10px] font-mono text-stone-500">{row.vendorWhatsapp || "Vendor WhatsApp number is missing."}</p>
+                    </td>
+                    <td className="px-4 py-4 align-top text-xs">
+                      <p className="font-bold text-stone-700">RPN: {row.rpnName}</p>
+                      <p className="mt-1 text-stone-500">Staff: {row.staffName}</p>
+                    </td>
+                    <td className="px-4 py-4 align-top">
+                      <p className="text-xs font-black text-brand-charcoal">{row.invoiceNumber}</p>
+                      <p className="mt-1 text-[10px] uppercase text-stone-500">{row.source} / {row.planName || "No plan"}</p>
+                    </td>
+                    <td className="px-4 py-4 align-top text-xs text-stone-600">
+                      <p>Invoice: {dateLabel(row.invoiceDate)}</p>
+                      <p className="mt-1 font-bold">Due: {dateLabel(row.dueDate)}</p>
+                      <p className={`mt-1 text-[10px] font-black uppercase ${row.daysDelta !== null && row.daysDelta < 0 ? "text-red-700" : "text-brand-orange"}`}>{daysPhrase(row)}</p>
+                    </td>
+                    <td className="px-4 py-4 align-top text-right font-mono text-xs font-black text-brand-charcoal">{money(row.amountDue)}</td>
+                    <td className="px-4 py-4 align-top text-xs font-bold text-stone-700">
+                      <CalendarClock size={14} className="mb-1 text-brand-orange" />
+                      {row.bucketLabel}
+                    </td>
+                    <td className="px-4 py-4 align-top">
+                      <StatusBadge status={collectionStatusLabel(row)} variant={statusVariant(row)} />
+                    </td>
+                    <td className="px-4 py-4 align-top">
+                      <div className="flex flex-wrap justify-end gap-2">
+                        <button type="button" onClick={() => notifyVendor(row)} className="inline-flex items-center gap-1 border border-brand-orange px-2 py-1 text-[10px] font-black uppercase text-brand-orange">
+                          <MessageCircle size={12} /> Notify vendor
+                        </button>
+                        <button type="button" onClick={() => downloadInvoice(row)} className="inline-flex items-center gap-1 border border-stone-300 px-2 py-1 text-[10px] font-black uppercase text-stone-700">
+                          <Download size={12} /> Download invoice
+                        </button>
+                        <button type="button" onClick={() => recordPayment(row)} disabled={!row.invoice || isClosedInvoiceStatus(String(row.status))} className="inline-flex items-center gap-1 border border-stone-300 px-2 py-1 text-[10px] font-black uppercase text-stone-700 disabled:opacity-40">
+                          <CheckCircle2 size={12} /> Mark paid
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        </div>
-      )}
+        )}
+      </DataPanel>
     </div>
   );
 };

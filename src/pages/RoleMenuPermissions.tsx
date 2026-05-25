@@ -67,7 +67,7 @@ const ACTION_GROUPS = [
     ],
   },
   {
-    name: "Finance & Subscriptions",
+    name: "Plans & Prices",
     keys: ["pricing.view", "pricing.submitApproval", "pricing.approve"],
   },
   {

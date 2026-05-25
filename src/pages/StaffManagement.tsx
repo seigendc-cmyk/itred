@@ -187,7 +187,7 @@ const ACTION_GROUPS = [
     keys: ['whatsapp.view', 'whatsapp.logActivity', 'whatsapp.verifyConversion']
   },
   {
-    name: 'Finance & Subscriptions',
+    name: 'Plans & Prices',
     keys: [
       'pricing.view',
       'pricing.submitApproval',

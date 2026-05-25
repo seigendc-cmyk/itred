@@ -1,5 +1,5 @@
 import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
+import { runAutoTable } from "../utils/pdfAutoTable.ts";
 import {
   Vendor,
   Subscription,
@@ -98,7 +98,7 @@ export const pdfService = {
       ];
     });
 
-    autoTable(doc, {
+    runAutoTable(doc, {
       startY: 75,
       head: tableHeaders,
       body: tableRows,
@@ -177,7 +177,7 @@ export const pdfService = {
       s.status.toUpperCase(),
     ]);
 
-    autoTable(doc, {
+    runAutoTable(doc, {
       startY: 100,
       head: subHeaders,
       body: subRows,
@@ -265,7 +265,7 @@ export const pdfService = {
       ];
     });
 
-    autoTable(doc, {
+    runAutoTable(doc, {
       startY: 85,
       head: tableHeaders,
       body: tableRows,
@@ -447,7 +447,7 @@ export const pdfService = {
       "",
     ]);
 
-    autoTable(doc, {
+    runAutoTable(doc, {
       startY: yPosition,
       head: productHeaders,
       body: productRows,

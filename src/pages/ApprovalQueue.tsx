@@ -36,6 +36,153 @@ import {
   hasValidSession,
 } from "../utils/session.ts";
 
+const toSentenceLabel = (key: string) =>
+  key
+    .replace(/_/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/^./, (c) => c.toUpperCase());
+
+const INTERNAL_STATE_FIELDS = new Set([
+  "id",
+  "uid",
+  "createdAt",
+  "updatedAt",
+  "deletedAt",
+  "createdBy",
+  "createdByStaffId",
+  "updatedBy",
+  "updatedByStaffId",
+  "metadata",
+  "raw",
+  "payload",
+  "debug",
+  "source",
+  "syncStatus",
+  "searchKeywords",
+]);
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === "object" && !Array.isArray(value);
+
+const formatDateValue = (value: string) => {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString();
+};
+
+const formatMoneyValue = (value: unknown) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return String(value ?? "");
+  return `$${Math.round(numeric).toLocaleString("en-US")}`;
+};
+
+const formatBusinessValue = (key: string, value: unknown): string => {
+  if (value === null || value === undefined || value === "") return "Not provided";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "number") {
+    return /(amount|price|cost|fee|total|balance|paid|due|rate|value)/i.test(key)
+      ? formatMoneyValue(value)
+      : value.toLocaleString();
+  }
+  if (typeof value === "string") {
+    if (/^\d{4}-\d{2}-\d{2}/.test(value) || /date|At$/i.test(key)) {
+      return formatDateValue(value);
+    }
+    if (/(amount|price|cost|fee|total|balance|paid|due|rate|value)/i.test(key)) {
+      return formatMoneyValue(value);
+    }
+    return value.replace(/_/g, " ");
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) return "None";
+    if (value.every((item) => !isRecord(item))) return value.map(String).join(", ");
+    return `${value.length} item${value.length === 1 ? "" : "s"}`;
+  }
+  if (isRecord(value)) {
+    const preferred = value.name || value.title || value.label || value.displayName || value.value;
+    return preferred ? String(preferred) : "See details";
+  }
+  return String(value);
+};
+
+const flattenBusinessRows = (
+  value: unknown,
+  parentKey = "",
+): Array<{ key: string; label: string; value: string }> => {
+  if (!isRecord(value)) return [];
+
+  return Object.entries(value).flatMap(([key, fieldValue]) => {
+    if (INTERNAL_STATE_FIELDS.has(key) || fieldValue === undefined) return [];
+    const path = parentKey ? `${parentKey}.${key}` : key;
+
+    if (isRecord(fieldValue)) {
+      const nested = flattenBusinessRows(fieldValue, path);
+      return nested.length
+        ? nested
+        : [{ key: path, label: toSentenceLabel(path.replace(/\./g, " ")), value: formatBusinessValue(key, fieldValue) }];
+    }
+
+    return [
+      {
+        key: path,
+        label: toSentenceLabel(path.replace(/\./g, " ")),
+        value: formatBusinessValue(key, fieldValue),
+      },
+    ];
+  });
+};
+
+const RequestedStateView: React.FC<{ state: unknown; canViewRaw: boolean }> = ({
+  state,
+  canViewRaw,
+}) => {
+  if (!state) {
+    return (
+      <div className="rounded-sm border border-orange-100 bg-orange-50/30 p-4 text-xs font-semibold text-stone-600">
+        Data payload omitted or deletion.
+      </div>
+    );
+  }
+
+  const rows = flattenBusinessRows(state);
+
+  return (
+    <div className="space-y-3">
+      <div className="max-h-72 overflow-y-auto custom-scrollbar rounded-sm border border-orange-100 bg-orange-50/30">
+        {rows.length > 0 ? (
+          <dl className="divide-y divide-orange-100/70">
+            {rows.map((row) => (
+              <div key={row.key} className="grid gap-1 px-3 py-2 sm:grid-cols-[180px_1fr]">
+                <dt className="text-[10px] font-black uppercase tracking-wide text-stone-500">
+                  {row.label}
+                </dt>
+                <dd className="break-words text-xs font-semibold text-brand-charcoal">
+                  {row.value}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        ) : (
+          <div className="p-4 text-xs font-semibold text-stone-600">
+            No readable business fields were found in this requested state.
+          </div>
+        )}
+      </div>
+
+      {canViewRaw && (
+        <details className="rounded-sm border border-stone-200 bg-stone-50 p-3">
+          <summary className="cursor-pointer text-[10px] font-black uppercase tracking-widest text-stone-500">
+            Debug raw requested payload
+          </summary>
+          <pre className="mt-3 max-h-48 overflow-x-auto custom-scrollbar whitespace-pre-wrap text-[10px] font-mono text-stone-600">
+            {JSON.stringify(state, null, 2)}
+          </pre>
+        </details>
+      )}
+    </div>
+  );
+};
+
 export const ApprovalQueue: React.FC = () => {
   const [requests, setRequests] = useState<ApprovalRequest[]>([]);
   const [selectedTab, setSelectedTab] = useState<string>("All");
@@ -76,6 +223,7 @@ export const ApprovalQueue: React.FC = () => {
   const session = getSession();
   const staffId = getSessionStaffId(session);
   const staffName = getSessionStaffName(session, "Unknown staff");
+  const canViewRawPayload = permissionService.isSysAdmin();
 
   const pendingRequests = requests.filter((r) => r.status === "pending");
   const todayStr = new Date().toISOString().split("T")[0];
@@ -517,15 +665,10 @@ export const ApprovalQueue: React.FC = () => {
                     <p className="text-[9px] font-bold uppercase text-brand-orange mb-2">
                       Requested State
                     </p>
-                    <pre className="p-3 bg-orange-50/30 text-[10px] font-mono text-stone-700 overflow-x-auto custom-scrollbar h-48 border border-orange-100">
-                      {activeModal.request.afterSnapshot
-                        ? JSON.stringify(
-                            activeModal.request.afterSnapshot,
-                            null,
-                            2,
-                          )
-                        : "Data payload omitted or deletion."}
-                    </pre>
+                    <RequestedStateView
+                      state={activeModal.request.afterSnapshot}
+                      canViewRaw={canViewRawPayload}
+                    />
                   </div>
                 </div>
               </div>

@@ -155,7 +155,7 @@ const MENU_GROUPS: {
   },
   {
     id: 'finance-subscriptions',
-    label: 'Finance & Subscriptions',
+    label: 'Plans & Prices',
     icon: Wallet,
     items: [
       { id: AppRoute.PRICING, label: 'Pricing', icon: CreditCard },

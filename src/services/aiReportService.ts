@@ -11,6 +11,7 @@ import {
 } from "./analyticsService.ts";
 import { getStorageAdapter } from "./storageService.ts";
 import { permissionService } from "./permissionService.ts";
+import { stripUndefined } from "../utils/firestoreSanitize.ts";
 
 export type AiReportType =
   | "vendor_advisory"
@@ -132,12 +133,13 @@ ${JSON.stringify(analyticsForPrompt(analytics))}
 
 const saveOutput = async (output: AiReportOutput) => {
   const storage = getStorageAdapter();
+  const safeOutput = stripUndefined(output);
   if (storage.batchSetItems) {
-    await storage.batchSetItems(OUTPUTS_KEY, [output]);
+    await storage.batchSetItems(OUTPUTS_KEY, [safeOutput]);
     return;
   }
   const existing = await storage.getItem<AiReportOutput[]>(OUTPUTS_KEY);
-  await storage.setItem(OUTPUTS_KEY, [output, ...((existing as AiReportOutput[]) || [])]);
+  await storage.setItem(OUTPUTS_KEY, [safeOutput, ...((existing as AiReportOutput[]) || [])]);
 };
 
 export const aiReportService = {
