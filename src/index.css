@@ -30,12 +30,20 @@
   }
 
   button:not(:disabled),
+  a[href],
   [role="button"],
+  input[type="button"]:not(:disabled),
+  input[type="submit"]:not(:disabled),
+  input[type="reset"]:not(:disabled),
   .clickable {
     cursor: pointer;
   }
 
-  button:disabled {
+  button:disabled,
+  input[type="button"]:disabled,
+  input[type="submit"]:disabled,
+  input[type="reset"]:disabled,
+  [aria-disabled="true"] {
     cursor: not-allowed;
   }
   

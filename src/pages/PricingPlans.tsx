@@ -59,11 +59,7 @@ import {
   canUseFeature,
   canGenerateCatalogue,
   calculateBrandedProductUsage,
-  getEffectiveBrandedProductLimit,
-  calculateSpotCheckUsage,
-  calculateStocktakeUsage,
-  getEffectiveSpotCheckLimit,
-  getEffectiveStocktakeLimit
+  getEffectiveBrandedProductLimit
 } from '../services/entitlementEngine.ts'
 import { StatCard } from '../components/ui/StatCard.tsx'
 
@@ -136,11 +132,6 @@ export const PricingPlans: React.FC = () => {
 
   const underlineInputClass =
     'w-full bg-stone-50 border-0 border-b-2 border-stone-300 focus:border-brand-orange focus:ring-0 outline-none rounded-none px-4 py-3 text-sm font-bold text-brand-charcoal transition-colors'
-
-  const quotaValue = (value: unknown) =>
-    String(value).toLowerCase() === 'unlimited'
-      ? 'unlimited'
-      : Number(value) || 0
 
   const loadData = async () => {
     setIsLoadingData(true)
@@ -232,7 +223,11 @@ export const PricingPlans: React.FC = () => {
             ? 'unlimited'
             : Number(editingPlan.maxBrandedProducts) || 0,
         maxVendorsPerCatalogue: Number(editingPlan.maxVendorsPerCatalogue) || 1,
-        maxImagesPerCatalogue: Number(editingPlan.maxImagesPerCatalogue) || 0,
+        maxImagesPerCatalogue:
+          String(editingPlan.maxImagesPerCatalogue).toLowerCase() ===
+          'unlimited'
+            ? 'unlimited'
+            : Number(editingPlan.maxImagesPerCatalogue) || 0,
         maxImagesPerProduct: Number(editingPlan.maxImagesPerProduct) || 1,
         maxImagesPerListing: Number(editingPlan.maxImagesPerListing) || 1,
         deploymentFrequency: editingPlan.deploymentFrequency || 'monthly',
@@ -262,31 +257,6 @@ export const PricingPlans: React.FC = () => {
           !!editingPlan.isInventorySpotCheckIncluded,
         inventorySpotChecksPerMonth:
           Number(editingPlan.inventorySpotChecksPerMonth) || 0,
-        enableInventorySpotChecks:
-          !!editingPlan.enableInventorySpotChecks ||
-          !!editingPlan.isInventorySpotCheckIncluded,
-        enableStocktake: !!editingPlan.enableStocktake,
-        spotChecksIncludedPerMonth: quotaValue(
-          editingPlan.spotChecksIncludedPerMonth ??
-            editingPlan.inventorySpotChecksPerMonth
-        ),
-        stocktakesIncludedPerMonth: quotaValue(
-          editingPlan.stocktakesIncludedPerMonth
-        ),
-        allowSpotCheckAddOn: !!editingPlan.allowSpotCheckAddOn,
-        spotCheckAddOnPrice: Number(editingPlan.spotCheckAddOnPrice) || 0,
-        spotCheckAddOnQuantity:
-          Number(editingPlan.spotCheckAddOnQuantity) || 0,
-        allowStocktakeAddOn: !!editingPlan.allowStocktakeAddOn,
-        stocktakeAddOnPrice: Number(editingPlan.stocktakeAddOnPrice) || 0,
-        stocktakeAddOnQuantity:
-          Number(editingPlan.stocktakeAddOnQuantity) || 0,
-        requireApprovalForSpotCheck:
-          !!editingPlan.requireApprovalForSpotCheck,
-        requireApprovalForStocktake:
-          !!editingPlan.requireApprovalForStocktake,
-        allowRpnSpotChecks: !!editingPlan.allowRpnSpotChecks,
-        allowRpnStocktake: !!editingPlan.allowRpnStocktake,
         biAnalyticsLevel: editingPlan.biAnalyticsLevel || 'none',
         rpnSupportLevel: editingPlan.rpnSupportLevel || 'none',
         isCollectionReminderEnabled: !!editingPlan.isCollectionReminderEnabled,
@@ -299,6 +269,31 @@ export const PricingPlans: React.FC = () => {
         maxStorefrontImages: Number(editingPlan.maxStorefrontImages) || 0,
         maxStorefrontDeploymentsPerMonth:
           Number(editingPlan.maxStorefrontDeploymentsPerMonth) || 0,
+        enableCatalogueGeneration:
+          editingPlan.enableCatalogueGeneration !== false,
+        enableOfflineCatalogue: editingPlan.enableOfflineCatalogue !== false,
+        enableSectorCatalogue: editingPlan.enableSectorCatalogue !== false,
+        enableMultiVendorCatalogue: !!editingPlan.enableMultiVendorCatalogue,
+        enableWhatsAppCahLinks: editingPlan.enableWhatsAppCahLinks !== false,
+        cataloguesIncludedPerMonth:
+          String(editingPlan.cataloguesIncludedPerMonth).toLowerCase() ===
+          'unlimited'
+            ? 'unlimited'
+            : Number(editingPlan.cataloguesIncludedPerMonth) || 0,
+        maxProductsPerCatalogue:
+          String(editingPlan.maxProductsPerCatalogue).toLowerCase() ===
+          'unlimited'
+            ? 'unlimited'
+            : Number(editingPlan.maxProductsPerCatalogue) || 0,
+        maxCataloguePayloadMb: Number(editingPlan.maxCataloguePayloadMb) || 8,
+        allowCatalogueOverage: !!editingPlan.allowCatalogueOverage,
+        catalogueOveragePrice: Number(editingPlan.catalogueOveragePrice) || 0,
+        allowCatalogueCredit: !!editingPlan.allowCatalogueCredit,
+        imagePolicy: editingPlan.imagePolicy || 'block_oversized',
+        imageFormat: editingPlan.imageFormat || 'webp',
+        imageMaxWidth: Number(editingPlan.imageMaxWidth) || 640,
+        imageMaxHeight: Number(editingPlan.imageMaxHeight) || 640,
+        imageQuality: Number(editingPlan.imageQuality) || 0.72,
         features: Array.from(
           new Set([
             ...asArray<string>(editingPlan.features),
@@ -1836,206 +1831,34 @@ export const PricingPlans: React.FC = () => {
                   </div>
                 </FormSection>
 
-                <FormSection title='Inventory Control Services'>
-                  <div className='grid grid-cols-1 gap-6 md:grid-cols-3'>
+                <FormSection title='Inventory Control'>
+                  <div className='grid grid-cols-2 gap-6'>
                     <FeatureToggle
-                      label='Enable Inventory Spot Checks'
-                      active={
-                        !!editingPlan?.enableInventorySpotChecks ||
-                        !!editingPlan?.isInventorySpotCheckIncluded
-                      }
+                      label='Spot Checks Included'
+                      active={!!editingPlan?.isInventorySpotCheckIncluded}
                       onClick={() =>
                         setEditingPlan({
                           ...editingPlan,
-                          enableInventorySpotChecks:
-                            !editingPlan?.enableInventorySpotChecks,
                           isInventorySpotCheckIncluded:
-                            !editingPlan?.enableInventorySpotChecks
+                            !editingPlan?.isInventorySpotCheckIncluded
                         })
                       }
                     />
 
-                    <FormField label='Spot Checks Included / Month'>
-                      <input
-                        value={
-                          editingPlan?.spotChecksIncludedPerMonth ??
-                          editingPlan?.inventorySpotChecksPerMonth ??
-                          0
-                        }
-                        onChange={e =>
-                          setEditingPlan({
-                            ...editingPlan,
-                            spotChecksIncludedPerMonth: quotaValue(
-                              e.target.value
-                            ),
-                            inventorySpotChecksPerMonth:
-                              e.target.value.toLowerCase() === 'unlimited'
-                                ? 0
-                                : Number(e.target.value)
-                          })
-                        }
-                        className={underlineInputClass}
-                        placeholder='0 or unlimited'
-                      />
-                    </FormField>
-
-                    <FeatureToggle
-                      label='Allow Spot Check Add-on'
-                      active={!!editingPlan?.allowSpotCheckAddOn}
-                      onClick={() =>
-                        setEditingPlan({
-                          ...editingPlan,
-                          allowSpotCheckAddOn:
-                            !editingPlan?.allowSpotCheckAddOn
-                        })
-                      }
-                    />
-
-                    <FormField label='Spot Check Add-on Price'>
+                    <FormField label='Checks / Month'>
                       <input
                         type='number'
-                        value={editingPlan?.spotCheckAddOnPrice ?? 0}
+                        disabled={!editingPlan?.isInventorySpotCheckIncluded}
+                        value={editingPlan?.inventorySpotChecksPerMonth ?? 0}
                         onChange={e =>
                           setEditingPlan({
                             ...editingPlan,
-                            spotCheckAddOnPrice: Number(e.target.value)
+                            inventorySpotChecksPerMonth: Number(e.target.value)
                           })
                         }
-                        className={underlineInputClass}
+                        className={`${underlineInputClass} disabled:opacity-50 disabled:cursor-not-allowed`}
                       />
                     </FormField>
-
-                    <FormField label='Spot Check Add-on Quantity'>
-                      <input
-                        type='number'
-                        value={editingPlan?.spotCheckAddOnQuantity ?? 0}
-                        onChange={e =>
-                          setEditingPlan({
-                            ...editingPlan,
-                            spotCheckAddOnQuantity: Number(e.target.value)
-                          })
-                        }
-                        className={underlineInputClass}
-                      />
-                    </FormField>
-
-                    <FeatureToggle
-                      label='Enable Stocktake'
-                      active={!!editingPlan?.enableStocktake}
-                      onClick={() =>
-                        setEditingPlan({
-                          ...editingPlan,
-                          enableStocktake: !editingPlan?.enableStocktake
-                        })
-                      }
-                    />
-
-                    <FormField label='Stocktakes Included / Month'>
-                      <input
-                        value={editingPlan?.stocktakesIncludedPerMonth ?? 0}
-                        onChange={e =>
-                          setEditingPlan({
-                            ...editingPlan,
-                            stocktakesIncludedPerMonth: quotaValue(
-                              e.target.value
-                            )
-                          })
-                        }
-                        className={underlineInputClass}
-                        placeholder='0 or unlimited'
-                      />
-                    </FormField>
-
-                    <FeatureToggle
-                      label='Allow Stocktake Add-on'
-                      active={!!editingPlan?.allowStocktakeAddOn}
-                      onClick={() =>
-                        setEditingPlan({
-                          ...editingPlan,
-                          allowStocktakeAddOn:
-                            !editingPlan?.allowStocktakeAddOn
-                        })
-                      }
-                    />
-
-                    <FormField label='Stocktake Add-on Price'>
-                      <input
-                        type='number'
-                        value={editingPlan?.stocktakeAddOnPrice ?? 0}
-                        onChange={e =>
-                          setEditingPlan({
-                            ...editingPlan,
-                            stocktakeAddOnPrice: Number(e.target.value)
-                          })
-                        }
-                        className={underlineInputClass}
-                      />
-                    </FormField>
-
-                    <FormField label='Stocktake Add-on Quantity'>
-                      <input
-                        type='number'
-                        value={editingPlan?.stocktakeAddOnQuantity ?? 0}
-                        onChange={e =>
-                          setEditingPlan({
-                            ...editingPlan,
-                            stocktakeAddOnQuantity: Number(e.target.value)
-                          })
-                        }
-                        className={underlineInputClass}
-                      />
-                    </FormField>
-
-                    <FeatureToggle
-                      label='Require Approval for Spot Check'
-                      active={!!editingPlan?.requireApprovalForSpotCheck}
-                      onClick={() =>
-                        setEditingPlan({
-                          ...editingPlan,
-                          requireApprovalForSpotCheck:
-                            !editingPlan?.requireApprovalForSpotCheck
-                        })
-                      }
-                    />
-
-                    <FeatureToggle
-                      label='Require Approval for Stocktake'
-                      active={!!editingPlan?.requireApprovalForStocktake}
-                      onClick={() =>
-                        setEditingPlan({
-                          ...editingPlan,
-                          requireApprovalForStocktake:
-                            !editingPlan?.requireApprovalForStocktake
-                        })
-                      }
-                    />
-
-                    <FeatureToggle
-                      label='Allow RPN Spot Checks'
-                      active={!!editingPlan?.allowRpnSpotChecks}
-                      onClick={() =>
-                        setEditingPlan({
-                          ...editingPlan,
-                          allowRpnSpotChecks: !editingPlan?.allowRpnSpotChecks
-                        })
-                      }
-                    />
-
-                    <FeatureToggle
-                      label='Allow RPN Stocktake'
-                      active={!!editingPlan?.allowRpnStocktake}
-                      onClick={() =>
-                        setEditingPlan({
-                          ...editingPlan,
-                          allowRpnStocktake: !editingPlan?.allowRpnStocktake
-                        })
-                      }
-                    />
-                    <div className='border border-stone-200 bg-stone-50 p-3 text-[9px] font-bold uppercase text-stone-500 md:col-span-2'>
-                      Billing hooks: spot_check_addon, stocktake_addon,
-                      spot_check_service_job and stocktake_service_job.
-                      Admin overrides can be layered through approval workflow.
-                    </div>
                   </div>
                 </FormSection>
 
@@ -2190,6 +2013,226 @@ export const PricingPlans: React.FC = () => {
                         })
                       }
                     />
+                  </div>
+                </FormSection>
+
+                <FormSection title='Catalogue & Offline Distribution Entitlements'>
+                  <div className='grid grid-cols-1 md:grid-cols-2 gap-6'>
+                    <FeatureToggle
+                      label='Catalogue Generation'
+                      active={editingPlan?.enableCatalogueGeneration !== false}
+                      onClick={() =>
+                        setEditingPlan({
+                          ...editingPlan,
+                          enableCatalogueGeneration:
+                            editingPlan?.enableCatalogueGeneration === false
+                        })
+                      }
+                    />
+                    <FeatureToggle
+                      label='Offline Catalogue'
+                      active={editingPlan?.enableOfflineCatalogue !== false}
+                      onClick={() =>
+                        setEditingPlan({
+                          ...editingPlan,
+                          enableOfflineCatalogue:
+                            editingPlan?.enableOfflineCatalogue === false
+                        })
+                      }
+                    />
+                    <FeatureToggle
+                      label='Sector Catalogue'
+                      active={editingPlan?.enableSectorCatalogue !== false}
+                      onClick={() =>
+                        setEditingPlan({
+                          ...editingPlan,
+                          enableSectorCatalogue:
+                            editingPlan?.enableSectorCatalogue === false
+                        })
+                      }
+                    />
+                    <FeatureToggle
+                      label='Multi-Vendor Catalogue'
+                      active={!!editingPlan?.enableMultiVendorCatalogue}
+                      onClick={() =>
+                        setEditingPlan({
+                          ...editingPlan,
+                          enableMultiVendorCatalogue:
+                            !editingPlan?.enableMultiVendorCatalogue
+                        })
+                      }
+                    />
+                    <FeatureToggle
+                      label='WhatsApp CAH Links'
+                      active={editingPlan?.enableWhatsAppCahLinks !== false}
+                      onClick={() =>
+                        setEditingPlan({
+                          ...editingPlan,
+                          enableWhatsAppCahLinks:
+                            editingPlan?.enableWhatsAppCahLinks === false
+                        })
+                      }
+                    />
+                    <FeatureToggle
+                      label='Allow Catalogue Overage'
+                      active={!!editingPlan?.allowCatalogueOverage}
+                      onClick={() =>
+                        setEditingPlan({
+                          ...editingPlan,
+                          allowCatalogueOverage:
+                            !editingPlan?.allowCatalogueOverage
+                        })
+                      }
+                    />
+                    <FeatureToggle
+                      label='Allow Catalogue Credit'
+                      active={!!editingPlan?.allowCatalogueCredit}
+                      onClick={() =>
+                        setEditingPlan({
+                          ...editingPlan,
+                          allowCatalogueCredit:
+                            !editingPlan?.allowCatalogueCredit
+                        })
+                      }
+                    />
+                  </div>
+                  <div className='grid grid-cols-2 gap-6 mt-6'>
+                    <FormField label='Catalogues / Month'>
+                      <input
+                        value={
+                          editingPlan?.cataloguesIncludedPerMonth ?? 'unlimited'
+                        }
+                        onChange={e =>
+                          setEditingPlan({
+                            ...editingPlan,
+                            cataloguesIncludedPerMonth:
+                              e.target.value.toLowerCase() === 'unlimited'
+                                ? 'unlimited'
+                                : Number(e.target.value)
+                          })
+                        }
+                        className={underlineInputClass}
+                        placeholder='unlimited'
+                      />
+                    </FormField>
+                    <FormField label='Max Products / Cat'>
+                      <input
+                        value={
+                          editingPlan?.maxProductsPerCatalogue ?? 'unlimited'
+                        }
+                        onChange={e =>
+                          setEditingPlan({
+                            ...editingPlan,
+                            maxProductsPerCatalogue:
+                              e.target.value.toLowerCase() === 'unlimited'
+                                ? 'unlimited'
+                                : Number(e.target.value)
+                          })
+                        }
+                        className={underlineInputClass}
+                        placeholder='unlimited'
+                      />
+                    </FormField>
+                    <FormField label='Payload MB'>
+                      <input
+                        type='number'
+                        value={editingPlan?.maxCataloguePayloadMb ?? 8}
+                        onChange={e =>
+                          setEditingPlan({
+                            ...editingPlan,
+                            maxCataloguePayloadMb: Number(e.target.value)
+                          })
+                        }
+                        className={underlineInputClass}
+                      />
+                    </FormField>
+                    <FormField label='Overage Price'>
+                      <input
+                        type='number'
+                        value={editingPlan?.catalogueOveragePrice ?? 0}
+                        onChange={e =>
+                          setEditingPlan({
+                            ...editingPlan,
+                            catalogueOveragePrice: Number(e.target.value)
+                          })
+                        }
+                        className={underlineInputClass}
+                      />
+                    </FormField>
+                    <FormField label='Image Policy'>
+                      <select
+                        value={editingPlan?.imagePolicy || 'block_oversized'}
+                        onChange={e =>
+                          setEditingPlan({
+                            ...editingPlan,
+                            imagePolicy: e.target.value as any
+                          })
+                        }
+                        className={underlineInputClass}
+                      >
+                        <option value='compress_include'>
+                          Compress & Include
+                        </option>
+                        <option value='block_oversized'>Block Oversized</option>
+                        <option value='placeholder_if_oversized'>
+                          Placeholder if Oversized
+                        </option>
+                      </select>
+                    </FormField>
+                    <FormField label='Image Format'>
+                      <select
+                        value={editingPlan?.imageFormat || 'webp'}
+                        onChange={e =>
+                          setEditingPlan({
+                            ...editingPlan,
+                            imageFormat: e.target.value as any
+                          })
+                        }
+                        className={underlineInputClass}
+                      >
+                        <option value='webp'>WebP</option>
+                      </select>
+                    </FormField>
+                    <FormField label='Image Max Width'>
+                      <input
+                        type='number'
+                        value={editingPlan?.imageMaxWidth ?? 640}
+                        onChange={e =>
+                          setEditingPlan({
+                            ...editingPlan,
+                            imageMaxWidth: Number(e.target.value)
+                          })
+                        }
+                        className={underlineInputClass}
+                      />
+                    </FormField>
+                    <FormField label='Image Max Height'>
+                      <input
+                        type='number'
+                        value={editingPlan?.imageMaxHeight ?? 640}
+                        onChange={e =>
+                          setEditingPlan({
+                            ...editingPlan,
+                            imageMaxHeight: Number(e.target.value)
+                          })
+                        }
+                        className={underlineInputClass}
+                      />
+                    </FormField>
+                    <FormField label='Image Quality'>
+                      <input
+                        type='number'
+                        step='0.01'
+                        value={editingPlan?.imageQuality ?? 0.72}
+                        onChange={e =>
+                          setEditingPlan({
+                            ...editingPlan,
+                            imageQuality: Number(e.target.value)
+                          })
+                        }
+                        className={underlineInputClass}
+                      />
+                    </FormField>
                   </div>
                 </FormSection>
               </div>
@@ -2449,23 +2492,26 @@ export const PricingPlans: React.FC = () => {
                   brandedProductAddOnPrice: 5,
                   brandedProductAddOnQuantity: 50,
                   maxBrandedProducts: 'unlimited',
-                  enableInventorySpotChecks: false,
-                  enableStocktake: false,
-                  spotChecksIncludedPerMonth: 0,
-                  stocktakesIncludedPerMonth: 0,
-                  allowSpotCheckAddOn: false,
-                  spotCheckAddOnPrice: 0,
-                  spotCheckAddOnQuantity: 0,
-                  allowStocktakeAddOn: false,
-                  stocktakeAddOnPrice: 0,
-                  stocktakeAddOnQuantity: 0,
-                  requireApprovalForSpotCheck: false,
-                  requireApprovalForStocktake: false,
-                  allowRpnSpotChecks: false,
-                  allowRpnStocktake: false,
                   maxDeliveryProviders: 1,
                   allowVerifiedDeliveryProvider: true,
-                  features: ['iDeliver / Verified Delivery Provider']
+                  features: ['iDeliver / Verified Delivery Provider'],
+                  enableCatalogueGeneration: true,
+                  enableOfflineCatalogue: true,
+                  enableSectorCatalogue: true,
+                  enableMultiVendorCatalogue: false,
+                  enableWhatsAppCahLinks: true,
+                  cataloguesIncludedPerMonth: 2,
+                  maxProductsPerCatalogue: 50,
+                  maxImagesPerCatalogue: 50,
+                  maxCataloguePayloadMb: 8,
+                  allowCatalogueOverage: false,
+                  catalogueOveragePrice: 0,
+                  allowCatalogueCredit: false,
+                  imagePolicy: 'block_oversized',
+                  imageFormat: 'webp',
+                  imageMaxWidth: 640,
+                  imageMaxHeight: 640,
+                  imageQuality: 0.72
                 })
                 setIsFormOpen(true)
               } else {
@@ -2535,36 +2581,6 @@ export const PricingPlans: React.FC = () => {
           <ComparisonRow
             label='Branded Add-on Quantity'
             field='brandedProductAddOnQuantity'
-            plans={safePlans}
-          />
-          <ComparisonBooleanRow
-            label='Spot Checks'
-            field='enableInventorySpotChecks'
-            plans={safePlans}
-          />
-          <ComparisonRow
-            label='Spot Check Included Quota'
-            field='spotChecksIncludedPerMonth'
-            plans={safePlans}
-          />
-          <ComparisonBooleanRow
-            label='Spot Check Add-on Support'
-            field='allowSpotCheckAddOn'
-            plans={safePlans}
-          />
-          <ComparisonBooleanRow
-            label='Stocktake'
-            field='enableStocktake'
-            plans={safePlans}
-          />
-          <ComparisonRow
-            label='Stocktake Included Quota'
-            field='stocktakesIncludedPerMonth'
-            plans={safePlans}
-          />
-          <ComparisonBooleanRow
-            label='Stocktake Add-on Support'
-            field='allowStocktakeAddOn'
             plans={safePlans}
           />
           <ComparisonRow
@@ -2710,36 +2726,6 @@ export const PricingPlans: React.FC = () => {
                         String(addOn.status || 'active').toLowerCase() ===
                           'active'
                     )
-                    const spotChecksUsed = calculateSpotCheckUsage(vendor.id)
-                    const spotCheckLimit = getEffectiveSpotCheckLimit(
-                      plan,
-                      subscription
-                    )
-                    const stocktakesUsed = calculateStocktakeUsage(vendor.id)
-                    const stocktakeLimit = getEffectiveStocktakeLimit(
-                      plan,
-                      subscription
-                    )
-                    const spotCheckAddOnActive = asArray<any>(
-                      subscription?.addOns
-                    ).some(
-                      addOn =>
-                        ['spot_checks', 'inventory_spot_checks'].includes(
-                          addOn.addOnKey
-                        ) &&
-                        addOn.enabled !== false &&
-                        String(addOn.status || 'active').toLowerCase() ===
-                          'active'
-                    )
-                    const stocktakeAddOnActive = asArray<any>(
-                      subscription?.addOns
-                    ).some(
-                      addOn =>
-                        ['stocktake', 'stocktakes'].includes(addOn.addOnKey) &&
-                        addOn.enabled !== false &&
-                        String(addOn.status || 'active').toLowerCase() ===
-                          'active'
-                    )
                     const pressure = calculateUpgradePressure({
                       usage,
                       plan,
@@ -2825,18 +2811,6 @@ export const PricingPlans: React.FC = () => {
                                 : brandedLimit}
                             </div>
                             <div>
-                              Spot Checks: {spotChecksUsed}/
-                              {spotCheckLimit === 'unlimited'
-                                ? 'âˆž'
-                                : spotCheckLimit}
-                            </div>
-                            <div>
-                              Stocktakes: {stocktakesUsed}/
-                              {stocktakeLimit === 'unlimited'
-                                ? 'âˆž'
-                                : stocktakeLimit}
-                            </div>
-                            <div>
                               Wallet: {plan.currency || 'USD'}{' '}
                               {creditBalance.toFixed(2)}
                             </div>
@@ -2865,58 +2839,6 @@ export const PricingPlans: React.FC = () => {
                                 } / ${plan.brandedProductAddOnQuantity || 0})`
                               : 'not available'}
                           </p>
-                          <p
-                            className={
-                              spotCheckAddOnActive
-                                ? 'text-emerald-700'
-                                : plan.allowSpotCheckAddOn
-                                ? 'text-amber-700'
-                                : 'text-stone-400'
-                            }
-                          >
-                            Spot check add-on:{' '}
-                            {spotCheckAddOnActive
-                              ? 'active'
-                              : plan.allowSpotCheckAddOn
-                              ? `available (${plan.currency || 'USD'} ${
-                                  plan.spotCheckAddOnPrice || 0
-                                } / ${plan.spotCheckAddOnQuantity || 0})`
-                              : 'not available'}
-                          </p>
-                          <p
-                            className={
-                              stocktakeAddOnActive
-                                ? 'text-emerald-700'
-                                : plan.allowStocktakeAddOn
-                                ? 'text-amber-700'
-                                : 'text-stone-400'
-                            }
-                          >
-                            Stocktake add-on:{' '}
-                            {stocktakeAddOnActive
-                              ? 'active'
-                              : plan.allowStocktakeAddOn
-                              ? `available (${plan.currency || 'USD'} ${
-                                  plan.stocktakeAddOnPrice || 0
-                                } / ${plan.stocktakeAddOnQuantity || 0})`
-                              : 'not available'}
-                          </p>
-                          {spotCheckLimit !== 'unlimited' &&
-                            Number(spotCheckLimit) > 0 &&
-                            spotChecksUsed >= Number(spotCheckLimit) * 0.8 && (
-                              <p className='text-amber-700'>
-                                Spot check usage is near limit. Recommend add-on
-                                or upgrade.
-                              </p>
-                            )}
-                          {stocktakeLimit !== 'unlimited' &&
-                            Number(stocktakeLimit) > 0 &&
-                            stocktakesUsed >= Number(stocktakeLimit) * 0.8 && (
-                              <p className='text-amber-700'>
-                                Stocktake usage is near limit. Recommend add-on
-                                or upgrade.
-                              </p>
-                            )}
                         </div>
 
                         <div className='text-[8px] text-stone-400'>

@@ -18,7 +18,8 @@ import {
   SecondaryButton,
   BrandedAlertModal,
   ConfirmDialog,
-  SearchableComboBox
+  SearchableComboBox,
+  StatusBadge
 } from '../components/CommonUI.tsx'
 import {
   FileCode,
@@ -63,7 +64,7 @@ import { cahService } from '../services/cahService.ts'
 import { pricingPlanService } from '../services/pricingPlanService.ts'
 import { permissionService } from '../services/permissionService.ts'
 import { analyticsService } from '../services/analyticsService.ts'
-import { asArray } from '../utils/safeData.ts'
+import { asArray as safeDataArray } from '../utils/safeData.ts'
 import { vendorService } from '../services/vendorService.ts'
 import { productService } from '../services/productService.ts'
 import { contactHubService } from '../services/contactHubService.ts'
@@ -104,7 +105,10 @@ import {
   isProductQuotaBillable,
   getBillableProductsForVendor
 } from '../utils/planQuotaUtils.ts'
-import { canGenerateCatalogue } from '../services/entitlementEngine.ts'
+import {
+  canGenerateCatalogue,
+  resolveCatalogueProductLimit
+} from '../services/entitlementEngine.ts'
 import { db } from '../lib/firebase.ts'
 import {
   buildVendorProductExportRows,
@@ -118,6 +122,78 @@ import {
 
 const MAX_CATALOGUE_SIZE_BYTES = 12 * 1024 * 1024
 const MAX_CATALOGUE_IMAGE_SIZE_BYTES = 8 * 1024
+
+const asArray = <T = any,>(value: unknown): T[] =>
+  Array.isArray(value) ? (value as T[]) : safeDataArray<T>(value)
+
+const normalizeImageList = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value
+      .map(item =>
+        typeof item === 'string'
+          ? item
+          : String((item as any)?.url || (item as any)?.imageUrl || '')
+      )
+      .filter(Boolean)
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    return [value]
+  }
+
+  return []
+}
+
+const safeDateFromUnknown = (value: unknown): Date | null => {
+  if (!value) return null
+
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value
+  }
+
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as any).toDate === 'function'
+  ) {
+    const date = (value as any).toDate()
+    return date instanceof Date && !Number.isNaN(date.getTime()) ? date : null
+  }
+
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as any).seconds === 'number'
+  ) {
+    const date = new Date((value as any).seconds * 1000)
+    return Number.isNaN(date.getTime()) ? null : date
+  }
+
+  if (typeof value === 'string' || typeof value === 'number') {
+    const date = new Date(value)
+    return Number.isNaN(date.getTime()) ? null : date
+  }
+
+  return null
+}
+
+const safeIsoString = (value: unknown, fallback = ''): string => {
+  const date = safeDateFromUnknown(value)
+  return date ? date.toISOString() : fallback
+}
+
+const safeDateLabel = (value: unknown, fallback = 'N/A'): string => {
+  const date = safeDateFromUnknown(value)
+  return date ? date.toLocaleDateString() : fallback
+}
+
+const safeNumber = (value: unknown, fallback = 0): number => {
+  const numberValue = Number(value)
+  return Number.isFinite(numberValue) ? numberValue : fallback
+}
+
+const safeText = (value: unknown, fallback = ''): string =>
+  String(value ?? fallback)
 
 type ImageHandlingPolicy =
   | 'auto_compress'
@@ -379,6 +455,112 @@ const mapVendorListRow = (row: any): VendorListRow => ({
   entitlementStatus: row.entitlementStatus || 'loading'
 })
 
+const getVendorMatchKeys = (vendor: any) =>
+  [
+    vendor?.id,
+    vendor?.vendorId,
+    vendor?.vendorCode,
+    vendor?.code,
+    vendor?.businessId,
+    vendor?.serial,
+    vendor?.vendorSerial
+  ]
+    .filter(Boolean)
+    .map(value => String(value).trim().toLowerCase())
+
+const productMatchesVendor = (product: any, vendor: any) => {
+  const vendorKeys = getVendorMatchKeys(vendor)
+
+  const productKeys = [
+    product?.vendorId,
+    product?.vendorCode,
+    product?.vendorSerial,
+    product?.businessId,
+    product?.ownerVendorId,
+    product?.sourceVendorId
+  ]
+    .filter(Boolean)
+    .map(value => String(value).trim().toLowerCase())
+
+  return productKeys.some(key => vendorKeys.includes(key))
+}
+
+const normalizeStorefrontProductForCatalogue = (
+  product: any,
+  vendor: Vendor
+): Product => {
+  const rawMode = String(
+    product?.productMode || product?.mode || product?.sourceType || ''
+  ).toLowerCase()
+  const productMode =
+    rawMode.includes('brand') || product?.isVendorBranded === true
+      ? 'branded_product'
+      : 'linked_product'
+
+  return {
+    ...product,
+    id:
+      product?.id ||
+      product?.offerId ||
+      product?.vendorProductId ||
+      `${vendor.id}_${product?.productId || product?.sku || product?.name}`,
+    vendorId: vendor.id,
+    vendorName:
+      product?.vendorName || vendor.name || vendor.tradingName || vendor.id,
+    productName:
+      product?.productName ||
+      product?.name ||
+      product?.title ||
+      product?.itemName ||
+      'Product',
+    name:
+      product?.name ||
+      product?.productName ||
+      product?.title ||
+      product?.itemName ||
+      'Product',
+    sku:
+      product?.vendorSku ||
+      product?.sku ||
+      product?.masterSku ||
+      product?.productSku ||
+      product?.productCode ||
+      '',
+    productMode,
+    masterProductId:
+      productMode === 'branded_product'
+        ? product?.masterProductId || null
+        : product?.masterProductId || product?.productId || null,
+    offerId:
+      product?.offerId || product?.vendorProductId || product?.id || '',
+    productId: product?.productId || product?.masterProductId || product?.id,
+    status: product?.status || (product?.active === false ? 'inactive' : 'active'),
+    active: product?.active !== false,
+    publishToCatalogue: product?.publishToCatalogue !== false,
+    stockQuantity: safeNumber(
+      product?.stockQuantity ??
+        product?.currentQty ??
+        product?.qty ??
+        product?.quantity,
+      0
+    ),
+    sellingPrice: safeNumber(
+      product?.sellingPrice ?? product?.price ?? product?.unitPrice,
+      0
+    ),
+    imageUrl:
+      normalizeImageList(
+        product?.imageUrl ||
+          product?.vendorProductImage ||
+          product?.brandLogoUrl ||
+          product?.images ||
+          product?.imageUrls
+      )[0] || '',
+    category: product?.category || product?.productCategory || '',
+    sector: product?.sector || vendor.sector || ''
+  } as Product
+}
+
 const normalizeSectorKey = (value?: string | null) => {
   if (!value) return ''
   return value
@@ -431,9 +613,9 @@ const getOverageUnitPrice = (plan?: PricingPlan): number => {
 }
 
 const addDays = (date: string, days: number) => {
-  const next = new Date(date)
+  const next = safeDateFromUnknown(date) || new Date()
   next.setDate(next.getDate() + days)
-  return next.toISOString().slice(0, 10)
+  return safeIsoString(next).slice(0, 10)
 }
 
 const getNextDeploymentDate = (
@@ -467,6 +649,66 @@ const getPlanLimit = (
     if (Number.isFinite(parsed) && parsed >= 0) return parsed
   }
   return null
+}
+
+const normalizePlanLookupText = (value: unknown) =>
+  String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '')
+
+const resolveCataloguePlan = (
+  vendor: Vendor,
+  plans: PricingPlan[],
+  entitlement?: { planName?: string }
+) => {
+  const sub = subscriptionService.getSubscriptionByVendor(vendor.id)
+  const isActiveSub =
+    sub &&
+    ['active', 'trial', 'past_due', 'grace_period', 'due', 'overdue'].includes(
+      sub.status
+    )
+  const resolvedPlanId = isActiveSub
+    ? sub.planId
+    : (vendor as any).subscription?.planId ||
+      (vendor as any).activePlanId ||
+      vendor.planId
+  const planById = resolvedPlanId
+    ? plans.find(plan => plan.id === resolvedPlanId)
+    : undefined
+  const planName = entitlement?.planName
+  const nPlanName = normalizePlanLookupText(planName)
+  const planByName = nPlanName
+    ? plans.find(
+        plan =>
+          normalizePlanLookupText(plan.name) === nPlanName ||
+          normalizePlanLookupText(plan.id) === nPlanName ||
+          normalizePlanLookupText(plan.name).includes(nPlanName) ||
+          nPlanName.includes(normalizePlanLookupText(plan.name))
+      )
+    : undefined
+
+  return {
+    plan: planById || planByName,
+    planSource: isActiveSub
+      ? 'active subscription'
+      : planById
+      ? 'vendor fallback'
+      : planByName
+      ? 'entitlement plan name'
+      : 'none',
+    planStatus: sub ? sub.status : vendor.subscriptionStatus || 'no subscription'
+  }
+}
+
+const resolveCatalogueAllowedProducts = (
+  plan: PricingPlan | undefined,
+  fallback: number
+): number => {
+  const limit = resolveCatalogueProductLimit(plan)
+  if (limit === 'unlimited') return Infinity
+  if (typeof limit === 'number') return Math.max(0, limit)
+  return fallback
 }
 
 const formatLimitValue = (value: number | null): string =>
@@ -554,9 +796,8 @@ const getVendorStaticImageCount = (vendor: Vendor): number => {
 }
 
 const isCurrentMonth = (dateValue: string | undefined): boolean => {
-  if (!dateValue) return false
-  const date = new Date(dateValue)
-  if (Number.isNaN(date.getTime())) return false
+  const date = safeDateFromUnknown(dateValue)
+  if (!date) return false
   const now = new Date()
   return (
     date.getMonth() === now.getMonth() &&
@@ -686,7 +927,9 @@ const buildCatalogueProductFromOffer = (
         .filter(Boolean)
         .join(' ')
         .toLowerCase(),
-      additionalImages: images.slice(1).map(image => image.url),
+      additionalImages: asArray<{ url: string }>(images)
+        .slice(1)
+        .map(image => image.url),
       images,
       ...metrics,
       model: '',
@@ -704,8 +947,8 @@ const buildCatalogueProductFromOffer = (
       source: 'backend entered',
       enteredByStaffId: '',
       lastUpdatedBy: '',
-      createdAt: offer.createdAt || new Date().toISOString(),
-      updatedAt: offer.updatedAt || new Date().toISOString()
+      createdAt: safeIsoString(offer.createdAt, safeIsoString(new Date())),
+      updatedAt: safeIsoString(offer.updatedAt, safeIsoString(new Date()))
     }
   }
   const productName =
@@ -785,7 +1028,9 @@ const buildCatalogueProductFromOffer = (
     tags: master.tags || [],
     keywords: master.keywords || [],
     searchableText: searchableParts.filter(Boolean).join(' ').toLowerCase(),
-    additionalImages: images.slice(1).map(image => image.url),
+    additionalImages: asArray<{ url: string }>(images)
+      .slice(1)
+      .map(image => image.url),
     images,
     ...metrics,
     model: '',
@@ -802,8 +1047,14 @@ const buildCatalogueProductFromOffer = (
     source: 'backend entered',
     enteredByStaffId: '',
     lastUpdatedBy: '',
-    createdAt: offer.createdAt || master.createdAt || new Date().toISOString(),
-    updatedAt: offer.updatedAt || master.updatedAt || new Date().toISOString()
+    createdAt: safeIsoString(
+      offer.createdAt || master.createdAt,
+      safeIsoString(new Date())
+    ),
+    updatedAt: safeIsoString(
+      offer.updatedAt || master.updatedAt,
+      safeIsoString(new Date())
+    )
   }
 }
 
@@ -877,6 +1128,9 @@ export const SectorCatalogueGenerator: React.FC = () => {
     useState<ImageHandlingPolicy>('exclude_oversized')
   const [vendorCreditSort, setVendorCreditSort] =
     useState<VendorCreditSortMode>('most_credit')
+  const [selectedProductIds, setSelectedProductIds] = useState<string[]>([])
+  const [selectedProductsOnly, setSelectedProductsOnly] = useState(false)
+  const [productSelectionSearch, setProductSelectionSearch] = useState('')
   const [vendorCreditFilters, setVendorCreditFilters] = useState({
     overLimitOnly: false,
     noCreditOnly: false,
@@ -1099,22 +1353,34 @@ export const SectorCatalogueGenerator: React.FC = () => {
   const loadData = async () => {
     const startMs = performance.now()
     try {
-      const [rawPlans, rawHistory, rawSettings, rawSystemSettings] =
-        await Promise.all([
-          pricingPlanService.getPlans(),
-          catalogueService.getHistory().catch((error: any) => {
-            if (firebaseHealthService.isMissingFirestoreIndexError?.(error)) {
-              console.warn(
-                'Missing catalogueGenerations index. Skipping non-critical history query.',
-                error
-              )
-              return []
-            }
-            throw error
-          }),
-          contactHubService.getSettings(),
-          settingsService.getSettings()
-        ])
+      const [
+        rawPlans,
+        rawHistory,
+        rawSettings,
+        rawSystemSettings,
+        rawVendors,
+        rawProducts,
+        rawMasterProducts,
+        rawVendorProductOffers
+      ] = await Promise.all([
+        pricingPlanService.getPlans(),
+        catalogueService.getHistory().catch((error: any) => {
+          if (firebaseHealthService.isMissingFirestoreIndexError?.(error)) {
+            console.warn(
+              'Missing catalogueGenerations index. Skipping non-critical history query.',
+              error
+            )
+            return []
+          }
+          throw error
+        }),
+        contactHubService.getSettings(),
+        settingsService.getSettings(),
+        vendorService.getVendors().catch(() => []),
+        productService.getProducts().catch(() => []),
+        productService.getMasterProducts().catch(() => []),
+        productService.getVendorProductOffers().catch(() => [])
+      ])
 
       const retentionDays =
         rawSystemSettings?.catalogueArchiveRetentionDays || 21
@@ -1131,6 +1397,11 @@ export const SectorCatalogueGenerator: React.FC = () => {
       }
 
       setIntelligenceLogs(whatsappActivityService.getIntelligenceLogs())
+      setDetailedVendors(asArray<Vendor>(rawVendors))
+      setDetailedProducts(asArray<Product>(rawProducts))
+      setProducts(asArray<Product>(rawProducts))
+      setMasterProducts(asArray<MasterProduct>(rawMasterProducts))
+      setVendorProductOffers(asArray<VendorProductOffer>(rawVendorProductOffers))
       setAllActiveCahLinks(
         asArray<CAHLink>(rawCahLinks).filter(isActiveCatalogueHubLink)
       )
@@ -1295,7 +1566,7 @@ export const SectorCatalogueGenerator: React.FC = () => {
   const generateSerialNumber = (sector: string, category: string) => {
     const now = new Date()
     const month = (now.getMonth() + 1).toString().padStart(2, '0')
-    const year = now.getFullYear().toString().slice(-2)
+    const year = String(now.getFullYear()).slice(-2)
     return `${sector || 'SECTOR'} | ${category || 'CAT'} | ${month}${year}`
   }
 
@@ -1514,7 +1785,7 @@ export const SectorCatalogueGenerator: React.FC = () => {
 
   useEffect(() => {
     const loadDetailedResources = async () => {
-      const idsToFetch = config.vendorIds.filter(
+      const idsToFetch = asArray<string>(config.vendorIds).filter(
         id => !detailedVendors.some(v => v.id === id)
       )
       if (idsToFetch.length === 0) return
@@ -1523,7 +1794,7 @@ export const SectorCatalogueGenerator: React.FC = () => {
       try {
         const chunks = []
         for (let i = 0; i < idsToFetch.length; i += 10) {
-          chunks.push(idsToFetch.slice(i, i + 10))
+          chunks.push(asArray<string>(idsToFetch).slice(i, i + 10))
         }
 
         const newVendors: Vendor[] = []
@@ -1580,9 +1851,18 @@ export const SectorCatalogueGenerator: React.FC = () => {
     const seen = new Set(combined.map(p => p.id))
 
     safeProducts.forEach(p => {
-      if (config.vendorIds.includes(p.vendorId) && !seen.has(p.id)) {
-        combined.push(p)
-        seen.add(p.id)
+      const matchedVendor = selectedVendors.find(vendor =>
+        productMatchesVendor(p, vendor)
+      )
+      if (!matchedVendor) return
+
+      const normalizedProduct = normalizeStorefrontProductForCatalogue(
+        p,
+        matchedVendor
+      )
+      if (!seen.has(normalizedProduct.id)) {
+        combined.push(normalizedProduct)
+        seen.add(normalizedProduct.id)
       }
     })
 
@@ -1613,8 +1893,75 @@ export const SectorCatalogueGenerator: React.FC = () => {
       )
     }
 
+    if (selectedVendors.length > 0 && filtered.length === 0) {
+      const storefrontEquivalent = safeProducts.filter(p =>
+        productMatchesVendor(p, selectedVendors[0])
+      )
+      console.log('Product Selection Diagnostics:', {
+        selectedVendorName: selectedVendors[0]?.name,
+        selectedVendorKeys: getVendorMatchKeys(selectedVendors[0]),
+        storefrontEquivalentProductCount: storefrontEquivalent.length,
+        catalogueProductCount: filtered.length,
+        linkedProductCount: storefrontEquivalent.filter(
+          p => p.productMode !== 'branded_product'
+        ).length,
+        brandedProductCount: storefrontEquivalent.filter(
+          p => p.productMode === 'branded_product'
+        ).length,
+        selectedProductCount: selectedProductIds.length,
+        resolvedPlanName:
+          entitlementByVendorId[selectedVendors[0]?.id]?.planName,
+        blockReason:
+          'Products exist in Storefront Builder but are not entering catalogue selection. Check vendor key matching or source alignment.'
+      })
+    }
+
     return filtered
-  }, [catalogueOfferProducts, safeProducts, config])
+  }, [
+    catalogueOfferProducts,
+    safeProducts,
+    selectedVendors,
+    config,
+    entitlementByVendorId,
+    selectedProductIds.length
+  ])
+
+  const visibleSelectionProducts = useMemo(() => {
+    if (!productSelectionSearch.trim()) return rawSelectedProducts
+
+    return rawSelectedProducts.filter(product => {
+      const searchBlob = buildSearchText(
+        [
+          product.name || product.productName,
+          product.sku || product.productCode,
+          product.vendorName,
+          product.category,
+          product.productMode === 'branded_product' ? 'branded' : 'linked'
+        ]
+      )
+
+      return matchesFreeOrderSearch(searchBlob, productSelectionSearch)
+    })
+  }, [rawSelectedProducts, productSelectionSearch])
+
+  const selectVisibleProducts = (
+    predicate: (product: Product) => boolean = () => true
+  ) => {
+    setSelectedProductsOnly(true)
+    setSelectedProductIds(prev =>
+      Array.from(
+        new Set([
+          ...prev,
+          ...visibleSelectionProducts.filter(predicate).map(p => p.id)
+        ])
+      )
+    )
+  }
+
+  const clearSelectedProducts = () => {
+    setSelectedProductIds([])
+    setSelectedProductsOnly(false)
+  }
 
   const productSignalCounts = useMemo(() => {
     const counts = new Map<string, number>()
@@ -1650,9 +1997,17 @@ export const SectorCatalogueGenerator: React.FC = () => {
       overrideReason.trim().length > 0
 
     selectedVendors.forEach(vendor => {
-      const plan = safePlans.find(p => p.id === vendor.planId)
+      const { plan, planSource, planStatus } = resolveCataloguePlan(
+        vendor,
+        safePlans,
+        entitlementByVendorId[vendor.id]
+      )
+
       const vendorProducts = rawSelectedProducts.filter(
-        p => p.vendorId === vendor.id && isProductQuotaBillable(p)
+        p =>
+          p.vendorId === vendor.id &&
+          isProductQuotaBillable(p) &&
+          (!selectedProductsOnly || selectedProductIds.includes(p.id))
       )
       const vendorHistory = safeHistory.filter(item =>
         (item.vendorIds || []).includes(vendor.id)
@@ -1661,18 +2016,31 @@ export const SectorCatalogueGenerator: React.FC = () => {
         isCurrentMonth(item.generatedAt)
       ).length
 
-      const allowedProducts = Math.max(
-        0,
-        plan?.maxProducts ?? config.maxProducts
-      )
-      const overageQuantity = Math.max(
-        0,
-        vendorProducts.length - allowedProducts
-      )
-      const overageUnitPrice = getOverageUnitPrice(plan)
+      const isCatalogueEnabled = plan?.enableCatalogueGeneration !== false
+      const isMultiVendorAllowed =
+        selectedVendors.length === 1 || !!plan?.enableMultiVendorCatalogue
+      const hasActivePlan = !!plan && isCatalogueEnabled && isMultiVendorAllowed
+
+      const allowedProducts = hasActivePlan
+        ? resolveCatalogueAllowedProducts(plan, config.maxProducts)
+        : 0
+
+      const overageQuantity =
+        allowedProducts === Infinity
+          ? 0
+          : Math.max(0, vendorProducts.length - allowedProducts)
+
+      const allowOverage = !!plan?.allowCatalogueOverage
+      const allowCredit = !!plan?.allowCatalogueCredit
+      const overageUnitPrice =
+        plan?.catalogueOveragePrice || getOverageUnitPrice(plan)
       const overageDue = overageQuantity * overageUnitPrice
       const creditBalance = getVendorCreditBalance(vendor)
-      const creditCovers = overageQuantity > 0 && creditBalance >= overageDue
+      const creditCovers =
+        overageQuantity > 0 &&
+        allowOverage &&
+        allowCredit &&
+        creditBalance >= overageDue
 
       const rankedProducts = [...vendorProducts].sort((a, b) => {
         const aFeatured = (a as any).featured ? 1 : 0
@@ -1700,21 +2068,44 @@ export const SectorCatalogueGenerator: React.FC = () => {
         if (aHasImage !== bHasImage) return bHasImage - aHasImage
 
         return (
-          new Date(b.updatedAt || b.createdAt).getTime() -
-          new Date(a.updatedAt || a.createdAt).getTime()
+          (safeDateFromUnknown(b.updatedAt || b.createdAt)?.getTime() || 0) -
+          (safeDateFromUnknown(a.updatedAt || a.createdAt)?.getTime() || 0)
         )
       })
 
       const allAllowed = overageQuantity === 0 || creditCovers || shouldOverride
       const vendorIncluded = allAllowed
         ? rankedProducts
-        : rankedProducts.slice(0, allowedProducts)
+        : asArray<Product>(rankedProducts).slice(0, allowedProducts)
+
+      let exclusionReason = 'excluded_due_to_plan_limit'
+      if (!hasActivePlan) {
+        if (!plan)
+          exclusionReason =
+            'No active plan assigned. Assign a plan before catalogue generation.'
+        else if (!isCatalogueEnabled)
+          exclusionReason = 'Catalogue generation is disabled on this plan.'
+        else if (!isMultiVendorAllowed)
+          exclusionReason =
+            'Multi-vendor catalogues are not enabled for this plan.'
+      } else if (overageQuantity > 0 && !allowOverage) {
+        exclusionReason = 'Plan limit exceeded and overage is not allowed.'
+      } else if (overageQuantity > 0 && !allowCredit) {
+        exclusionReason = 'Plan limit exceeded and credit payment is disabled.'
+      }
+
       const vendorExcluded = allAllowed
         ? []
-        : rankedProducts.slice(allowedProducts).map(product => ({
-            ...product,
-            catalogueExclusionReason: 'excluded_due_to_plan_limit'
-          }))
+        : asArray<Product>(rankedProducts)
+            .slice(
+              allowedProducts === Infinity
+                ? rankedProducts.length
+                : allowedProducts
+            )
+            .map(product => ({
+              ...product,
+              catalogueExclusionReason: exclusionReason
+            }))
 
       const finalEntitlement = canGenerateCatalogue({
         vendorId: vendor.id,
@@ -1725,8 +2116,9 @@ export const SectorCatalogueGenerator: React.FC = () => {
           0
         ),
         cataloguesThisPeriod,
-        allowOverage: true,
-        walletBalance: creditBalance
+        allowOverage,
+        walletBalance: allowCredit ? creditBalance : 0,
+        isMultiVendor: selectedVendors.length > 1
       })
 
       let upgradeRecommendation =
@@ -1736,7 +2128,13 @@ export const SectorCatalogueGenerator: React.FC = () => {
             } or preload catalogue credit.`
           : 'No upgrade required.'
 
-      if (!finalEntitlement.allowed && !shouldOverride) {
+      if (!hasActivePlan) {
+        upgradeRecommendation = !plan
+          ? 'No active plan assigned. Assign a plan before catalogue generation.'
+          : !isCatalogueEnabled
+          ? 'Catalogue generation is disabled on this plan.'
+          : 'Multi-vendor catalogues are not enabled for this plan.'
+      } else if (!finalEntitlement.allowed && !shouldOverride) {
         upgradeRecommendation = finalEntitlement.reasons
           .map((r: any) => r.message)
           .join('; ')
@@ -1749,6 +2147,8 @@ export const SectorCatalogueGenerator: React.FC = () => {
         vendorId: vendor.id,
         vendorName: vendor.name,
         planName: plan?.name || vendor.planId || 'Unassigned Plan',
+        planSource,
+        planStatus,
         selectedProducts: vendorProducts.length,
         allowedProducts,
         includedProducts: vendorIncluded.length,
@@ -1768,7 +2168,10 @@ export const SectorCatalogueGenerator: React.FC = () => {
     })
 
     return {
-      includedProducts: includedProducts.slice(0, config.maxProducts),
+      includedProducts: asArray<Product>(includedProducts).slice(
+        0,
+        config.maxProducts
+      ),
       excludedProducts,
       summaries
     }
@@ -1779,7 +2182,10 @@ export const SectorCatalogueGenerator: React.FC = () => {
     overrideReason,
     productSignalCounts,
     rawSelectedProducts,
+    entitlementByVendorId,
     safePlans,
+    selectedProductIds,
+    selectedProductsOnly,
     selectedVendors
   ])
 
@@ -1834,7 +2240,22 @@ export const SectorCatalogueGenerator: React.FC = () => {
           !biFilters.selectedVendorsOnly || selectedVendorIdSet.has(vendor.id)
       )
       .map(vendor => {
-        const plan = safePlans.find(item => item.id === vendor.planId)
+        const sub = subscriptionService.getSubscriptionByVendor(vendor.id)
+        const isActiveSub =
+          sub &&
+          [
+            'active',
+            'trial',
+            'past_due',
+            'grace_period',
+            'due',
+            'overdue'
+          ].includes(sub.status)
+        const { plan } = resolveCataloguePlan(
+          vendor,
+          safePlans,
+          entitlementByVendorId[vendor.id]
+        )
         const planName = plan?.name || vendor.planId || 'Unassigned Plan'
         const summary = entitlementSummaryByVendor.get(vendor.id)
         const rawVendorProducts =
@@ -1847,7 +2268,13 @@ export const SectorCatalogueGenerator: React.FC = () => {
         const selectedProductCount =
           summary?.selectedProducts ?? rawVendorProducts.length
 
-        const productLimit = getPlanLimit(plan, ['maxProducts', 'productLimit'])
+        const resolvedProductLimit = resolveCatalogueProductLimit(plan)
+        const productLimit =
+          resolvedProductLimit === 'unlimited'
+            ? null
+            : typeof resolvedProductLimit === 'number'
+            ? resolvedProductLimit
+            : getPlanLimit(plan, ['maxProducts', 'productLimit'])
         const imageLimit = getPlanLimit(plan, [
           'maxImages',
           'imageLimit',
@@ -2026,11 +2453,13 @@ export const SectorCatalogueGenerator: React.FC = () => {
     biFilters.selectedVendorsOnly,
     config.vendorIds,
     entitlementSummaryByVendor,
+    entitlementByVendorId,
     rawSelectedProducts,
     safeHistory,
     safePlans,
     safeProducts,
-    safeVendors
+    safeVendors,
+    entitlementByVendorId
   ])
 
   const vendorCreditRows = useMemo<VendorCatalogueCreditRow[]>(() => {
@@ -2041,47 +2470,62 @@ export const SectorCatalogueGenerator: React.FC = () => {
 
     return safeVendors
       .map(vendor => {
-        const plan = safePlans.find(item => item.id === vendor.planId)
+        const { plan } = resolveCataloguePlan(
+          vendor,
+          safePlans,
+          entitlementByVendorId[vendor.id]
+        )
         const summary = entitlementSummaryByVendor.get(vendor.id)
         const vendorProducts = rawSelectedProducts.filter(
           product =>
             product.vendorId === vendor.id && isProductQuotaBillable(product)
         )
-        const productsAllowed = Math.max(
-          0,
-          summary?.allowedProducts ?? plan?.maxProducts ?? config.maxProducts
-        )
+        const productsAllowed =
+          summary?.allowedProducts ??
+          resolveCatalogueAllowedProducts(plan, config.maxProducts)
         const productsSelected =
           summary?.selectedProducts ?? vendorProducts.length
-        const productsOverLimit = Math.max(
-          0,
-          productsSelected - productsAllowed
-        )
+        const productsOverLimit =
+          productsAllowed === Infinity
+            ? 0
+            : Math.max(0, productsSelected - productsAllowed)
         const overageDue = summary?.overageDue || 0
         const creditUsed = summary?.creditUsed || 0
         const creditBalance = getVendorCreditBalance(vendor)
         const remainingCredit =
           summary?.remainingCredit ?? Math.max(0, creditBalance - creditUsed)
-        const imagesAllowed = plan?.maxImagesPerCatalogue ?? config.maxImages
+        const imagesAllowedRaw = plan?.maxImagesPerCatalogue ?? config.maxImages
+        const imagesAllowed =
+          String(imagesAllowedRaw).toLowerCase() === 'unlimited'
+            ? Infinity
+            : Number(imagesAllowedRaw)
         const imagesSelected = vendorProducts.reduce(
           (count, product) => count + getProductImageCount(product),
           0
         )
-        const imagesDue = imagesAllowed - imagesSelected
-        const deploymentsAllowedThisMonth = plan?.maxDeploymentsPerMonth ?? 0
+        const imagesDue =
+          imagesAllowed === Infinity ? 0 : imagesAllowed - imagesSelected
+        const deploymentsAllowedRaw =
+          plan?.cataloguesIncludedPerMonth ?? plan?.maxDeploymentsPerMonth ?? 0
+        const deploymentsAllowedThisMonth =
+          String(deploymentsAllowedRaw).toLowerCase() === 'unlimited'
+            ? Infinity
+            : Number(deploymentsAllowedRaw)
         const vendorHistory = safeHistory
           .filter(item => (item.vendorIds || []).includes(vendor.id))
           .sort(
             (a, b) =>
-              new Date(b.generatedAt).getTime() -
-              new Date(a.generatedAt).getTime()
+              (safeDateFromUnknown(b.generatedAt)?.getTime() || 0) -
+              (safeDateFromUnknown(a.generatedAt)?.getTime() || 0)
           )
         const deploymentsUsedThisMonth = vendorHistory.filter(item =>
           isCurrentMonth(item.generatedAt)
         ).length
         const deploymentsDue =
           deploymentsAllowedThisMonth - deploymentsUsedThisMonth
-        const lastDeploymentDate = vendorHistory[0]?.generatedAt?.slice(0, 10)
+        const lastDeploymentDate = safeIsoString(
+          vendorHistory[0]?.generatedAt
+        ).slice(0, 10)
         const nextDeploymentDate = getNextDeploymentDate(
           lastDeploymentDate,
           plan
@@ -2101,14 +2545,18 @@ export const SectorCatalogueGenerator: React.FC = () => {
             creditBalance
         )
 
+        const allowOverage = !!plan?.allowCatalogueOverage
+        const allowCredit = !!plan?.allowCatalogueCredit
+
         const entitlement = canGenerateCatalogue({
           vendorId: vendor.id,
           plan: plan || {},
           selectedProductCount: productsSelected,
           selectedImageCount: imagesSelected,
           cataloguesThisPeriod: deploymentsUsedThisMonth,
-          allowOverage: true,
-          walletBalance: creditBalance
+          allowOverage,
+          walletBalance: allowCredit ? creditBalance : 0,
+          isMultiVendor: selectedVendorSet.size > 1
         })
 
         let status: VendorCatalogueEntitlementStatus = 'OK'
@@ -2435,6 +2883,291 @@ export const SectorCatalogueGenerator: React.FC = () => {
     return totalBytes
   }, [config.vendorIds, allSelectedProducts, optimizationSummary])
 
+  const catalogueBuildMetrics = useMemo(() => {
+    const selectedVendorList = asArray<Vendor>(selectedVendors)
+    const candidateProducts = asArray<Product>(rawSelectedProducts)
+    const includedProducts = asArray<Product>(allSelectedProducts)
+    const excludedProducts = asArray<
+      Product & { catalogueExclusionReason?: string }
+    >(entitlementExcludedProducts)
+    const summaries = asArray<CatalogueEntitlementSummary>(
+      entitlementSummaries
+    )
+    const storefrontSourceProducts = asArray<Product>(safeProducts)
+    const storefrontProducts = asArray<Product>(safeProducts).filter(product =>
+      selectedVendorList.some(vendor => productMatchesVendor(product, vendor))
+    )
+
+    const selectedVendorNames = selectedVendorList.map(
+      vendor => vendor.name || vendor.tradingName || vendor.id
+    )
+    const vendorsWithContactIssues = selectedVendorList.filter(
+      vendor => !vendor.whatsappNumber || !vendor.catalogueDisplayName
+    ).length
+    const vendorsWithNoPlan = summaries.filter(summary =>
+      ['Unassigned Plan', 'NO ACTIVE PLAN'].includes(summary.planName)
+    ).length
+    const planBlockedSummaries = summaries.filter(summary => {
+      const reason = summary.upgradeRecommendation || ''
+      return (
+        ['Unassigned Plan', 'NO ACTIVE PLAN'].includes(summary.planName) ||
+        /disabled|multi-vendor|no active plan|explicitly zero/i.test(reason) ||
+        (summary.allowedProducts === 0 && summary.selectedProducts > 0)
+      )
+    })
+    const vendorsBlockedByPlan = planBlockedSummaries.length
+    const stockoutProductCount = candidateProducts.filter(
+      product =>
+        safeNumber(product.stockQuantity) <= 0 &&
+        product.stockQuantity !== undefined &&
+        (product as any).stockStatus !== 'in_stock'
+    ).length
+    const selectedProductsForExport = selectedProductsOnly
+      ? candidateProducts.filter(product => selectedProductIds.includes(product.id))
+      : candidateProducts
+    const selectedImageCount = selectedProductsForExport.reduce(
+      (count, product) => count + getProductImageCount(product),
+      0
+    )
+    const includedImageCount = includedProducts.reduce(
+      (count, product) => count + getProductImageCount(product),
+      0
+    )
+    const oversizedImageCount =
+      safeNumber(optimizationSummary?.aboveMaxCount) ||
+      includedProducts.filter(
+        product =>
+          safeNumber((product as any).imageOptimizationBytes) >
+            MAX_CATALOGUE_IMAGE_SIZE_BYTES ||
+          ['blocked', 'failed'].includes(
+            safeText((product as any).imageOptimizationStatus).toLowerCase()
+          )
+      ).length
+    const imagesExcludedCount =
+      imageHandlingPolicy === 'block_oversized' ? oversizedImageCount : 0
+    const estimatedPayloadBytes =
+      safeNumber(optimizationSummary?.totalEstimatedPayloadBytes) ||
+      includedImageCount * MAX_CATALOGUE_IMAGE_SIZE_BYTES
+    const estimatedFileSizeKb = estimatedSize / 1024
+    const estimatedPayloadMb = estimatedPayloadBytes / 1024 / 1024
+    const includedProductCount = includedProducts.length
+    const reviewWarnings: string[] = []
+    const storefrontAlignmentIssue =
+      selectedVendorList.length > 0 &&
+      storefrontProducts.length > 0 &&
+      candidateProducts.length === 0
+
+    if (selectedVendorList.length === 0) {
+      reviewWarnings.push('No selected vendor.')
+    }
+    if (
+      storefrontSourceProducts.length > 0 &&
+      storefrontProducts.length === 0 &&
+      candidateProducts.length === 0 &&
+      vendorsBlockedByPlan === 0
+    ) {
+      reviewWarnings.push(
+        'Products exist in storefront source but did not match selected vendor keys.'
+      )
+    }
+    if (
+      storefrontProducts.length > 0 &&
+      candidateProducts.length === 0 &&
+      vendorsBlockedByPlan === 0
+    ) {
+      reviewWarnings.push(
+        'Products filtered out by publish/stock rules.'
+      )
+    }
+    if (
+      selectedVendorList.length > 0 &&
+      storefrontProducts.length === 0 &&
+      candidateProducts.length === 0 &&
+      vendorsBlockedByPlan === 0
+    ) {
+      reviewWarnings.push(
+        'Products exist in Storefront Builder but are not entering catalogue metrics. Check vendor key matching or source alignment.'
+      )
+    }
+    if (
+      candidateProducts.length > 0 &&
+      selectedProductsOnly &&
+      selectedProductIds.length === 0
+    ) {
+      reviewWarnings.push('Products available but none selected.')
+    }
+    if (candidateProducts.length > 0 && includedProductCount === 0) {
+      reviewWarnings.push(
+        'No exportable products selected. Check product selection, publish status, stock status, and plan limits.'
+      )
+    }
+    if (vendorsWithContactIssues > 0) {
+      reviewWarnings.push(
+        `${vendorsWithContactIssues} selected vendor(s) missing critical contact info.`
+      )
+    }
+    if (vendorsWithNoPlan > 0) {
+      reviewWarnings.push(`${vendorsWithNoPlan} selected vendor(s) have no active plan.`)
+    }
+    if (vendorsBlockedByPlan > 0) {
+      reviewWarnings.push(`${vendorsBlockedByPlan} selected vendor(s) blocked by plan rules.`)
+    }
+    if (includedProductCount > 0 && includedImageCount === 0) {
+      reviewWarnings.push('No images found for included products.')
+    }
+    if (imagesExcludedCount > 0) {
+      reviewWarnings.push(`${imagesExcludedCount} oversized image(s) excluded.`)
+    }
+    if (selectedCahLinkIds.length === 0) {
+      reviewWarnings.push('CAH links not selected.')
+    }
+
+    const deploymentRows = summaries.map(summary => {
+      const planBlocked = planBlockedSummaries.some(
+        item => item.vendorId === summary.vendorId
+      )
+      let blockReason = ''
+      if (planBlocked) {
+        blockReason = summary.upgradeRecommendation
+      } else if (summary.excludedProducts > 0) {
+        blockReason = summary.upgradeRecommendation
+      } else if (
+        storefrontProducts.length > 0 &&
+        candidateProducts.length === 0
+      ) {
+        blockReason = 'Products filtered out by publish/stock rules.'
+      } else if (
+        candidateProducts.length > 0 &&
+        selectedProductsOnly &&
+        selectedProductIds.length === 0
+      ) {
+        blockReason = 'Products available but none selected.'
+      }
+
+      return {
+        vendorId: summary.vendorId,
+        vendorName: summary.vendorName,
+        planName: summary.planName,
+        selectedProducts: summary.selectedProducts,
+        allowedProducts: summary.allowedProducts,
+        includedProducts: summary.includedProducts,
+        excludedProducts: summary.excludedProducts,
+        overageDue: summary.overageDue,
+        creditUsed: summary.creditUsed,
+        remainingCredit: summary.remainingCredit,
+        blockReason
+      }
+    })
+
+    if (storefrontAlignmentIssue) {
+      selectedVendorList.forEach(vendor => {
+        const vendorStorefrontProducts = storefrontProducts.filter(product =>
+          productMatchesVendor(product, vendor)
+        )
+        console.log('Catalogue metrics source alignment diagnostics:', {
+          selectedVendorKeys: getVendorMatchKeys(vendor),
+          storefrontSourceCount: storefrontSourceProducts.length,
+          vendorMatchedCount: vendorStorefrontProducts.length,
+          candidateProductCount: candidateProducts.length,
+          linkedProductCount: vendorStorefrontProducts.filter(
+            product => product.productMode !== 'branded_product'
+          ).length,
+          brandedProductCount: vendorStorefrontProducts.filter(
+            product => product.productMode === 'branded_product'
+          ).length,
+          planName:
+            deploymentRows.find(row => row.vendorId === vendor.id)?.planName ||
+            entitlementByVendorId[vendor.id]?.planName ||
+            vendor.planId ||
+            'Unknown',
+          blockReason:
+            'Products exist in Storefront Builder but are not entering catalogue metrics. Check vendor key matching or source alignment.'
+        })
+      })
+    }
+
+    let imageStatus = 'GOOD'
+    if (includedProductCount === 0) imageStatus = 'NOT READY'
+    else if (includedImageCount === 0) imageStatus = 'WARNING'
+    else if (imagesExcludedCount > 0) imageStatus = 'WARNING'
+    else if (estimatedPayloadBytes > MAX_CATALOGUE_SIZE_BYTES)
+      imageStatus = 'TOO HEAVY'
+    else if (estimatedPayloadBytes > 8 * 1024 * 1024) imageStatus = 'WARNING'
+
+    return {
+      selectedVendorCount: selectedVendorList.length,
+      selectedVendorNames,
+      vendorsWithContactIssues,
+      vendorsWithNoPlan,
+      vendorsBlockedByPlan,
+      candidateProductCount: candidateProducts.length,
+      selectedProductCount: selectedProductsForExport.length,
+      includedProductCount,
+      excludedProductCount: excludedProducts.length,
+      activeProductCount: candidateProducts.filter(
+        product =>
+          product.status === 'active' ||
+          (product as any).active === true ||
+          product.publishToCatalogue === true ||
+          (product as any).catalogue === true
+      ).length,
+      publishedProductCount: candidateProducts.filter(
+        product => product.publishToCatalogue !== false
+      ).length,
+      stockoutProductCount,
+      linkedProductCount: candidateProducts.filter(
+        product => product.productMode !== 'branded_product'
+      ).length,
+      brandedProductCount: candidateProducts.filter(
+        product => product.productMode === 'branded_product'
+      ).length,
+      allowedProductCount: summaries.reduce((total, summary) => {
+        if (summary.allowedProducts === Infinity) return total
+        return total + safeNumber(summary.allowedProducts)
+      }, 0),
+      productsOverLimit: summaries.reduce(
+        (total, summary) => total + safeNumber(summary.overageQuantity),
+        0
+      ),
+      overageDue: summaries.reduce(
+        (total, summary) => total + safeNumber(summary.overageDue),
+        0
+      ),
+      creditUsed: summaries.reduce(
+        (total, summary) => total + safeNumber(summary.creditUsed),
+        0
+      ),
+      remainingCredit: summaries.reduce(
+        (total, summary) => total + safeNumber(summary.remainingCredit),
+        0
+      ),
+      selectedImageCount,
+      includedImageCount,
+      oversizedImageCount,
+      imagesExcludedCount,
+      estimatedPayloadBytes,
+      estimatedPayloadMb,
+      estimatedFileSizeKb,
+      imageStatus,
+      reviewWarnings,
+      deploymentRows
+    }
+  }, [
+    allSelectedProducts,
+    entitlementByVendorId,
+    entitlementExcludedProducts,
+    entitlementSummaries,
+    estimatedSize,
+    imageHandlingPolicy,
+    optimizationSummary,
+    rawSelectedProducts,
+    safeProducts,
+    selectedCahLinkIds.length,
+    selectedProductIds,
+    selectedProductsOnly,
+    selectedVendors
+  ])
+
   const warnings = useMemo(() => {
     const safeSelectedVendors = asArray<Vendor>(selectedVendors)
 
@@ -2524,10 +3257,7 @@ export const SectorCatalogueGenerator: React.FC = () => {
 
       // Frequency Check
       const monthlyDeployments = safeHistory.filter(
-        h =>
-          h.vendorIds.includes(vendor.id) &&
-          new Date(h.generatedAt).getMonth() === new Date().getMonth() &&
-          new Date(h.generatedAt).getFullYear() === new Date().getFullYear()
+        h => h.vendorIds.includes(vendor.id) && isCurrentMonth(h.generatedAt)
       ).length
 
       if (monthlyDeployments >= plan.maxDeploymentsPerMonth) {
@@ -2676,7 +3406,20 @@ export const SectorCatalogueGenerator: React.FC = () => {
       return
     }
 
-    if (allSelectedProducts.length === 0) {
+    if (
+      entitlementSummaries.length > 0 &&
+      entitlementSummaries.every(s => s.planName === 'NO ACTIVE PLAN')
+    ) {
+      showBrandedAlert({
+        title: 'seiGEN Commerce',
+        message:
+          'Catalogue generation blocked. Selected vendors do not have active catalogue plans.',
+        type: 'warning'
+      })
+      return
+    }
+
+    if (selectedProductsOnly && selectedProductIds.length === 0) {
       showBrandedAlert({
         title: 'seiGEN Commerce',
         message:
@@ -2778,7 +3521,7 @@ export const SectorCatalogueGenerator: React.FC = () => {
       selectedCahLinkCount: finalCahLinkIds?.length ?? 0,
       generatedByStaffId: activeStaffSession?.staffId ?? null,
       generatedByStaffName: activeStaffSession?.staffName ?? null,
-      generatedAt: new Date().toISOString()
+      generatedAt: safeIsoString(new Date())
     })
 
     setIsGenerating(true)
@@ -2790,7 +3533,7 @@ export const SectorCatalogueGenerator: React.FC = () => {
       setProgressMessage('checking wallet/overage')
       await new Promise(resolve => setTimeout(resolve, 400))
       const now = new Date()
-      const expiry = new Date()
+      const expiry = new Date(now)
       expiry.setDate(now.getDate() + config.expiryPeriodDays)
 
       let seigenLogoDataUri = ''
@@ -2806,18 +3549,65 @@ export const SectorCatalogueGenerator: React.FC = () => {
       setOptimizationSummary(null)
       setProgressMessage('building catalogue')
 
+      const planByVendorId = new Map<string, PricingPlan | undefined>()
+      let maxPayloadMb = 8
+      let maxWidth = 160
+      let maxHeight = 160
+      let quality = 0.82
+      let outputFormat = 'image/webp'
+
+      selectedVendors.forEach(vendor => {
+        const sub = subscriptionService.getSubscriptionByVendor(vendor.id)
+        const isActiveSub =
+          sub &&
+          [
+            'active',
+            'trial',
+            'past_due',
+            'grace_period',
+            'due',
+            'overdue'
+          ].includes(sub.status)
+        const resolvedPlanId = isActiveSub
+          ? sub.planId
+          : (vendor as any).subscription?.planId ||
+            (vendor as any).activePlanId ||
+            vendor.planId
+        const plan = safePlans.find(p => p.id === resolvedPlanId)
+        planByVendorId.set(vendor.id, plan)
+
+        if (plan) {
+          if (
+            plan.maxCataloguePayloadMb &&
+            plan.maxCataloguePayloadMb > maxPayloadMb
+          )
+            maxPayloadMb = plan.maxCataloguePayloadMb
+          if (plan.imageMaxWidth && plan.imageMaxWidth > maxWidth)
+            maxWidth = plan.imageMaxWidth
+          if (plan.imageMaxHeight && plan.imageMaxHeight > maxHeight)
+            maxHeight = plan.imageMaxHeight
+          if (plan.imageQuality && plan.imageQuality > quality)
+            quality = plan.imageQuality
+          if (plan.imageFormat)
+            outputFormat =
+              plan.imageFormat === 'webp' ? 'image/webp' : 'image/jpeg'
+        }
+      })
+
+      const maxCatalogueSizeBytes = maxPayloadMb * 1024 * 1024
+
       const optimizationResult = await optimizeCatalogueImages(
         allSelectedProducts,
         {
           targetBytes: MAX_CATALOGUE_IMAGE_SIZE_BYTES,
           warningBytes: MAX_CATALOGUE_IMAGE_SIZE_BYTES,
           maxBytes: MAX_CATALOGUE_IMAGE_SIZE_BYTES,
-          maxWidth: 160,
-          maxHeight: 160,
+          maxWidth,
+          maxHeight,
           minQuality: 0.35,
-          maxQuality: 0.82,
+          maxQuality: quality,
           background: '#ffffff',
-          outputType: 'image/webp'
+          outputType: outputFormat as any
         }
       )
 
@@ -2835,14 +3625,6 @@ export const SectorCatalogueGenerator: React.FC = () => {
           )
         }
       )
-      if (
-        imageHandlingPolicy === 'block_oversized' &&
-        oversizedOptimizedProducts.length > 0
-      ) {
-        throw new Error(
-          `${oversizedOptimizedProducts.length} images remain above 8KB after WebP compression. Exclude oversized images or split the catalogue.`
-        )
-      }
       const optimizedProducts =
         imageHandlingPolicy === 'exclude_oversized'
           ? optimizationResult.products.map(product => {
@@ -2862,24 +3644,57 @@ export const SectorCatalogueGenerator: React.FC = () => {
               }
               return product
             })
+          : imageHandlingPolicy === 'block_oversized'
+          ? optimizationResult.products.filter(product => {
+              const item = product as any
+              const isOversized =
+                item.imageUrl &&
+                (Number(item.imageOptimizationBytes || 0) >
+                  MAX_CATALOGUE_IMAGE_SIZE_BYTES ||
+                  item.imageOptimizationStatus === 'blocked' ||
+                  item.imageOptimizationStatus === 'failed')
+              return !isOversized
+            })
           : optimizationResult.products
 
       if (!optimizedProducts?.length) {
-        console.warn('Catalogue export pipeline empty: diagnostics below')
-        console.table({
-          selectedVendorIdsCount: config.vendorIds?.length || 0,
-          selectedSector: config.sector || 'not available',
-          selectedCategory: config.category || 'not available',
+        const diagInfo = {
+          selectedVendorsCount: config.vendorIds?.length || 0,
+          selectedProductsCount: selectedProductIds?.length || 0,
+          productsAfterVendorFilter: 'not available',
+          productsAfterStockFilter: 'not available',
+          productsAfterPublishFilter: 'not available',
+          productsAfterEntitlementFilter: allSelectedProducts?.length || 0,
+          productsAfterImagePolicy: optimizedProducts?.length || 0,
+          oversizedBlockedCount: oversizedOptimizedProducts?.length || 0,
           rawProductsCount: safeProducts?.length || 0,
-          rawOffersCount: safeVendorProductOffers?.length || 0,
-          afterVendorActiveStockCategoryFilter:
-            rawSelectedProducts?.length || 0,
-          afterEntitlementFilter: allSelectedProducts?.length || 0,
-          afterOptimizationFilter: optimizedProducts?.length || 0
-        })
-        throw new Error(
-          'No products available for export after filtering pipeline.'
-        )
+          afterVendorActiveStockCategoryFilter: rawSelectedProducts?.length || 0
+        }
+
+        console.warn('Catalogue export pipeline empty: diagnostics below')
+        console.table(diagInfo)
+
+        const errorMessage = `Catalogue generation could not continue because all products were filtered out.
+
+Diagnostics:
+- Selected vendors count: ${diagInfo.selectedVendorsCount}
+- Selected products count: ${diagInfo.selectedProductsCount}
+- Products after vendor filter: ${diagInfo.productsAfterVendorFilter}
+- Products after stock filter: ${diagInfo.productsAfterStockFilter}
+- Products after publish filter: ${diagInfo.productsAfterPublishFilter}
+- Products after entitlement filter: ${diagInfo.productsAfterEntitlementFilter}
+- Products after image policy: ${diagInfo.productsAfterImagePolicy}
+- Oversized blocked count: ${diagInfo.oversizedBlockedCount}
+
+Likely actions:
+- Select products
+- Select vendors
+- Enable Include Out of Stock
+- Check Publish to Catalogue
+- Check plan limits
+- Reduce oversized images`
+
+        throw new Error(errorMessage)
       }
 
       const finalEstimatedSize =
@@ -2900,18 +3715,35 @@ export const SectorCatalogueGenerator: React.FC = () => {
               : 0),
           0
         )
-      if (finalEstimatedSize > MAX_CATALOGUE_SIZE_BYTES) {
+      if (finalEstimatedSize > maxCatalogueSizeBytes) {
         throw new Error(
-          'Catalogue exceeds 12MB. Split catalogue by sector, category, suburb, or vendor group.'
+          `Catalogue exceeds ${maxPayloadMb}MB. Split catalogue by sector, category, suburb, or vendor group.`
         )
       }
 
+      const imageDiagnostics = {
+        originalSize: optimizationResult.summary.totalEstimatedPayloadBytes,
+        optimizedSize: optimizedProducts.reduce(
+          (sum, p) => sum + (Number((p as any).imageOptimizationBytes) || 0),
+          0
+        ),
+        format: outputFormat,
+        blockedCount,
+        placeholderCount,
+        imagePolicy: 'plan_resolved',
+        productsBeforeImagePolicy: optimizationResult.products.length,
+        oversizedImagesDetected: oversizedOptimizedProducts.length,
+        imagesBlockedByPolicy: blockedCount + placeholderCount,
+        productsAfterImagePolicy: optimizedProducts.length,
+        estimatedPayloadMb: (finalEstimatedSize / 1024 / 1024).toFixed(2)
+      }
+      console.warn('Catalogue image diagnostics', imageDiagnostics)
+      console.table(imageDiagnostics)
+
       console.log('Catalogue export source', {
         selectedVendors: selectedVendors.length,
-        masterProducts: safeMasterProducts.length,
-        vendorOffers: safeVendorProductOffers.length,
         exportProducts: allSelectedProducts.length,
-        legacyProducts: products.length
+        rawProducts: safeProducts.length
       })
 
       const publicSlug = `${config.sector}-${config.category}-${finalId}`
@@ -2947,7 +3779,7 @@ export const SectorCatalogueGenerator: React.FC = () => {
           catalogueId: finalId,
           sector: config.sector,
           category: config.category,
-          expiryDate: expiry.toISOString(),
+          expiryDate: safeIsoString(expiry),
           seigenLogoDataUri,
           seigenLogoUrl:
             systemSettings?.seigenLogoUrl ||
@@ -2970,7 +3802,7 @@ export const SectorCatalogueGenerator: React.FC = () => {
       const displayCategory = config.category
         ? config.category.trim()
         : 'All Categories'
-      const yyyyMmDd = new Date().toISOString().split('T')[0]
+      const yyyyMmDd = safeIsoString(new Date()).split('T')[0]
       let safeFileName = `SCI_${displaySector}_${displayCategory}_${yyyyMmDd}`
       safeFileName = safeFileName
         .replace(/\s+/g, '_')
@@ -2995,7 +3827,7 @@ export const SectorCatalogueGenerator: React.FC = () => {
           0
         ),
         productsExcluded: entitlementExcludedProducts.length,
-        generatedAt: new Date().toISOString()
+        generatedAt: safeIsoString(new Date())
       })
 
       // Lightweight config snapshot
@@ -3035,7 +3867,7 @@ export const SectorCatalogueGenerator: React.FC = () => {
         vendorIds: config.vendorIds,
         cahLinkIds: finalCahLinkIds,
         generatedBy: 'System Admin',
-        generatedAt: new Date().toISOString(),
+        generatedAt: safeIsoString(new Date()),
         expiryPeriodDays: config.expiryPeriodDays,
         status: 'generated',
         notes: config.notes || null,
@@ -3063,13 +3895,25 @@ export const SectorCatalogueGenerator: React.FC = () => {
           row => row.vendorId === vendor.id
         )
         const summary = entitlementSummaryByVendor.get(vendor.id)
-        usageEntries.push({
-          vendorId: vendor.id,
-          usageType: 'catalogue_generated',
-          quantity: 1,
-          sourceId: finalId,
-          description: `Catalogue generated for ${config.sector}/${config.category}`
-        })
+        usageEntries.push(
+          sanitizeForFirestore({
+            vendorId: vendor.id,
+            planId: controlRow?.planId || vendor.planId || null,
+            subscriptionId:
+              subscriptionService.getSubscriptionByVendor(vendor.id)?.id ||
+              null,
+            catalogueId: finalId,
+            serialNumber: config.serialNumber || null,
+            generatedAt: catalogueAnalyticsSnapshot.generatedAt,
+            productCount: controlRow?.productsSelected || 0,
+            imageCount: controlRow?.imagesSelected || 0,
+            generatedByStaffId: activeStaffSession?.staffId || null,
+            usageType: 'catalogue_generated',
+            quantity: 1,
+            sourceId: finalId,
+            description: `Catalogue generated for ${config.sector}/${config.category}`
+          })
+        )
         if (controlRow) {
           ledgerEntries.push({
             catalogueId: finalId,
@@ -3081,12 +3925,12 @@ export const SectorCatalogueGenerator: React.FC = () => {
             overageDue: summary?.overageDue || 0,
             deploymentCount: 1,
             catalogueSizeBytes: finalEstimatedSize,
-            oversizedImagesExcluded:
-              imageHandlingPolicy === 'exclude_oversized'
-                ? oversizedOptimizedProducts.filter(
-                    product => product.vendorId === vendor.id
-                  ).length
-                : 0,
+            oversizedImagesExcluded: oversizedOptimizedProducts.filter(
+              product =>
+                product.vendorId === vendor.id &&
+                planByVendorId.get(vendor.id)?.imagePolicy !==
+                  'compress_include'
+            ).length,
             overrideUsed: !!summary?.overrideUsed,
             overrideReason: summary?.overrideUsed
               ? overrideReason.trim() || null
@@ -3103,7 +3947,6 @@ export const SectorCatalogueGenerator: React.FC = () => {
           })
         }
       }
-      void vendorPlanUsageService.recordUsageBatch(usageEntries)
 
       // Prepare entitlement settlement data
       const summariesWithCredit = entitlementSummaries.filter(
@@ -3125,7 +3968,7 @@ export const SectorCatalogueGenerator: React.FC = () => {
         vendorUpdates.push({
           id: vendor.id,
           [creditField]: Math.max(0, beforeCredit - summary.creditUsed),
-          updatedAt: new Date().toISOString()
+          updatedAt: safeIsoString(new Date())
         })
 
         auditLogs.push(
@@ -3215,6 +4058,20 @@ export const SectorCatalogueGenerator: React.FC = () => {
         })
       )
 
+      try {
+        void vendorPlanUsageService.recordUsageBatch(usageEntries)
+        if (
+          typeof (catalogueUsageLedgerService as any)?.recordUsageBatch ===
+          'function'
+        ) {
+          void (catalogueUsageLedgerService as any).recordUsageBatch(
+            usageEntries
+          )
+        }
+      } catch (usageError) {
+        console.warn('Failed to record catalogue usage', usageError)
+      }
+
       // Non-blocking analytics and audit for the main generation event
       try {
         void staffAuditService.logAction(
@@ -3282,10 +4139,14 @@ export const SectorCatalogueGenerator: React.FC = () => {
       const elapsedSeconds = ((performance.now() - startedAt) / 1000).toFixed(1)
       await refreshHistory()
 
+      const hasBlockedOversized = blockedCount > 0
+      const successMsg = `Catalogue generated in ${elapsedSeconds}s. Deployment metadata saved.`
       showBrandedAlert({
         title: 'seiGEN Commerce',
-        message: `Catalogue generated in ${elapsedSeconds}s. Deployment metadata saved.`,
-        type: 'success'
+        message: hasBlockedOversized
+          ? `${successMsg} Some products/images were excluded because oversized images are blocked by the current image policy.`
+          : successMsg,
+        type: hasBlockedOversized ? 'warning' : 'success'
       })
     } catch (err) {
       console.error(err)
@@ -3644,9 +4505,9 @@ export const SectorCatalogueGenerator: React.FC = () => {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `vendor-credit-deployment-control-${new Date()
-      .toISOString()
-      .slice(0, 10)}.csv`
+    a.download = `vendor-credit-deployment-control-${safeIsoString(
+      new Date()
+    ).slice(0, 10)}.csv`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -3663,12 +4524,12 @@ export const SectorCatalogueGenerator: React.FC = () => {
     const plan = safePlans.find(item => item.id === row.planId)
     if (!vendor || !plan) return null
     const now = new Date()
-    const periodFrom = new Date(now.getFullYear(), now.getMonth(), 1)
-      .toISOString()
-      .slice(0, 10)
-    const periodTo = new Date(now.getFullYear(), now.getMonth() + 1, 0)
-      .toISOString()
-      .slice(0, 10)
+    const periodFrom = safeIsoString(
+      new Date(now.getFullYear(), now.getMonth(), 1)
+    ).slice(0, 10)
+    const periodTo = safeIsoString(
+      new Date(now.getFullYear(), now.getMonth() + 1, 0)
+    ).slice(0, 10)
 
     return {
       vendorId: row.vendorId,
@@ -3701,7 +4562,7 @@ export const SectorCatalogueGenerator: React.FC = () => {
       overageDue: row.overageDue,
       billDue: row.billDue,
       recommendedAction: row.recommendedAction,
-      generatedAt: new Date().toISOString()
+      generatedAt: safeIsoString(new Date())
     }
   }
 
@@ -4355,7 +5216,9 @@ export const SectorCatalogueGenerator: React.FC = () => {
                           {row.creditBalance.toFixed(2)}
                         </td>
                         <td className='border border-stone-100 px-2 py-2 font-mono'>
-                          {row.productsAllowed}
+                          {row.productsAllowed === Infinity
+                            ? '∞'
+                            : row.productsAllowed}
                         </td>
                         <td className='border border-stone-100 px-2 py-2 font-mono'>
                           {row.productsSelected}
@@ -4373,7 +5236,9 @@ export const SectorCatalogueGenerator: React.FC = () => {
                           {row.remainingCredit.toFixed(2)}
                         </td>
                         <td className='border border-stone-100 px-2 py-2 font-mono'>
-                          {row.imagesAllowed}
+                          {row.imagesAllowed === Infinity
+                            ? '∞'
+                            : row.imagesAllowed}
                         </td>
                         <td className='border border-stone-100 px-2 py-2 font-mono'>
                           {row.imagesSelected}
@@ -4383,10 +5248,12 @@ export const SectorCatalogueGenerator: React.FC = () => {
                             row.imagesDue < 0 ? 'text-red-600' : ''
                           }`}
                         >
-                          {row.imagesDue}
+                          {row.imagesAllowed === Infinity ? '∞' : row.imagesDue}
                         </td>
                         <td className='border border-stone-100 px-2 py-2 font-mono'>
-                          {row.deploymentsAllowedThisMonth}
+                          {row.deploymentsAllowedThisMonth === Infinity
+                            ? '∞'
+                            : row.deploymentsAllowedThisMonth}
                         </td>
                         <td className='border border-stone-100 px-2 py-2 font-mono'>
                           {row.deploymentsUsedThisMonth}
@@ -4452,6 +5319,147 @@ export const SectorCatalogueGenerator: React.FC = () => {
                   </tbody>
                 </table>
               </div>
+
+              {(!localStorage.getItem('activeStaffSession') ||
+                ['SysAdmin', 'Super Admin', 'Admin'].includes(
+                  JSON.parse(localStorage.getItem('activeStaffSession') || '{}')
+                    .role || ''
+                ) ||
+                ['SysAdmin Desk'].includes(
+                  JSON.parse(localStorage.getItem('activeStaffSession') || '{}')
+                    .desk || ''
+                )) && (
+                <div className='mt-6 p-4 border border-stone-200 bg-stone-50'>
+                  <details>
+                    <summary className='text-xs font-black uppercase text-brand-charcoal cursor-pointer outline-none'>
+                      Plan Linkage Diagnostics
+                    </summary>
+                    <div className='mt-4 overflow-x-auto'>
+                      <table className='w-full text-left text-[10px]'>
+                        <thead className='bg-stone-200 text-stone-600 uppercase'>
+                          <tr>
+                            <th className='p-2'>Vendor Name</th>
+                            <th className='p-2'>Vendor ID</th>
+                            <th className='p-2'>Vendor.planId</th>
+                            <th className='p-2'>Active Sub ID</th>
+                            <th className='p-2'>Active Sub planId</th>
+                            <th className='p-2'>Resolved Plan ID</th>
+                            <th className='p-2'>Resolved Plan Name</th>
+                            <th className='p-2'>Plan Source</th>
+                            <th className='p-2'>Gen Enabled</th>
+                            <th className='p-2'>Max Products</th>
+                            <th className='p-2'>Max Images</th>
+                            <th className='p-2'>Cat Rem.</th>
+                            <th className='p-2'>Block Reason</th>
+                          </tr>
+                        </thead>
+                        <tbody className='divide-y divide-stone-200'>
+                          {selectedVendors.map(vendor => {
+                            const summary = entitlementSummaryByVendor.get(
+                              vendor.id
+                            )
+                            const controlRow = vendorCreditRows.find(
+                              r => r.vendorId === vendor.id
+                            )
+                            const sub =
+                              subscriptionService.getSubscriptionByVendor(
+                                vendor.id
+                              )
+                            const isActiveSub =
+                              sub &&
+                              [
+                                'active',
+                                'trial',
+                                'past_due',
+                                'grace_period',
+                                'due',
+                                'overdue'
+                              ].includes(sub.status)
+                            const resolvedPlanId = isActiveSub
+                              ? sub.planId
+                              : vendor.planId
+                            const plan = safePlans.find(
+                              p => p.id === resolvedPlanId
+                            )
+                            const planSource =
+                              (summary as any)?.planSource ||
+                              (isActiveSub
+                                ? 'active subscription'
+                                : vendor.planId
+                                ? 'vendor fallback'
+                                : 'none')
+
+                            return (
+                              <tr key={vendor.id} className='hover:bg-white'>
+                                <td className='p-2 font-bold'>{vendor.name}</td>
+                                <td className='p-2 font-mono'>{vendor.id}</td>
+                                <td className='p-2 font-mono'>
+                                  {vendor.planId || 'None'}
+                                </td>
+                                <td className='p-2 font-mono'>
+                                  {isActiveSub ? sub?.id : 'None'}
+                                </td>
+                                <td className='p-2 font-mono'>
+                                  {isActiveSub ? sub?.planId : 'None'}
+                                </td>
+                                <td className='p-2 font-mono'>
+                                  {resolvedPlanId || 'None'}
+                                </td>
+                                <td className='p-2 font-bold'>
+                                  {plan?.name || 'None'}
+                                </td>
+                                <td className='p-2 uppercase'>{planSource}</td>
+                                <td className='p-2'>
+                                  {plan?.enableCatalogueGeneration !== false
+                                    ? 'Yes'
+                                    : 'No'}
+                                </td>
+                                <td className='p-2 font-mono'>
+                                  {formatLimitValue(
+                                    plan?.maxProductsPerCatalogue ??
+                                      plan?.maxProducts ??
+                                      null
+                                  )}
+                                </td>
+                                <td className='p-2 font-mono'>
+                                  {formatLimitValue(
+                                    plan?.maxImagesPerCatalogue ?? null
+                                  )}
+                                </td>
+                                <td className='p-2 font-mono'>
+                                  {controlRow?.deploymentsDue ?? 'N/A'}
+                                </td>
+                                <td
+                                  className='p-2 text-red-600 max-w-[150px] truncate'
+                                  title={
+                                    controlRow?.status !== 'OK'
+                                      ? controlRow?.recommendedAction
+                                      : ''
+                                  }
+                                >
+                                  {controlRow?.status !== 'OK'
+                                    ? controlRow?.recommendedAction
+                                    : '-'}
+                                </td>
+                              </tr>
+                            )
+                          })}
+                          {selectedVendors.length === 0 && (
+                            <tr>
+                              <td
+                                colSpan={13}
+                                className='p-4 text-center text-stone-400 font-bold uppercase'
+                              >
+                                Select vendors to view plan diagnostics
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </details>
+                </div>
+              )}
             </div>
           </DataPanel>
 
@@ -4837,9 +5845,10 @@ export const SectorCatalogueGenerator: React.FC = () => {
                   ? vendorListError || 'Vendor lookup failed'
                   : 'Loading vendors...'}
                 {masterCache.lastRefreshedAt
-                  ? ` | Last refreshed ${new Date(
-                      masterCache.lastRefreshedAt
-                    ).toLocaleString()}`
+                  ? ` | Last refreshed ${
+                      safeDateFromUnknown(masterCache.lastRefreshedAt)
+                        ?.toLocaleString() || 'N/A'
+                    }`
                   : ''}
               </span>
               <button
@@ -4940,6 +5949,392 @@ export const SectorCatalogueGenerator: React.FC = () => {
                     No active vendors match this sector filter
                   </div>
                 )}
+            </div>
+          </section>
+
+          {/* Product Selection */}
+          <section className='card'>
+            <div className='flex items-start justify-between mb-6'>
+              <div className='flex items-start gap-4'>
+                <div className='w-10 h-10 bg-brand-charcoal text-white flex items-center justify-center font-bold italic shrink-0'>
+                  PS
+                </div>
+                <div>
+                  <h3 className='text-sm uppercase font-bold tracking-[0.2em] text-brand-charcoal'>
+                    LINKED PRODUCTS FROM SELECTED VENDORS
+                  </h3>
+                  <p className='mt-1 text-[10px] font-bold uppercase text-stone-400'>
+                    Selected Products Only means this catalogue will include
+                    only products selected here.
+                  </p>
+                </div>
+              </div>
+              <div className='text-[10px] font-bold text-brand-orange shrink-0 ml-4 pt-1'>
+                Selected products: {selectedProductIds.length}
+              </div>
+            </div>
+
+            <div className='mb-6 p-4 bg-stone-50 border border-stone-200'>
+              <label className='flex items-center gap-2 text-xs font-black uppercase text-brand-charcoal cursor-pointer'>
+                <input
+                  type='checkbox'
+                  checked={selectedProductsOnly}
+                  onChange={e => setSelectedProductsOnly(e.target.checked)}
+                  className='accent-brand-orange w-4 h-4'
+                />
+                Selected Products Only
+              </label>
+            </div>
+
+            <div className='space-y-4'>
+              {config.vendorIds.length === 0 ? (
+                <div className='p-6 text-center text-xs font-bold text-stone-400'>
+                  Select at least one vendor to view linked products.
+                </div>
+              ) : rawSelectedProducts.length === 0 ? (
+                <div className='p-6 bg-stone-50 border border-stone-200'>
+                  {(() => {
+                    const allRaw = safeProducts.filter(p =>
+                      selectedVendors.some(v => productMatchesVendor(p, v))
+                    )
+
+                    const planStatuses = selectedVendors
+                      .map(v =>
+                        entitlementByVendorId[v.id]?.status === 'missing'
+                          ? 'NO ACTIVE PLAN'
+                          : entitlementByVendorId[v.id]?.planName ||
+                            'Active Plan'
+                      )
+                      .join(', ')
+
+                    const activeCount = allRaw.filter(
+                      p =>
+                        p.status === 'active' ||
+                        (p as any).active === true ||
+                        p.publishToCatalogue === true ||
+                        (p as any).catalogue === true ||
+                        (p as any).active !== false
+                    ).length
+
+                    const publishedCount = allRaw.filter(
+                      p => p.publishToCatalogue !== false
+                    ).length
+
+                    const inStockCount = allRaw.filter(
+                      p =>
+                        Number(p.stockQuantity) > 0 ||
+                        p.stockQuantity === undefined ||
+                        (p as any).stockStatus === 'in_stock'
+                    ).length
+
+                    const categoryCount = allRaw.filter(p =>
+                      categoryMatchesProduct(p, config.category)
+                    ).length
+
+                    return (
+                      <div className='space-y-4'>
+                        <div className='text-xs font-bold text-stone-500'>
+                          No linked products found for selected vendors. Check
+                          Vendor Management &gt; Product & Inventory Sheet.
+                        </div>
+                        {allRaw.length > 0 && (
+                          <div className='border border-amber-300 bg-amber-50 p-3 text-[10px] font-black uppercase text-amber-800'>
+                            Products exist in Storefront Builder but are not
+                            entering catalogue selection. Check vendor key
+                            matching or source alignment.
+                          </div>
+                        )}
+                        <div className='flex items-center gap-3 text-brand-charcoal border-b border-stone-200 pb-3'>
+                          <AlertTriangle
+                            size={18}
+                            className='text-brand-orange'
+                          />
+                          <h4 className='text-xs font-black uppercase'>
+                            Why no products are showing
+                          </h4>
+                        </div>
+
+                        <div className='grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 text-[10px] font-mono text-stone-600'>
+                          <div className='flex justify-between border-b border-stone-200 pb-1'>
+                            <span className='font-bold uppercase text-stone-400'>
+                              selected vendors count
+                            </span>
+                            <span>{config.vendorIds.length}</span>
+                          </div>
+                          <div className='flex justify-between border-b border-stone-200 pb-1'>
+                            <span className='font-bold uppercase text-stone-400'>
+                              selected vendor names
+                            </span>
+                            <span
+                              className='truncate ml-2'
+                              title={selectedVendors
+                                .map(v => v.name)
+                                .join(', ')}
+                            >
+                              {selectedVendors
+                                .map(v => v.name || v.tradingName)
+                                .join(', ') || 'Unknown'}
+                            </span>
+                          </div>
+                          <div className='flex justify-between border-b border-stone-200 pb-1'>
+                            <span className='font-bold uppercase text-stone-400'>
+                              selected vendor plan status
+                            </span>
+                            <span className='text-brand-orange font-bold truncate ml-2'>
+                              {planStatuses || 'Unknown'}
+                            </span>
+                          </div>
+                          <div className='flex justify-between border-b border-stone-200 pb-1'>
+                            <span className='font-bold uppercase text-stone-400'>
+                              total vendor offers found before filters
+                            </span>
+                            <span>{allRaw.length}</span>
+                          </div>
+                          <div className='flex justify-between border-b border-stone-200 pb-1'>
+                            <span className='font-bold uppercase text-stone-400'>
+                              linked products found
+                            </span>
+                            <span>
+                              {
+                                allRaw.filter(
+                                  p => p.productMode !== 'branded_product'
+                                ).length
+                              }
+                            </span>
+                          </div>
+                          <div className='flex justify-between border-b border-stone-200 pb-1'>
+                            <span className='font-bold uppercase text-stone-400'>
+                              branded products found
+                            </span>
+                            <span>
+                              {
+                                allRaw.filter(
+                                  p => p.productMode === 'branded_product'
+                                ).length
+                              }
+                            </span>
+                          </div>
+                          <div className='flex justify-between border-b border-stone-200 pb-1'>
+                            <span className='font-bold uppercase text-stone-400'>
+                              active products count
+                            </span>
+                            <span>{activeCount}</span>
+                          </div>
+                          <div className='flex justify-between border-b border-stone-200 pb-1'>
+                            <span className='font-bold uppercase text-stone-400'>
+                              publishToCatalogue count
+                            </span>
+                            <span>{publishedCount}</span>
+                          </div>
+                          <div className='flex justify-between border-b border-stone-200 pb-1'>
+                            <span className='font-bold uppercase text-stone-400'>
+                              in-stock count
+                            </span>
+                            <span>{inStockCount}</span>
+                          </div>
+                          <div className='flex justify-between border-b border-stone-200 pb-1'>
+                            <span className='font-bold uppercase text-stone-400'>
+                              after category filter count
+                            </span>
+                            <span>{categoryCount}</span>
+                          </div>
+                          <div className='flex justify-between border-b border-stone-200 pb-1'>
+                            <span className='font-bold uppercase text-stone-400'>
+                              after entitlement filter count
+                            </span>
+                            <span>
+                              {entitlementResult.includedProducts.length}
+                            </span>
+                          </div>
+                          <div className='flex justify-between border-b border-stone-200 pb-1'>
+                            <span className='font-bold uppercase text-stone-400'>
+                              rawSelectedProducts count
+                            </span>
+                            <span className='font-bold text-brand-charcoal'>
+                              {rawSelectedProducts.length}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className='mt-4 pt-4 border-t border-stone-200'>
+                          <p className='text-[10px] font-bold uppercase text-stone-500 mb-2'>
+                            Likely actions:
+                          </p>
+                          <ul className='list-disc pl-4 space-y-1 text-[10px] font-bold text-stone-600 uppercase'>
+                            <li>Assign an active plan to this vendor.</li>
+                            <li>
+                              Open Vendor Management &gt; Product & Inventory
+                              Sheet and publish products to catalogue.
+                            </li>
+                            <li>Check product active status.</li>
+                            <li>
+                              Enable Include Out of Stock if products have zero
+                              quantity.
+                            </li>
+                            <li>Check category/sector filters.</li>
+                          </ul>
+                        </div>
+                      </div>
+                    )
+                  })()}
+                </div>
+              ) : (
+                <>
+                  <div className='mb-4 relative'>
+                    <Search className='absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400' />
+                    <input
+                      value={productSelectionSearch}
+                      onChange={e => setProductSelectionSearch(e.target.value)}
+                      placeholder='Search linked products by name, SKU, vendor...'
+                      className='w-full border-2 border-stone-200 bg-white py-3 pl-10 pr-3 text-xs font-bold uppercase outline-none focus:border-brand-orange'
+                    />
+                  </div>
+                  <div className='flex flex-wrap gap-2'>
+                    <SecondaryButton
+                      size='sm'
+                      onClick={() => selectVisibleProducts()}
+                    >
+                      Select All Visible
+                    </SecondaryButton>
+                    <SecondaryButton
+                      size='sm'
+                      onClick={() =>
+                        selectVisibleProducts(
+                          p => p.productMode !== 'branded_product'
+                        )
+                      }
+                    >
+                      Select Linked Only
+                    </SecondaryButton>
+                    <SecondaryButton
+                      size='sm'
+                      onClick={() =>
+                        selectVisibleProducts(
+                          p => p.productMode === 'branded_product'
+                        )
+                      }
+                    >
+                      Select Branded Only
+                    </SecondaryButton>
+                    <SecondaryButton
+                      size='sm'
+                      onClick={clearSelectedProducts}
+                    >
+                      Clear Selected
+                    </SecondaryButton>
+                  </div>
+                  <div className='grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar'>
+                    {visibleSelectionProducts.map(product => {
+                      const imageUrl =
+                        normalizeImageList(
+                          product.imageUrl ||
+                            (product as any).vendorProductImage ||
+                            (product as any).brandLogoUrl ||
+                            (product as any).images ||
+                            (product as any).imageUrls
+                        )[0] || ''
+                      const imageStatus =
+                        (product as any).imageStatus ||
+                        (imageUrl ? 'uploaded' : 'missing')
+                      const isSelected = selectedProductIds.includes(
+                        product.id
+                      )
+                      const toggleProduct = () => {
+                        setSelectedProductsOnly(true)
+                        setSelectedProductIds(prev =>
+                          prev.includes(product.id)
+                            ? prev.filter(id => id !== product.id)
+                            : [...prev, product.id]
+                        )
+                      }
+
+                      return (
+                      <div
+                        key={product.id}
+                        onClick={toggleProduct}
+                        className={`p-3 border-2 flex items-start gap-4 cursor-pointer transition-all ${
+                          isSelected
+                            ? 'border-brand-orange bg-orange-50/20'
+                            : 'border-stone-50 hover:border-stone-100'
+                        }`}
+                      >
+                        <input
+                          type='checkbox'
+                          checked={isSelected}
+                          onClick={e => e.stopPropagation()}
+                          onChange={toggleProduct}
+                          className='mt-6 accent-brand-orange'
+                        />
+                        <div className='h-16 w-16 shrink-0 overflow-hidden border border-stone-200 bg-stone-50'>
+                          {imageUrl ? (
+                            <img
+                              src={imageUrl}
+                              alt={product.name || product.productName}
+                              className='h-full w-full object-cover'
+                            />
+                          ) : (
+                            <div className='flex h-full w-full items-center justify-center text-[8px] font-black uppercase text-stone-300'>
+                              No image
+                            </div>
+                          )}
+                        </div>
+                        <div className='flex-1 min-w-0'>
+                          <div className='flex flex-wrap items-start justify-between gap-2'>
+                            <p className='text-[11px] font-bold uppercase truncate'>
+                              {product.name || product.productName}
+                            </p>
+                            <span
+                              className={`shrink-0 px-2 py-1 text-[8px] font-black uppercase ${
+                                product.productMode === 'branded_product'
+                                  ? 'bg-brand-charcoal text-white'
+                                  : 'bg-brand-orange text-white'
+                              }`}
+                            >
+                              {product.productMode === 'branded_product'
+                                ? 'BRANDED'
+                                : 'LINKED'}
+                            </span>
+                          </div>
+                          <p className='text-[9px] text-stone-400 font-bold uppercase truncate'>
+                            {product.sku || product.productCode || 'No SKU'} •{' '}
+                            {product.vendorName}
+                          </p>
+                          <div className='mt-2 grid grid-cols-1 gap-1 text-[9px] font-mono text-stone-500 sm:grid-cols-2'>
+                            <span>
+                              Master:{' '}
+                              {product.productMode !== 'branded_product'
+                                ? product.masterProductId || 'N/A'
+                                : 'N/A'}
+                            </span>
+                            <span>
+                              Offer: {product.offerId || product.id || 'N/A'}
+                            </span>
+                            <span>
+                              Qty/current stock: {product.stockQuantity ?? 0}
+                            </span>
+                            <span>Price: {product.sellingPrice || 0}</span>
+                            <span>
+                              Status:{' '}
+                              {product.status === 'active'
+                                ? 'active'
+                                : 'inactive'}
+                            </span>
+                            <span>
+                              Publish:{' '}
+                              {product.publishToCatalogue !== false
+                                ? 'Yes'
+                                : 'No'}
+                            </span>
+                            <span>Image: {imageStatus}</span>
+                            <span>Category: {product.category || 'N/A'}</span>
+                          </div>
+                        </div>
+                      </div>
+                      )
+                    })}
+                  </div>
+                </>
+              )}
             </div>
           </section>
 
@@ -5232,17 +6627,20 @@ export const SectorCatalogueGenerator: React.FC = () => {
                 </thead>
                 <tbody className='text-sm font-medium text-stone-600 divide-y divide-stone-100'>
                   {filteredHistory.map(cat => {
+                    const expiryTime = safeDateFromUnknown(
+                      cat.expiryDate
+                    )?.getTime()
+                    const nowTime = Date.now()
                     const isExpiringSoon =
                       cat.status === 'deployed' &&
-                      cat.expiryDate &&
-                      new Date(cat.expiryDate).getTime() -
-                        new Date().getTime() <
+                      typeof expiryTime === 'number' &&
+                      expiryTime - nowTime <
                         2 * 24 * 60 * 60 * 1000
                     const isExpired =
                       cat.status === 'expired' ||
                       (cat.status === 'deployed' &&
-                        cat.expiryDate &&
-                        new Date(cat.expiryDate) < new Date())
+                        typeof expiryTime === 'number' &&
+                        expiryTime < nowTime)
 
                     return (
                       <tr
@@ -5283,20 +6681,18 @@ export const SectorCatalogueGenerator: React.FC = () => {
                         <td className='px-4 py-3 text-[9px] font-bold uppercase text-stone-500 whitespace-nowrap space-y-1'>
                           <span>
                             Gen:{' '}
-                            {new Date(cat.generatedAt).toLocaleDateString()}
+                            {safeDateLabel(cat.generatedAt)}
                           </span>
                           <br />
                           {cat.deployedAt && (
                             <span>
-                              Deployed:{' '}
-                              {new Date(cat.deployedAt).toLocaleDateString()}
+                              Deployed: {safeDateLabel(cat.deployedAt)}
                             </span>
                           )}
                           <br />
                           {cat.expiryDate && (
                             <span>
-                              Expiry:{' '}
-                              {new Date(cat.expiryDate).toLocaleDateString()}
+                              Expiry: {safeDateLabel(cat.expiryDate)}
                             </span>
                           )}
                         </td>
@@ -5464,9 +6860,9 @@ export const SectorCatalogueGenerator: React.FC = () => {
         <div className='space-y-8'>
           <DataPanel title='Review Checklist'>
             <div className='p-6 space-y-6'>
-              {warnings.length > 0 ? (
+              {catalogueBuildMetrics.reviewWarnings.length > 0 ? (
                 <div className='space-y-3'>
-                  {warnings.map((w, i) => (
+                  {catalogueBuildMetrics.reviewWarnings.map((w, i) => (
                     <div key={i} className='flex gap-3 text-red-600'>
                       <AlertTriangle size={14} className='shrink-0 mt-0.5' />
                       <p className='text-[10px] font-bold uppercase leading-tight italic'>
@@ -5474,12 +6870,37 @@ export const SectorCatalogueGenerator: React.FC = () => {
                       </p>
                     </div>
                   ))}
+                  {selectedVendors[0] && (
+                    <div className='border border-stone-200 bg-stone-50 p-3 text-[9px] font-mono uppercase text-stone-500'>
+                      <p>
+                        Vendor: {selectedVendors[0].name || selectedVendors[0].tradingName} /{' '}
+                        {selectedVendors[0].vendorCode || selectedVendors[0].id}
+                      </p>
+                      <p>
+                        Products: storefront {safeProducts.filter(product =>
+                          productMatchesVendor(product, selectedVendors[0])
+                        ).length} / candidates {catalogueBuildMetrics.candidateProductCount} / linked{' '}
+                        {catalogueBuildMetrics.linkedProductCount} / branded{' '}
+                        {catalogueBuildMetrics.brandedProductCount} / selected{' '}
+                        {catalogueBuildMetrics.selectedProductCount} / included{' '}
+                        {catalogueBuildMetrics.includedProductCount}
+                      </p>
+                      <p>
+                        Plan:{' '}
+                        {catalogueBuildMetrics.deploymentRows[0]?.planName || 'N/A'} / limit{' '}
+                        {catalogueBuildMetrics.deploymentRows[0]?.allowedProducts === Infinity
+                          ? 'unlimited'
+                          : catalogueBuildMetrics.deploymentRows[0]?.allowedProducts ?? 'N/A'} /{' '}
+                        {catalogueBuildMetrics.deploymentRows[0]?.blockReason || 'no plan block'}
+                      </p>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className='flex items-center gap-3 text-emerald-600'>
                   <CheckCircle2 size={16} />
                   <p className='text-[10px] font-bold uppercase'>
-                    Ready to create
+                    READY TO CREATE
                   </p>
                 </div>
               )}
@@ -5494,7 +6915,7 @@ export const SectorCatalogueGenerator: React.FC = () => {
                     Included
                   </p>
                   <p className='text-lg font-black text-brand-charcoal'>
-                    {allSelectedProducts.length}
+                    {catalogueBuildMetrics.includedProductCount}
                   </p>
                 </div>
                 <div className='p-3 border border-orange-200 bg-orange-50'>
@@ -5502,13 +6923,20 @@ export const SectorCatalogueGenerator: React.FC = () => {
                     Excluded
                   </p>
                   <p className='text-lg font-black text-orange-900'>
-                    {entitlementExcludedProducts.length}
+                    {catalogueBuildMetrics.excludedProductCount}
                   </p>
                 </div>
               </div>
 
+              {catalogueBuildMetrics.includedProductCount === 0 && (
+                <div className='border border-amber-300 bg-amber-50 p-3 text-[10px] font-black uppercase leading-relaxed text-amber-800'>
+                  No exportable products currently included. Check product
+                  selection, publish status, stock status, and plan limits.
+                </div>
+              )}
+
               <div className='space-y-3 max-h-80 overflow-y-auto pr-1'>
-                {entitlementSummaries.map(summary => (
+                {catalogueBuildMetrics.deploymentRows.map(summary => (
                   <div
                     key={summary.vendorId}
                     className='border border-stone-200 bg-white p-3'
@@ -5526,7 +6954,7 @@ export const SectorCatalogueGenerator: React.FC = () => {
                         className={`text-[8px] font-black uppercase px-2 py-1 border ${
                           summary.excludedProducts > 0
                             ? 'border-orange-300 bg-orange-50 text-orange-800'
-                            : summary.creditUsed > 0 || summary.overrideUsed
+                            : summary.creditUsed > 0
                             ? 'border-amber-300 bg-amber-50 text-amber-800'
                             : 'border-emerald-200 bg-emerald-50 text-emerald-700'
                         }`}
@@ -5535,14 +6963,17 @@ export const SectorCatalogueGenerator: React.FC = () => {
                           ? 'Auto-dropped'
                           : summary.creditUsed > 0
                           ? 'Credit used'
-                          : summary.overrideUsed
-                          ? 'Override'
                           : 'Clear'}
                       </span>
                     </div>
                     <div className='grid grid-cols-2 gap-2 mt-3 text-[9px] font-bold uppercase text-stone-500'>
                       <span>Selected: {summary.selectedProducts}</span>
-                      <span>Allowed: {summary.allowedProducts}</span>
+                      <span>
+                        Allowed:{' '}
+                        {summary.allowedProducts === Infinity
+                          ? '∞'
+                          : summary.allowedProducts}
+                      </span>
                       <span>Included: {summary.includedProducts}</span>
                       <span>Excluded: {summary.excludedProducts}</span>
                       <span>Overage Due: {summary.overageDue.toFixed(2)}</span>
@@ -5551,21 +6982,14 @@ export const SectorCatalogueGenerator: React.FC = () => {
                         Remaining Credit: {summary.remainingCredit.toFixed(2)}
                       </span>
                     </div>
-                    {summary.excludedProducts > 0 && (
+                    {summary.blockReason && (
                       <p className='mt-3 text-[9px] font-bold leading-relaxed text-orange-900'>
-                        {summary.vendorName}: {summary.excludedProducts}{' '}
-                        products excluded because {summary.planName} allows{' '}
-                        {summary.allowedProducts} and no credit was available.
-                      </p>
-                    )}
-                    {summary.overageQuantity > 0 && (
-                      <p className='mt-2 text-[8px] font-bold uppercase text-stone-400'>
-                        {summary.upgradeRecommendation}
+                        {summary.blockReason}
                       </p>
                     )}
                   </div>
                 ))}
-                {entitlementSummaries.length === 0 && (
+                {catalogueBuildMetrics.deploymentRows.length === 0 && (
                   <p className='text-[10px] font-bold uppercase text-stone-400'>
                     Select vendors to calculate entitlement.
                   </p>
@@ -5614,22 +7038,34 @@ export const SectorCatalogueGenerator: React.FC = () => {
                 </li>
                 <li className='flex justify-between'>
                   <span className='font-bold uppercase text-[10px] text-stone-400'>
+                    Selected images:
+                  </span>
+                  <span>{catalogueBuildMetrics.selectedImageCount}</span>
+                </li>
+                <li className='flex justify-between'>
+                  <span className='font-bold uppercase text-[10px] text-stone-400'>
+                    Included images:
+                  </span>
+                  <span>{catalogueBuildMetrics.includedImageCount}</span>
+                </li>
+                <li className='flex justify-between'>
+                  <span className='font-bold uppercase text-[10px] text-stone-400'>
+                    Oversized images:
+                  </span>
+                  <span>{catalogueBuildMetrics.oversizedImageCount}</span>
+                </li>
+                <li className='flex justify-between'>
+                  <span className='font-bold uppercase text-[10px] text-stone-400'>
+                    Images excluded:
+                  </span>
+                  <span>{catalogueBuildMetrics.imagesExcludedCount}</span>
+                </li>
+                <li className='flex justify-between'>
+                  <span className='font-bold uppercase text-[10px] text-stone-400'>
                     Estimated payload:
                   </span>
                   <span>
-                    {optimizationSummary
-                      ? (
-                          optimizationSummary.totalEstimatedPayloadBytes /
-                          1024 /
-                          1024
-                        ).toFixed(2)
-                      : (
-                          (allSelectedProducts.filter(p => p.imageUrl).length *
-                            8192) /
-                          1024 /
-                          1024
-                        ).toFixed(2)}{' '}
-                    MB
+                    {catalogueBuildMetrics.estimatedPayloadMb.toFixed(2)} MB
                   </span>
                 </li>
                 <li className='flex justify-between'>
@@ -5637,21 +7073,17 @@ export const SectorCatalogueGenerator: React.FC = () => {
                     Status:
                   </span>
                   <span className='font-bold'>
-                    {(() => {
-                      const payload = optimizationSummary
-                        ? optimizationSummary.totalEstimatedPayloadBytes
-                        : allSelectedProducts.filter(p => p.imageUrl).length *
-                          8192
-                      if (payload < 3 * 1024 * 1024)
-                        return <span className='text-emerald-600'>Good</span>
-                      if (payload <= 8 * 1024 * 1024)
-                        return (
-                          <span className='text-amber-600'>Acceptable</span>
-                        )
-                      if (payload <= 12 * 1024 * 1024)
-                        return <span className='text-orange-600'>Warning</span>
-                      return <span className='text-red-600'>Too Heavy</span>
-                    })()}
+                    <span
+                      className={
+                        catalogueBuildMetrics.imageStatus === 'GOOD'
+                          ? 'text-emerald-600'
+                          : catalogueBuildMetrics.imageStatus === 'TOO HEAVY'
+                          ? 'text-red-600'
+                          : 'text-amber-600'
+                      }
+                    >
+                      {catalogueBuildMetrics.imageStatus}
+                    </span>
                   </span>
                 </li>
               </ul>
@@ -5703,22 +7135,35 @@ export const SectorCatalogueGenerator: React.FC = () => {
                 <p className='text-[9px] font-bold uppercase tracking-[0.2em] mb-1 opacity-60'>
                   Estimated File Size
                 </p>
-                <p className='text-3xl font-bold tracking-tighter'>
-                  {estimatedSize > 1024 * 1024
-                    ? `${(estimatedSize / 1024 / 1024).toFixed(2)} MB`
-                    : `${(estimatedSize / 1024).toFixed(0)} KB`}
-                </p>
+                {catalogueBuildMetrics.includedProductCount === 0 ? (
+                  <p className='text-sm font-black uppercase tracking-tight text-amber-200'>
+                    No exportable products selected.
+                  </p>
+                ) : (
+                  <p className='text-3xl font-bold tracking-tighter'>
+                    {catalogueBuildMetrics.estimatedFileSizeKb > 1024
+                      ? `${(
+                          catalogueBuildMetrics.estimatedFileSizeKb / 1024
+                        ).toFixed(2)} MB`
+                      : `${catalogueBuildMetrics.estimatedFileSizeKb.toFixed(
+                          0
+                        )} KB`}
+                  </p>
+                )}
                 <div className='w-full h-1 bg-white/20 mt-4 overflow-hidden'>
                   <div
                     className={`h-full transition-all duration-500 ${
-                      estimatedSize > MAX_CATALOGUE_SIZE_BYTES
+                      catalogueBuildMetrics.estimatedPayloadBytes >
+                      MAX_CATALOGUE_SIZE_BYTES
                         ? 'bg-red-500'
                         : 'bg-emerald-500'
                     }`}
                     style={{
                       width: `${Math.min(
                         100,
-                        (estimatedSize / MAX_CATALOGUE_SIZE_BYTES) * 100
+                        (catalogueBuildMetrics.estimatedPayloadBytes /
+                          MAX_CATALOGUE_SIZE_BYTES) *
+                          100
                       )}%`
                     }}
                   />
@@ -5728,7 +7173,7 @@ export const SectorCatalogueGenerator: React.FC = () => {
               <div className='grid grid-cols-2 gap-4'>
                 <div className='text-center p-3 border border-stone-100'>
                   <div className='text-xs font-bold'>
-                    {allSelectedProducts.length}
+                    {catalogueBuildMetrics.includedProductCount}
                   </div>
                   <div className='text-[8px] font-extrabold uppercase text-stone-400'>
                     Products
@@ -5736,7 +7181,7 @@ export const SectorCatalogueGenerator: React.FC = () => {
                 </div>
                 <div className='text-center p-3 border border-stone-100'>
                   <div className='text-xs font-bold'>
-                    {allSelectedProducts.filter(p => !!p.imageUrl).length}
+                    {catalogueBuildMetrics.includedImageCount}
                   </div>
                   <div className='text-[8px] font-extrabold uppercase text-stone-400'>
                     Images

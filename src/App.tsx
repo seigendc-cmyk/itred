@@ -22,6 +22,7 @@ import { WhatsAppPerformanceReports } from "./pages/WhatsAppPerformanceReports.t
 import { PricingPlans } from "./pages/PricingPlans.tsx";
 import { SubscriptionManagement } from "./pages/SubscriptionManagement.tsx";
 import { SectorCatalogueGenerator } from "./pages/SectorCatalogueGenerator.tsx";
+import { CatalogueBuilderV2 } from "./features/catalogueBuilderV2/CatalogueBuilderV2.tsx";
 import { VendorStorefrontBuilder } from "./pages/VendorStorefrontBuilder.tsx";
 import { Analytics } from "./pages/Analytics.tsx";
 import { BIMarket } from "./pages/BIMarket.tsx";
@@ -138,6 +139,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     [AppRoute.PRICING]: "Pricing",
     [AppRoute.SUBSCRIPTIONS]: "Subscriptions & Collections",
     [AppRoute.CATALOGUE_GEN]: "Create Catalogue",
+    [AppRoute.CATALOGUE_BUILDER_V2]: "Catalogue Builder",
     [AppRoute.VENDOR_STOREFRONT]: "Create Storefront",
     [AppRoute.ANALYTICS]: "Performance Metrics",
     [AppRoute.BI_MARKET]: "BI Market Analytics",
@@ -182,6 +184,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       pricing: "pricing",
       subscriptions: "subscriptionsCollections",
       "catalogue-generator": "createCatalogue",
+      "catalogue-builder-v2": "createCatalogue",
       "vendor-storefront-builder": "createStorefront",
       analytics: "analytics",
       "bi-market": "biMarketAnalytics",
@@ -353,6 +356,16 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           element={
             checkAccess("catalogue-generator") ? (
               <SectorCatalogueGenerator />
+            ) : (
+              <RestrictedAccess />
+            )
+          }
+        />
+        <Route
+          path="/catalogue-builder-v2"
+          element={
+            checkAccess("catalogue-builder-v2") ? (
+              <CatalogueBuilderV2 />
             ) : (
               <RestrictedAccess />
             )

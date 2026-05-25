@@ -173,6 +173,12 @@ const productSearchBlob = (product: MasterProduct) =>
     .filter(Boolean)
     .join(" ");
 
+const MASTER_SEARCH_RESULT_LIMIT = 30;
+const MASTER_SEARCH_CACHE_LIMIT = 25;
+const SELECTED_DRAFT_RENDER_LIMIT = 120;
+const isDevDiagnostics = () =>
+  typeof import.meta !== "undefined" && Boolean(import.meta.env?.DEV);
+
 export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = ({
   open,
   onClose,
@@ -186,6 +192,7 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
   onSaved,
 }) => {
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [selectedSourceVendorFilter, setSelectedSourceVendorFilter] =
     useState("all");
   const [creationMode, setCreationMode] = useState<
@@ -204,6 +211,9 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
   const [isSaving, setIsSaving] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const masterSearchCacheRef = useRef<
+    Map<string, { products: MasterProduct[]; elapsedMs: number }>
+  >(new Map());
   const [alertConfig, setAlertConfig] = useState<{
     isOpen: boolean;
     message: string;
@@ -219,6 +229,13 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
     () => new Map(masterProducts.map((product) => [product.id, product])),
     [masterProducts],
   );
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(search);
+    }, 220);
+    return () => window.clearTimeout(timer);
+  }, [search]);
 
   const vendorById = useMemo(
     () => new Map(vendors.map((vendor) => [vendor.id, vendor])),
@@ -276,6 +293,7 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
   }, [existingVendorProductLinks]);
 
   const linkedByProductId = useMemo(() => {
+    if (isDevDiagnostics()) console.time("vendor-offer duplicate map");
     const map = new Map<string, VendorProductOffer[]>();
     existingVendorProductLinks.forEach((link) => {
       if (link.productMode === "branded_product") return;
@@ -284,8 +302,32 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
       rows.push(link);
       map.set(productId, rows);
     });
+    if (isDevDiagnostics()) console.timeEnd("vendor-offer duplicate map");
     return map;
   }, [existingVendorProductLinks]);
+
+  const existingLinkedProductKeys = useMemo(() => {
+    if (isDevDiagnostics()) console.time("vendor-offer duplicate set");
+    const set = new Set<string>();
+    existingOffers.forEach((offer) => {
+      if (offer.productMode === "branded_product") return;
+      const productId = String(offer.masterProductId || offer.productId || "");
+      if (offer.vendorId && productId) set.add(`${offer.vendorId}::${productId}`);
+    });
+    if (isDevDiagnostics()) console.timeEnd("vendor-offer duplicate set");
+    return set;
+  }, [existingOffers]);
+
+  const existingLinkedKeyByOfferId = useMemo(() => {
+    const map = new Map<string, string>();
+    existingOffers.forEach((offer) => {
+      const productId = String(offer.masterProductId || offer.productId || "");
+      if (offer.id && offer.vendorId && productId) {
+        map.set(offer.id, `${offer.vendorId}::${productId}`);
+      }
+    });
+    return map;
+  }, [existingOffers]);
 
   const sourceVendorOptions = useMemo(() => {
     const map = new Map<
@@ -311,9 +353,20 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
   }, [masterProducts]);
 
   const searchResults = useMemo(() => {
-    return masterProducts
+    const normalizedQuery = normalizeSearch(debouncedSearch);
+    if (normalizedQuery.length < 2 && selectedSourceVendorFilter === "all") {
+      return [];
+    }
+
+    const cacheKey = `${normalizedQuery}::${selectedSourceVendorFilter}`;
+    const cached = masterSearchCacheRef.current.get(cacheKey);
+    if (cached) return cached.products;
+
+    if (isDevDiagnostics()) console.time("master product search");
+    const startedAt = performance.now();
+    const products = masterProducts
       .filter((product) => {
-        const matchesSearch = matchesAllTokens(search, productSearchBlob(product));
+        const matchesSearch = matchesAllTokens(debouncedSearch, productSearchBlob(product));
         const productSourceKey =
           getProductSourceVendorKey(product) || "no-source";
         const matchesSourceVendor =
@@ -322,8 +375,24 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
 
         return matchesSearch && matchesSourceVendor;
       })
-      .slice(0, 40);
-  }, [masterProducts, search, selectedSourceVendorFilter]);
+      .slice(0, MASTER_SEARCH_RESULT_LIMIT);
+    const elapsedMs = Math.round(performance.now() - startedAt);
+    masterSearchCacheRef.current.set(cacheKey, { products, elapsedMs });
+    while (masterSearchCacheRef.current.size > MASTER_SEARCH_CACHE_LIMIT) {
+      const oldestKey = masterSearchCacheRef.current.keys().next().value;
+      if (!oldestKey) break;
+      masterSearchCacheRef.current.delete(oldestKey);
+    }
+    if (isDevDiagnostics()) {
+      console.timeEnd("master product search");
+      console.info("Vendor product sheet master search", {
+        query: normalizedQuery,
+        resultCount: products.length,
+        elapsedMs,
+      });
+    }
+    return products;
+  }, [debouncedSearch, masterProducts, selectedSourceVendorFilter]);
 
   const vendorBranches = (rowVendorId: string) =>
     vendorById.get(rowVendorId)?.branches || [];
@@ -348,7 +417,7 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
             .filter(Boolean)
             .join(" "),
         ),
-      ),
+      ).slice(0, SELECTED_DRAFT_RENDER_LIMIT),
     [selectedOfferDrafts, selectedSheetSearch, vendorById],
   );
 
@@ -464,9 +533,11 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
         }
       }
 
-      for (const updatedOffer of pendingUpdates) {
-        await productService.saveVendorProductOffer(updatedOffer);
-        updatedOffers.push(updatedOffer);
+      if (pendingUpdates.length > 0) {
+        if (isDevDiagnostics()) console.time("vendor offer import batch write");
+        await productService.saveVendorProductOffersBatch(pendingUpdates);
+        if (isDevDiagnostics()) console.timeEnd("vendor offer import batch write");
+        updatedOffers.push(...pendingUpdates);
       }
 
       if (updatedOffers.length > 0) onSaved(updatedOffers);
@@ -849,13 +920,11 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
         error = "Image limit exceeded for current plan.";
       else {
         const key = `${row.vendorId}::${row.productId}`;
-        const matchedExisting = existingOffers.find(
-          (offer) =>
-            `${offer.vendorId}::${offer.masterProductId || offer.productId}` === key,
-        );
+        const matchedExisting = existingLinkedProductKeys.has(key);
         const currentLinkId = row.existingLinkId || row.offerId;
         const isExistingDuplicate =
-          !!matchedExisting && matchedExisting.id !== currentLinkId;
+          matchedExisting &&
+          existingLinkedKeyByOfferId.get(String(currentLinkId || "")) !== key;
         const isSheetDuplicate = seen.has(key);
         if (
           row.productMode !== "branded_product" &&
@@ -973,7 +1042,6 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
           images: offer.images || [],
         }) as VendorProductOffer;
 
-        await productService.saveVendorProductOffer(safeOffer);
         savedOffers.push(safeOffer);
 
         try {
@@ -997,6 +1065,12 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
         } catch (auditError) {
           console.error("Vendor product offer audit logging failed", auditError);
         }
+      }
+
+      if (savedOffers.length > 0) {
+        if (isDevDiagnostics()) console.time("vendor offer sheet batch write");
+        await productService.saveVendorProductOffersBatch(savedOffers);
+        if (isDevDiagnostics()) console.timeEnd("vendor offer sheet batch write");
       }
 
       onSaved(savedOffers);
@@ -1160,7 +1234,7 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                   className="w-full border-2 border-stone-200 bg-white py-3 pl-10 pr-3 text-xs font-bold uppercase outline-none focus:border-brand-orange"
-                  placeholder="Search products by name, brand, barcode, SKU, category or keywords..."
+                  placeholder="Type at least 2 characters to search product name, SKU, category or sector..."
                 />
               </div>
               <select
@@ -1189,6 +1263,15 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
               )}
             </div>
 
+            {debouncedSearch.trim().length < 2 && selectedSourceVendorFilter === "all" ? (
+              <div className="mt-4 border border-dashed border-stone-200 bg-stone-50 p-6 text-center text-[10px] font-bold uppercase text-stone-400">
+                Search first to load matching master products. Results are limited for speed.
+              </div>
+            ) : searchResults.length === 0 ? (
+              <div className="mt-4 border border-dashed border-stone-200 bg-stone-50 p-6 text-center text-[10px] font-bold uppercase text-stone-400">
+                No master products match this search.
+              </div>
+            ) : (
             <div className="mt-4 grid grid-cols-1 gap-2 sm:[grid-template-columns:repeat(auto-fit,minmax(280px,1fr))]">
               {searchResults.map((product) => {
                 const draft = selectedOfferDraftsByProductId[product.id];
@@ -1304,6 +1387,7 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
                 );
               })}
             </div>
+            )}
 
             <div className="mt-4 flex flex-col gap-2 sm:flex-row">
               <PrimaryButton
@@ -1385,6 +1469,11 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
           </section>
 
           <section className="hidden overflow-x-auto border border-stone-200 lg:block">
+            {selectedOfferDrafts.length > visibleSelectedOfferDrafts.length && (
+              <div className="border-b border-amber-200 bg-amber-50 p-3 text-[10px] font-bold uppercase text-amber-700">
+                Showing first {visibleSelectedOfferDrafts.length} selected rows. Use sheet search to narrow large selections before editing.
+              </div>
+            )}
             <table className="min-w-[1280px] w-full border-collapse text-left">
               <thead className="bg-stone-50 text-[9px] font-black uppercase text-stone-400">
                 <tr>
@@ -1716,6 +1805,11 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
           </section>
 
           <section className="space-y-3 lg:hidden">
+            {selectedOfferDrafts.length > visibleSelectedOfferDrafts.length && (
+              <div className="border border-amber-200 bg-amber-50 p-3 text-[10px] font-bold uppercase text-amber-700">
+                Showing first {visibleSelectedOfferDrafts.length} selected rows. Use sheet search to narrow large selections before editing.
+              </div>
+            )}
             {visibleSelectedOfferDrafts.map((row) => {
               const product = productById.get(row.productId);
               const branches = vendorBranches(row.vendorId);

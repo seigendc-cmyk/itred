@@ -24,6 +24,12 @@ export interface OptimizedImageResult {
   status: "target" | "quality-fallback" | "warning" | "blocked" | "failed";
   originalUrl?: string;
   error?: string;
+  originalFormat?: string;
+  optimizedFormat?: string;
+  originalBytes?: number;
+  wasConvertedToWebP?: boolean;
+  optimizationStatus?: string;
+  reductionPercent?: number;
 }
 
 export interface CatalogueImageOptimizationSummary {
@@ -47,7 +53,9 @@ export interface CatalogueImageOptimizationResult {
   images: Record<string, OptimizedImageResult>;
 }
 
-const DEFAULT_OPTIONS: Required<Omit<CatalogueImageOptimizationOptions, "groupKeyBuilder">> = {
+const DEFAULT_OPTIONS: Required<
+  Omit<CatalogueImageOptimizationOptions, "groupKeyBuilder">
+> = {
   targetBytes: 8192,
   warningBytes: 12288,
   maxBytes: 20480,
@@ -71,7 +79,9 @@ const getProductImage = (product: Product): string => {
     item.primaryImageUrl ||
     item.image ||
     (Array.isArray(item.imageUrls) ? item.imageUrls[0] : "") ||
-    (typeof item.images?.[0] === "string" ? item.images[0] : firstImageObject?.url || firstImageObject?.imageUrl || "") ||
+    (typeof item.images?.[0] === "string"
+      ? item.images[0]
+      : firstImageObject?.url || firstImageObject?.imageUrl || "") ||
     (Array.isArray(item.additionalImages) ? item.additionalImages[0] : "") ||
     ""
   );
@@ -89,10 +99,17 @@ const getProductGalleryImages = (product: Product, limit = 6) => {
   const seen = new Set<string>();
   return raw
     .map((image: any, index) => {
-      const url = String(typeof image === "string" ? image : image?.url || image?.imageUrl || "").trim();
+      const url = String(
+        typeof image === "string" ? image : image?.url || image?.imageUrl || "",
+      ).trim();
       if (!url || seen.has(url)) return null;
       seen.add(url);
-      return { url, alt: image?.alt ?? item.name ?? item.productName ?? null, sortOrder: index, isPrimary: index === 0 };
+      return {
+        url,
+        alt: image?.alt ?? item.name ?? item.productName ?? null,
+        sortOrder: index,
+        isPrimary: index === 0,
+      };
     })
     .filter(Boolean)
     .slice(0, limit);
@@ -108,14 +125,19 @@ const normalizeKeyPart = (value: unknown, preserveCodes = false): string =>
 const fallbackGroupKey = (product: Product): string => {
   const item = product as any;
   const sku = normalizeKeyPart(
-    item.sku || item.productCode || item.barcode || item.standardSku || item.vendorSku,
+    item.sku ||
+      item.productCode ||
+      item.barcode ||
+      item.standardSku ||
+      item.vendorSku,
     true,
   );
   if (sku && sku.length >= 4) return `sku:${sku}`;
   const name = normalizeKeyPart(item.name || item.productName);
   const category = normalizeKeyPart(item.category);
   const sector = normalizeKeyPart(item.sector);
-  if (name && (category || sector)) return ["name", name, category, sector].filter(Boolean).join(":");
+  if (name && (category || sector))
+    return ["name", name, category, sector].filter(Boolean).join(":");
   return `id:${item.id || Math.random().toString(36).slice(2)}`;
 };
 
@@ -138,12 +160,14 @@ const canvasToBlob = (
         if (blob) resolve(blob);
         else reject(new Error("Canvas export failed"));
       },
-      type,
+      "image/webp",
       quality,
     );
   });
 
-const loadImageFromSource = async (fileOrUrl: File | Blob | string): Promise<HTMLImageElement> => {
+const loadImageFromSource = async (
+  fileOrUrl: File | Blob | string,
+): Promise<HTMLImageElement> => {
   const image = new Image();
   image.decoding = "async";
 
@@ -197,7 +221,10 @@ const drawContainThumbnail = (
 };
 
 export const estimateBase64Size = (base64: string): number => {
-  const clean = String(base64 || "").split(",").pop() || "";
+  const clean =
+    String(base64 || "")
+      .split(",")
+      .pop() || "";
   const padding = clean.endsWith("==") ? 2 : clean.endsWith("=") ? 1 : 0;
   return Math.max(0, Math.floor((clean.length * 3) / 4) - padding);
 };
@@ -222,33 +249,61 @@ export const optimizeImageToWebP = async (
     const width = Math.min(size, opts.maxWidth);
     const height = Math.min(size, opts.maxHeight);
     const canvas = drawContainThumbnail(image, width, height, opts.background);
-    const qualitySteps = [opts.maxQuality, 0.72, 0.62, 0.52, 0.44, opts.minQuality]
-      .filter((quality, index, values) => quality >= opts.minQuality && values.indexOf(quality) === index)
+    const qualitySteps = [
+      opts.maxQuality,
+      0.72,
+      0.62,
+      0.52,
+      0.44,
+      opts.minQuality,
+    ]
+      .filter(
+        (quality, index, values) =>
+          quality >= opts.minQuality && values.indexOf(quality) === index,
+      )
       .sort((a, b) => b - a);
 
     for (const quality of qualitySteps) {
       const blob = await canvasToBlob(canvas, opts.outputType, quality);
       const dataUrl = await blobToDataUrl(blob);
+      const resultBytes = blob.size || estimateBase64Size(dataUrl);
       const result: OptimizedImageResult = {
         base64: dataUrl.split(",")[1] || "",
         dataUrl,
         blob,
-        bytes: blob.size || estimateBase64Size(dataUrl),
+        bytes: resultBytes,
         width,
         height,
         quality,
         status: "target",
         originalUrl: typeof fileOrUrl === "string" ? fileOrUrl : undefined,
+        originalFormat,
+        optimizedFormat: "webp",
+        originalBytes,
+        wasConvertedToWebP: true,
+        optimizationStatus: "target",
+        reductionPercent: originalBytes
+          ? Math.max(
+              0,
+              Math.round(((originalBytes - resultBytes) / originalBytes) * 100),
+            )
+          : 0,
       };
 
-      if (!best || result.bytes < best.bytes || (best.bytes > opts.targetBytes && result.quality > best.quality)) {
+      if (
+        !best ||
+        result.bytes < best.bytes ||
+        (best.bytes > opts.targetBytes && result.quality > best.quality)
+      ) {
         best = result;
       }
 
       if (result.bytes <= opts.targetBytes) {
-        return result;
+        best = result;
+        break;
       }
     }
+    if (best && best.bytes <= opts.targetBytes) break;
   }
 
   if (!best) throw new Error("Image optimization failed");
@@ -259,6 +314,7 @@ export const optimizeImageToWebP = async (
       : best.bytes <= opts.maxBytes
         ? "warning"
         : "blocked";
+  best.optimizationStatus = best.status;
 
   return best;
 };
@@ -277,12 +333,16 @@ export const optimizeCatalogueImages = async (
   });
 
   const optimizedByGroup: Record<string, OptimizedImageResult> = {};
-  const productImagesFound = products.filter((product) => !!getProductImage(product)).length;
+  const productImagesFound = products.filter(
+    (product) => !!getProductImage(product),
+  ).length;
   let imagesOptimized = 0;
   let failedCount = 0;
 
   for (const [groupKey, groupProducts] of groups.entries()) {
-    const representative = groupProducts.find((product) => !!getProductImage(product));
+    const representative = groupProducts.find(
+      (product) => !!getProductImage(product),
+    );
     const imageUrl = representative ? getProductImage(representative) : "";
     if (!imageUrl) continue;
 
@@ -302,7 +362,14 @@ export const optimizeCatalogueImages = async (
         quality: 0,
         status: "failed",
         originalUrl: imageUrl,
-        error: error instanceof Error ? error.message : "Image optimization failed",
+        error:
+          error instanceof Error ? error.message : "Image optimization failed",
+        originalFormat: "unknown",
+        optimizedFormat: "failed",
+        originalBytes: 0,
+        wasConvertedToWebP: false,
+        optimizationStatus: "failed",
+        reductionPercent: 0,
       };
     }
   }
@@ -310,8 +377,13 @@ export const optimizeCatalogueImages = async (
   const productsForExport = products.map((product, index) => {
     const groupKey = groupKeyBuilder(product);
     const groupProducts = groups.get(groupKey) || [];
-    const representativeIndex = groupProducts.findIndex((item) => !!getProductImage(item));
-    const representative = representativeIndex >= 0 ? groupProducts[representativeIndex] : groupProducts[0];
+    const representativeIndex = groupProducts.findIndex(
+      (item) => !!getProductImage(item),
+    );
+    const representative =
+      representativeIndex >= 0
+        ? groupProducts[representativeIndex]
+        : groupProducts[0];
     const isRepresentative = representative === product;
     const optimized = optimizedByGroup[groupKey];
     const originalImageUrl = getProductImage(product);
@@ -319,7 +391,8 @@ export const optimizeCatalogueImages = async (
       ...product,
       originalImageUrl,
       catalogueImageGroupKey: groupKey,
-      imageOptimizationStatus: optimized?.status || (originalImageUrl ? "failed" : "missing"),
+      imageOptimizationStatus:
+        optimized?.status || (originalImageUrl ? "failed" : "missing"),
       imageOptimizationBytes: optimized?.bytes || 0,
     };
 
@@ -329,7 +402,11 @@ export const optimizeCatalogueImages = async (
     delete item.galleryImages;
     const galleryImages = getProductGalleryImages(product, 6);
 
-    if (isRepresentative && optimized?.dataUrl && optimized.status !== "failed") {
+    if (
+      isRepresentative &&
+      optimized?.dataUrl &&
+      optimized.status !== "failed"
+    ) {
       item.imageUrl = optimized.dataUrl;
     } else {
       item.imageUrl = "";
@@ -337,7 +414,14 @@ export const optimizeCatalogueImages = async (
 
     item.images = [
       ...(item.imageUrl
-        ? [{ url: item.imageUrl, alt: item.name || item.productName || null, sortOrder: 0, isPrimary: true }]
+        ? [
+            {
+              url: item.imageUrl,
+              alt: item.name || item.productName || null,
+              sortOrder: 0,
+              isPrimary: true,
+            },
+          ]
         : []),
       ...galleryImages
         .filter((image: any) => image.url !== originalImageUrl)
@@ -354,8 +438,26 @@ export const optimizeCatalogueImages = async (
     return item as Product;
   });
 
-  const optimizedImages = Object.values(optimizedByGroup).filter((item) => item.status !== "failed");
-  const totalEstimatedPayloadBytes = optimizedImages.reduce((total, item) => total + item.bytes, 0);
+  const diagnosticsArray = Object.values(optimizedByGroup).map((r) => ({
+    originalFormat: r.originalFormat || "unknown",
+    optimizedFormat: r.optimizedFormat || "failed",
+    originalBytes: r.originalBytes || 0,
+    optimizedBytes: r.bytes,
+    reductionPercent: r.reductionPercent || 0,
+    wasConvertedToWebP: r.wasConvertedToWebP || false,
+    optimizationStatus: r.optimizationStatus || r.status,
+  }));
+  if (diagnosticsArray.length > 0) {
+    console.table(diagnosticsArray);
+  }
+
+  const optimizedImages = Object.values(optimizedByGroup).filter(
+    (item) => item.status !== "failed",
+  );
+  const totalEstimatedPayloadBytes = optimizedImages.reduce(
+    (total, item) => total + item.bytes,
+    0,
+  );
   const averageOptimizedBytes = optimizedImages.length
     ? Math.round(totalEstimatedPayloadBytes / optimizedImages.length)
     : 0;
@@ -370,14 +472,27 @@ export const optimizeCatalogueImages = async (
       imagesOptimized,
       averageOptimizedBytes,
       totalEstimatedPayloadBytes,
-      aboveTargetCount: optimizedImages.filter((item) => item.bytes > opts.targetBytes).length,
-      aboveWarningCount: optimizedImages.filter((item) => item.bytes > opts.warningBytes).length,
-      aboveMaxCount: optimizedImages.filter((item) => item.bytes > opts.maxBytes).length,
+      aboveTargetCount: optimizedImages.filter(
+        (item) => item.bytes > opts.targetBytes,
+      ).length,
+      aboveWarningCount: optimizedImages.filter(
+        (item) => item.bytes > opts.warningBytes,
+      ).length,
+      aboveMaxCount: optimizedImages.filter(
+        (item) => item.bytes > opts.maxBytes,
+      ).length,
       failedCount,
       groupedRows: products.length,
       uniqueThumbnails,
       imageReductionPercent:
-        products.length > 0 ? Math.max(0, Math.round(((products.length - uniqueThumbnails) / products.length) * 100)) : 0,
+        products.length > 0
+          ? Math.max(
+              0,
+              Math.round(
+                ((products.length - uniqueThumbnails) / products.length) * 100,
+              ),
+            )
+          : 0,
     },
   };
 };

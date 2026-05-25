@@ -417,6 +417,7 @@ export const VendorManagement: React.FC = () => {
 
   const [isSaving, setIsSaving] = useState(false)
   const [isProductSheetOpen, setIsProductSheetOpen] = useState(false)
+  const [isLoadingMasterProducts, setIsLoadingMasterProducts] = useState(false)
   const [formError, setFormError] = useState('')
   const [formSuccess, setFormSuccess] = useState('')
   const [showDraftPrompt, setShowDraftPrompt] = useState(false)
@@ -553,9 +554,6 @@ export const VendorManagement: React.FC = () => {
     const pl = asArray<PricingPlan>(
       await Promise.resolve(pricingPlanService.getPlans())
     )
-    const mp = asArray<MasterProduct>(
-      await Promise.resolve(productService.getMasterProducts())
-    )
     const vo = asArray<VendorProductOffer>(
       await Promise.resolve(productService.getVendorProductOffers())
     )
@@ -568,7 +566,6 @@ export const VendorManagement: React.FC = () => {
     setVendors(v)
     setRpns(r)
     setPlans(pl)
-    setMasterProducts(mp)
     setVendorProductOffers(vo)
     setStaffList(st)
     setCampaigns(cm)
@@ -694,6 +691,31 @@ export const VendorManagement: React.FC = () => {
     setProductCounts(pCounts)
   }
 
+  const ensureMasterProductsLoaded = async () => {
+    if (masterProducts.length > 0 || isLoadingMasterProducts) return
+    setIsLoadingMasterProducts(true)
+    const startedAt = performance.now()
+    try {
+      const products = asArray<MasterProduct>(
+        await Promise.resolve(productService.getMasterProducts())
+      )
+      setMasterProducts(products)
+      if (import.meta.env.DEV) {
+        console.info('Vendor product sheet master products loaded', {
+          count: products.length,
+          elapsedMs: Math.round(performance.now() - startedAt)
+        })
+      }
+    } finally {
+      setIsLoadingMasterProducts(false)
+    }
+  }
+
+  const openProductSheet = async () => {
+    await ensureMasterProductsLoaded()
+    setIsProductSheetOpen(true)
+  }
+
   const handleVendorProductSheetSaved = async (
     savedOffers: VendorProductOffer[]
   ) => {
@@ -707,7 +729,8 @@ export const VendorManagement: React.FC = () => {
     await refreshVendorProductOffers()
   }
 
-  const handleExportActiveVendorInventory = () => {
+  const handleExportActiveVendorInventory = async () => {
+    await ensureMasterProductsLoaded()
     if (!activeVendorId) {
       showBrandedAlert({
         message: 'Save or select a vendor before exporting inventory.',
@@ -1653,6 +1676,29 @@ export const VendorManagement: React.FC = () => {
     })
   }
 
+  const enableVerifiedVendorBadge = () => {
+    const now = new Date().toISOString()
+    setFormData(prev => ({
+      ...prev,
+      inventorySpotCheckVerified: true,
+      inventorySpotCheckVerifiedAt: prev.inventorySpotCheckVerifiedAt || now,
+      showVerifiedVendorBadge: true,
+      verifiedBadgeDisabledAt: '',
+      verifiedBadgeDisabledBy: ''
+    }))
+  }
+
+  const disableVerifiedVendorBadge = () => {
+    const session = requireActiveSession()
+    if (!session) return
+    setFormData(prev => ({
+      ...prev,
+      showVerifiedVendorBadge: false,
+      verifiedBadgeDisabledAt: new Date().toISOString(),
+      verifiedBadgeDisabledBy: getSessionStaffId(session)
+    }))
+  }
+
   const handleGenerateVendorBill = () => {
     if (!selectedVendor) {
       showBrandedAlert({
@@ -1783,11 +1829,13 @@ export const VendorManagement: React.FC = () => {
               </div>
               <div className='grid grid-cols-1 gap-2 sm:grid-cols-2 lg:min-w-[420px]'>
                 <PrimaryButton
-                  onClick={() => setIsProductSheetOpen(true)}
-                  disabled={!activeVendorId}
+                  onClick={openProductSheet}
+                  disabled={!activeVendorId || isLoadingMasterProducts}
                 >
-                  <Package size={14} className='mr-2 inline' /> Open Product &
-                  Inventory Sheet
+                  <Package size={14} className='mr-2 inline' />{' '}
+                  {isLoadingMasterProducts
+                    ? 'Loading Product Library...'
+                    : 'Open Product & Inventory Sheet'}
                 </PrimaryButton>
                 <SecondaryButton
                   onClick={handleExportActiveVendorInventory}
@@ -1803,8 +1851,8 @@ export const VendorManagement: React.FC = () => {
                   Inventory Template
                 </SecondaryButton>
                 <SecondaryButton
-                  onClick={() => setIsProductSheetOpen(true)}
-                  disabled={!activeVendorId}
+                  onClick={openProductSheet}
+                  disabled={!activeVendorId || isLoadingMasterProducts}
                 >
                   <Upload size={14} className='mr-2 inline' /> Import Vendor
                   Inventory Excel/CSV
@@ -1985,6 +2033,48 @@ export const VendorManagement: React.FC = () => {
                 <CheckCircle2 size={16} /> {formSuccess}
               </div>
             )}
+
+            <DataPanel title='Verified Vendor Badge'>
+              <div className='p-6 space-y-4'>
+                <div className='grid grid-cols-1 gap-3 text-[10px] font-bold uppercase text-stone-500 sm:grid-cols-2'>
+                  <div className='border border-stone-200 bg-stone-50 p-3'>
+                    <p className='text-stone-400'>Inventory spot check</p>
+                    <p className='mt-1 text-brand-charcoal'>
+                      {formData.inventorySpotCheckVerified ? 'Verified' : 'Not verified'}
+                    </p>
+                    <p className='mt-1 font-mono text-[9px] text-stone-400'>
+                      {formData.inventorySpotCheckVerifiedAt || 'No verification date'}
+                    </p>
+                  </div>
+                  <div className='border border-stone-200 bg-stone-50 p-3'>
+                    <p className='text-stone-400'>Catalogue badge</p>
+                    <p className='mt-1 text-brand-charcoal'>
+                      {formData.showVerifiedVendorBadge !== false &&
+                      formData.inventorySpotCheckVerified
+                        ? 'Visible'
+                        : 'Hidden'}
+                    </p>
+                    {formData.verifiedBadgeDisabledAt && (
+                      <p className='mt-1 font-mono text-[9px] text-stone-400'>
+                        Disabled {formData.verifiedBadgeDisabledAt} by{' '}
+                        {formData.verifiedBadgeDisabledBy || 'unknown'}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <div className='flex flex-wrap gap-2'>
+                  <PrimaryButton type='button' size='sm' onClick={enableVerifiedVendorBadge}>
+                    Enable Verified Badge
+                  </PrimaryButton>
+                  <SecondaryButton type='button' size='sm' onClick={disableVerifiedVendorBadge}>
+                    Disable Verified Badge
+                  </SecondaryButton>
+                </div>
+                <p className='text-[10px] font-bold uppercase text-stone-400'>
+                  Disabling hides the public badge only. Spot check verification history remains on the vendor record.
+                </p>
+              </div>
+            </DataPanel>
 
             {/* Duplicate Intelligence */}
             {duplicates.length > 0 && (

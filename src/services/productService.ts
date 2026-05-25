@@ -321,6 +321,51 @@ const loadVendors = async (): Promise<Vendor[]> => {
   return asArray<Vendor>(data);
 };
 
+const normalizeVendorProductOffer = (
+  offer: VendorProductOffer,
+): VendorProductOffer => {
+  const productMode = offer.productMode || "linked_product";
+  const linkedMasterProductId =
+    productMode === "branded_product"
+      ? null
+      : String(offer.masterProductId || offer.productId || "");
+  return sanitizeForFirestore({
+    ...offer,
+    productMode,
+    sourceType:
+      productMode === "branded_product"
+        ? "vendor_branded"
+        : "master_linked",
+    masterProductId:
+      productMode === "branded_product" ? null : linkedMasterProductId,
+    brandOwnerVendorId:
+      offer.brandOwnerVendorId ||
+      (productMode === "branded_product" ? offer.vendorId : undefined),
+    isVendorBranded: productMode === "branded_product",
+    openingQty: Number((offer as any).openingQty) || 0,
+    vendorReceipts: Number((offer as any).vendorReceipts) || 0,
+    vendorSales: Number((offer as any).vendorSales) || 0,
+    currentQty:
+      Number((offer as any).currentQty ?? offer.stockQuantity ?? 0) || 0,
+    stockQuantity:
+      Number((offer as any).currentQty ?? offer.stockQuantity ?? 0) || 0,
+    stockStatus:
+      offer.stockStatus ||
+      stockStatusFromQuantity(
+        Number((offer as any).currentQty ?? offer.stockQuantity ?? 0) || 0,
+      ),
+    active: offer.active !== false,
+    publishToCatalogue: offer.publishToCatalogue !== false,
+    deliveryAvailable: offer.deliveryAvailable !== false,
+    vendorProductImage:
+      normalizeListingImages(offer, 6)[0]?.url || offer.vendorProductImage || "",
+    images: normalizeListingImages(offer, 6),
+    featured: !!offer.featured,
+    createdAt: offer.createdAt || nowIso(),
+    updatedAt: nowIso(),
+  }) as VendorProductOffer;
+};
+
 export const productService = {
   async migrateLegacyProducts(): Promise<void> {
     const alreadyMigrated =
@@ -460,16 +505,15 @@ export const productService = {
 
   async saveVendorProductOffer(offer: VendorProductOffer): Promise<void> {
     const offers = await productService.getVendorProductOffers();
-    const productMode = offer.productMode || "linked_product";
-    const linkedMasterProductId =
-      productMode === "branded_product"
-        ? null
-        : String(offer.masterProductId || offer.productId || "");
-    if (productMode !== "branded_product" && linkedMasterProductId) {
+    const safeOffer = normalizeVendorProductOffer(offer);
+    const linkedMasterProductId = String(
+      safeOffer.masterProductId || safeOffer.productId || "",
+    );
+    if (safeOffer.productMode !== "branded_product" && linkedMasterProductId) {
       const duplicate = offers.find(
         (currentOffer) =>
-          currentOffer.id !== offer.id &&
-          currentOffer.vendorId === offer.vendorId &&
+          currentOffer.id !== safeOffer.id &&
+          currentOffer.vendorId === safeOffer.vendorId &&
           currentOffer.productMode !== "branded_product" &&
           String(currentOffer.masterProductId || currentOffer.productId || "") ===
             linkedMasterProductId,
@@ -478,45 +522,7 @@ export const productService = {
         throw new Error("This vendor is already linked to the selected master product.");
       }
     }
-    const normalizedOffer: VendorProductOffer = {
-      ...offer,
-      productMode,
-      sourceType:
-        productMode === "branded_product"
-          ? "vendor_branded"
-          : "master_linked",
-      masterProductId:
-        productMode === "branded_product"
-          ? null
-          : linkedMasterProductId,
-      brandOwnerVendorId:
-        offer.brandOwnerVendorId ||
-        (productMode === "branded_product" ? offer.vendorId : undefined),
-      isVendorBranded: productMode === "branded_product",
-      openingQty: Number((offer as any).openingQty) || 0,
-      vendorReceipts: Number((offer as any).vendorReceipts) || 0,
-      vendorSales: Number((offer as any).vendorSales) || 0,
-      currentQty:
-        Number((offer as any).currentQty ?? offer.stockQuantity ?? 0) || 0,
-      stockQuantity:
-        Number((offer as any).currentQty ?? offer.stockQuantity ?? 0) || 0,
-      stockStatus:
-        offer.stockStatus ||
-        stockStatusFromQuantity(
-          Number((offer as any).currentQty ?? offer.stockQuantity ?? 0) || 0,
-        ),
-      active: offer.active !== false,
-      publishToCatalogue: offer.publishToCatalogue !== false,
-      deliveryAvailable: offer.deliveryAvailable !== false,
-      vendorProductImage:
-        normalizeListingImages(offer, 6)[0]?.url || offer.vendorProductImage || "",
-      images: normalizeListingImages(offer, 6),
-      featured: !!offer.featured,
-      createdAt: offer.createdAt || nowIso(),
-      updatedAt: nowIso(),
-    };
-    const index = offers.findIndex((o) => o.id === normalizedOffer.id);
-    const safeOffer = sanitizeForFirestore(normalizedOffer) as VendorProductOffer;
+    const index = offers.findIndex((o) => o.id === safeOffer.id);
     if (index >= 0) offers[index] = safeOffer;
     else offers.push(safeOffer);
     await getStorageAdapter().setItem(VENDOR_OFFERS_KEY, sanitizeForFirestore(offers));
@@ -532,6 +538,56 @@ export const productService = {
         productMode: safeOffer.productMode || "linked_product",
       },
       metadata: { productMode: safeOffer.productMode || "linked_product" },
+    });
+  },
+
+  async saveVendorProductOffersBatch(inputOffers: VendorProductOffer[]): Promise<void> {
+    const incoming = asArray<VendorProductOffer>(inputOffers).map(
+      normalizeVendorProductOffer,
+    );
+    if (incoming.length === 0) return;
+
+    const offers = await productService.getVendorProductOffers();
+    const existingById = new Map(offers.map((offer) => [offer.id, offer]));
+    const linkedKeys = new Map<string, string>();
+    offers.forEach((offer) => {
+      if (offer.productMode === "branded_product") return;
+      const productId = String(offer.masterProductId || offer.productId || "");
+      if (offer.vendorId && productId) linkedKeys.set(`${offer.vendorId}::${productId}`, offer.id);
+    });
+
+    incoming.forEach((offer) => {
+      if (offer.productMode === "branded_product") return;
+      const productId = String(offer.masterProductId || offer.productId || "");
+      if (!offer.vendorId || !productId) return;
+      const key = `${offer.vendorId}::${productId}`;
+      const existingId = linkedKeys.get(key);
+      if (existingId && existingId !== offer.id) {
+        throw new Error("This vendor is already linked to the selected master product.");
+      }
+      linkedKeys.set(key, offer.id);
+    });
+
+    incoming.forEach((offer) => existingById.set(offer.id, offer));
+    const nextOffers = Array.from(existingById.values());
+    await getStorageAdapter().setItem(VENDOR_OFFERS_KEY, sanitizeForFirestore(nextOffers));
+    dataCacheService.clearCache();
+
+    incoming.forEach((safeOffer) => {
+      void analyticsService.logEvent({
+        eventType: offers.some((offer) => offer.id === safeOffer.id)
+          ? "PRODUCT_UPDATED"
+          : "PRODUCT_CREATED",
+        actorType: "admin",
+        actorName: "Vendor Offer Desk",
+        productId: safeOffer.productId,
+        vendorId: safeOffer.vendorId,
+        details: {
+          layer: "vendor_product_offer",
+          productMode: safeOffer.productMode || "linked_product",
+        },
+        metadata: { productMode: safeOffer.productMode || "linked_product" },
+      });
     });
   },
 

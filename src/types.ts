@@ -12,6 +12,7 @@ export enum AppRoute {
   PRICING = "pricing",
   SUBSCRIPTIONS = "itred_subscriptions",
   CATALOGUE_GEN = "catalogue-generator",
+  CATALOGUE_BUILDER_V2 = "catalogue-builder-v2",
   VENDOR_STOREFRONT = "vendor-storefront-builder",
   ANALYTICS = "analytics",
   BI_MARKET = "bi-market",
@@ -68,7 +69,13 @@ export type PermissionLevel =
   | "export"
   | "full";
 
-export type FieldDataSource = "manual" | "import" | "field" | "system" | "firebase" | string;
+export type FieldDataSource =
+  | "manual"
+  | "import"
+  | "field"
+  | "system"
+  | "firebase"
+  | string;
 
 export type MenuKey =
   | "dashboard"
@@ -349,7 +356,12 @@ export interface FinanceLedgerEntry {
 export interface CashbookTransaction {
   id: string;
   transactionNumber: string;
-  transactionType: "receipt" | "payment" | "deposit" | "transfer" | "adjustment";
+  transactionType:
+    | "receipt"
+    | "payment"
+    | "deposit"
+    | "transfer"
+    | "adjustment";
   accountId: string;
   accountName: string;
   destinationAccountId: string | null;
@@ -839,12 +851,7 @@ export interface WhatsAppIntelligenceLog {
 
 export interface VendorMarketFeedInsight {
   id: string;
-  category:
-    | "observation"
-    | "risk"
-    | "demand"
-    | "handling"
-    | "opportunity";
+  category: "observation" | "risk" | "demand" | "handling" | "opportunity";
   severity: "info" | "warning" | "high" | "critical";
   title: string;
   message: string;
@@ -1101,7 +1108,7 @@ export interface PricingPlan {
   brandedProductAddOnQuantity?: number;
   maxBrandedProducts?: number | "unlimited";
   maxVendorsPerCatalogue: number;
-  maxImagesPerCatalogue: number;
+  maxImagesPerCatalogue: number | "unlimited";
   maxImagesPerListing?: number;
   maxImagesPerProduct?: number;
   deploymentFrequency: DeploymentFrequency;
@@ -1164,6 +1171,25 @@ export interface PricingPlan {
   updatedBy: string;
   createdAt: string;
   updatedAt: string;
+  enableCatalogueGeneration?: boolean;
+  enableOfflineCatalogue?: boolean;
+  enableSectorCatalogue?: boolean;
+  enableMultiVendorCatalogue?: boolean;
+  enableWhatsAppCahLinks?: boolean;
+  cataloguesIncludedPerMonth?: number | "unlimited";
+  maxProductsPerCatalogue?: number | "unlimited";
+  maxCataloguePayloadMb?: number;
+  allowCatalogueOverage?: boolean;
+  catalogueOveragePrice?: number;
+  allowCatalogueCredit?: boolean;
+  imagePolicy?:
+    | "compress_include"
+    | "block_oversized"
+    | "placeholder_if_oversized";
+  imageFormat?: "webp";
+  imageMaxWidth?: number;
+  imageMaxHeight?: number;
+  imageQuality?: number;
 }
 
 export interface VendorEntitlementSnapshot {
@@ -1310,6 +1336,11 @@ export interface Vendor {
   whatsappGroupLink?: string;
   whatsappChannelLink?: string;
   status: VendorStatus;
+  inventorySpotCheckVerified?: boolean;
+  inventorySpotCheckVerifiedAt?: string;
+  showVerifiedVendorBadge?: boolean;
+  verifiedBadgeDisabledAt?: string;
+  verifiedBadgeDisabledBy?: string;
 
   // Management & Subscription
   assignedRPNId?: string;
@@ -2049,12 +2080,15 @@ export interface VendorSubscriptionPayment {
 
 export type VendorInvoiceStatus =
   | "draft"
+  | "issued"
+  | "due_soon"
   | "pending"
   | "unpaid"
   | "partially_paid"
   | "paid"
   | "overdue"
-  | "cancelled";
+  | "cancelled"
+  | "void";
 
 export type VendorInvoiceLineItemType =
   | "subscription"
@@ -2076,8 +2110,10 @@ export interface VendorInvoice {
   vendorName: string;
   planId?: string | null;
   planName?: string | null;
+  invoiceDate: string;
   issueDate: string;
   dueDate: string;
+  paymentTermsDays: number;
   status: VendorInvoiceStatus;
   subtotal: number;
   taxAmount: number;
@@ -2086,10 +2122,32 @@ export interface VendorInvoice {
   balanceDue: number;
   currency: string;
   notes?: string | null;
+  collectionStatus?: "not_due" | "due_soon" | "overdue" | "paid" | "cancelled" | "void";
+  lastReminderAt?: string | null;
+  lastReminderChannel?: "whatsapp" | "call" | "manual" | null;
+  lastReminderMessage?: string | null;
+  reminderCount?: number;
+  voidedAt?: string | null;
+  voidedByStaffId?: string | null;
+  voidedByStaffName?: string | null;
+  voidReason?: string | null;
   generatedByStaffId?: string | null;
   generatedByStaffName?: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface VendorInvoiceBillingProfile {
+  companyName: string;
+  companyAddress: string;
+  phoneNumbers: string[];
+  ecocashNumber: string;
+  innBucksNumber: string;
+  mukuruNumber: string;
+  invoiceTermsText: string;
+  popInstructionText: string;
+  useVendorAssignedRpnForPayments: boolean;
+  updatedAt?: string;
 }
 
 export interface VendorInvoiceLine {
@@ -2200,6 +2258,8 @@ export interface VendorBillingLedgerEntry {
     | "job_created"
     | "job_completed"
     | "job_billed"
+    | "collection_reminder_sent"
+    | "invoice_voided"
     | "invoice_cancelled";
   debit: number;
   credit: number;
@@ -2268,7 +2328,11 @@ export interface RPN {
 
 export type RpnChurnBonusType = "fixed" | "percentage_of_recurring_revenue";
 export type RpnAssignmentStatus = "active" | "released" | "transferred";
-export type RpnOnboardingLogStatus = "pending" | "approved" | "rejected" | "duplicate";
+export type RpnOnboardingLogStatus =
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "duplicate";
 export type RpnCompensationRunStatus =
   | "draft"
   | "reviewed"
@@ -2427,7 +2491,13 @@ export interface RpnCompensationLedgerEntry {
   periodFrom: string;
   periodTo: string;
   transactionType: RpnCompensationLedgerTransactionType;
-  sourceType: "compensation_run" | "run_line" | "manual" | "coa" | "cashbook" | "reversal";
+  sourceType:
+    | "compensation_run"
+    | "run_line"
+    | "manual"
+    | "coa"
+    | "cashbook"
+    | "reversal";
   sourceId: string;
   compensationRunId?: string;
   vendorId?: string;
@@ -3321,7 +3391,12 @@ export interface ProspectActivityLog {
   createdAt: string;
 }
 
-export type ProspectPriority = "Low" | "Medium" | "High" | "Urgent" | "Critical";
+export type ProspectPriority =
+  | "Low"
+  | "Medium"
+  | "High"
+  | "Urgent"
+  | "Critical";
 
 export const PROSPECT_PRIORITIES: ProspectPriority[] = [
   "Low",

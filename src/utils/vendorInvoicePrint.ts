@@ -1,8 +1,9 @@
 import { Vendor, VendorInvoice, VendorInvoiceLine } from "../types.ts";
 import { vendorBillingService } from "../services/vendorBillingService.ts";
+import { rpnService } from "../services/rpnService.ts";
 
-const money = (value: number, currency: string) =>
-  `${currency} ${Number(value || 0).toFixed(2)}`;
+const money = (value: number) =>
+  `$${Math.round(Number(value || 0)).toLocaleString("en-US")}`;
 
 const safe = (value: unknown) =>
   String(value ?? "")
@@ -14,6 +15,7 @@ export const buildVendorInvoicePrintHtml = (
   lines: VendorInvoiceLine[],
   vendor?: Vendor,
 ) => {
+  const billingProfile = vendorBillingService.getBillingProfile();
   const address = [
     vendor?.streetAddress,
     vendor?.suburb,
@@ -24,6 +26,23 @@ export const buildVendorInvoicePrintHtml = (
   ]
     .filter(Boolean)
     .join(", ");
+  const assignedRpn =
+    billingProfile.useVendorAssignedRpnForPayments && vendor?.assignedRPNId
+      ? rpnService.getAll().find((rpn) => rpn.id === vendor.assignedRPNId)
+      : null;
+  const assignedRpnText = assignedRpn
+    ? `Use vendor attached RPN for payment follow-up/support where available: ${assignedRpn.name} (${assignedRpn.phone || assignedRpn.whatsapp || "contact not supplied"}).`
+    : billingProfile.useVendorAssignedRpnForPayments
+      ? "Use vendor attached RPN for payment follow-up/support where available."
+      : "";
+  const companyPhones = billingProfile.phoneNumbers.join(" / ");
+  const voidAudit =
+    invoice.status === "void"
+      ? `<div class="section void-box">
+          <strong>Void audit:</strong> ${safe(invoice.voidedAt || "Date unavailable")} / ${safe(invoice.voidedByStaffName || "Staff unavailable")}<br />
+          <strong>Reason:</strong> ${safe(invoice.voidReason || "No reason supplied")}
+        </div>`
+      : "";
 
   return `<!doctype html>
 <html>
@@ -43,9 +62,11 @@ export const buildVendorInvoicePrintHtml = (
     th, td { border: 1px solid #d6d3d1; padding: 9px; text-align: left; vertical-align: top; }
     th { background: #f5f5f4; text-transform: uppercase; font-size: 10px; }
     .right { text-align: right; }
+    .money { white-space: nowrap; font-variant-numeric: tabular-nums; font-size: 11px; }
     .totals { width: 360px; margin-left: auto; }
     .total-row { font-weight: 700; background: #fff7ed; }
     .footer { border-top: 2px solid #1c1917; margin-top: 32px; padding-top: 16px; }
+    .void-box { border: 1px solid #fecaca; background: #fef2f2; color: #991b1b; padding: 12px; font-size: 12px; line-height: 1.6; }
     @media print { body { padding: 0; } .page { border: 0; } }
   </style>
 </head>
@@ -53,13 +74,18 @@ export const buildVendorInvoicePrintHtml = (
   <div class="page">
     <div class="top">
       <div>
-        <h1>seiGEN Commerce Infrastructure</h1>
+        <h1>${safe(billingProfile.companyName)}</h1>
         <h2>iTred Marketplace</h2>
+        <div class="meta company-details">
+          ${safe(billingProfile.companyAddress)}<br />
+          ${safe(companyPhones)}
+        </div>
       </div>
       <div class="meta">
         <strong>Invoice/Bill Number:</strong> ${safe(invoice.invoiceNumber)}<br />
-        <strong>Invoice Date:</strong> ${safe(invoice.issueDate)}<br />
-        <strong>Due Date:</strong> ${safe(invoice.dueDate)}
+        <strong>Invoice Date:</strong> ${safe(invoice.invoiceDate || invoice.issueDate)}<br />
+        <strong>Due Date:</strong> ${safe(invoice.dueDate)}<br />
+        <strong>Payment Terms:</strong> ${safe(invoice.paymentTermsDays || 30)} days
       </div>
     </div>
     <div class="section vendor">
@@ -69,6 +95,7 @@ export const buildVendorInvoicePrintHtml = (
       <strong>Email:</strong> ${safe(vendor?.email || "")}<br />
       <strong>Sector:</strong> ${safe(vendor?.sector || "")}
     </div>
+    ${voidAudit}
     <div class="section">
       <table>
         <thead>
@@ -86,9 +113,9 @@ export const buildVendorInvoicePrintHtml = (
               (line) => `<tr>
                 <td>${safe(line.description)}</td>
                 <td class="right">${line.quantity}</td>
-                <td class="right">${money(line.unitPrice, invoice.currency)}</td>
-                <td class="right">${money(line.taxAmount, invoice.currency)}</td>
-                <td class="right">${money(line.grossAmount, invoice.currency)}</td>
+                <td class="right money">${money(line.unitPrice)}</td>
+                <td class="right money">${money(line.taxAmount)}</td>
+                <td class="right money">${money(line.grossAmount)}</td>
               </tr>`,
             )
             .join("")}
@@ -97,16 +124,24 @@ export const buildVendorInvoicePrintHtml = (
     </div>
     <div class="section">
       <table class="totals">
-        <tr><td>Subtotal</td><td class="right">${money(invoice.subtotal, invoice.currency)}</td></tr>
-        <tr><td>Tax</td><td class="right">${money(invoice.taxAmount, invoice.currency)}</td></tr>
-        <tr class="total-row"><td>Total</td><td class="right">${money(invoice.totalAmount, invoice.currency)}</td></tr>
-        <tr><td>Amount Paid</td><td class="right">${money(invoice.amountPaid, invoice.currency)}</td></tr>
-        <tr class="total-row"><td>Balance Due</td><td class="right">${money(invoice.balanceDue, invoice.currency)}</td></tr>
+        <tr><td>Subtotal</td><td class="right money">${money(invoice.subtotal)}</td></tr>
+        <tr><td>Tax</td><td class="right money">${money(invoice.taxAmount)}</td></tr>
+        <tr class="total-row"><td>Total</td><td class="right money">${money(invoice.totalAmount)}</td></tr>
+        <tr><td>Amount Paid</td><td class="right money">${money(invoice.amountPaid)}</td></tr>
+        <tr class="total-row"><td>Balance Due</td><td class="right money">${money(invoice.balanceDue)}</td></tr>
       </table>
     </div>
     <div class="footer">
-      <strong>Payment instructions:</strong> Please use the invoice number as payment reference and send proof of payment to SCI/iTred Finance.<br />
-      Powered by seiGEN Commerce Infrastructure
+      <strong>Banking details</strong><br />
+      Ecocash ${safe(billingProfile.ecocashNumber)}<br />
+      InnBucks ${safe(billingProfile.innBucksNumber)}<br />
+      Mukuru ${safe(billingProfile.mukuruNumber)}<br /><br />
+      <strong>Business terms</strong><br />
+      ${safe(billingProfile.popInstructionText)}<br />
+      Payment should reference invoice number ${safe(invoice.invoiceNumber)} and vendor name ${safe(invoice.vendorName)}.<br />
+      ${safe(assignedRpnText)}${assignedRpnText ? "<br />" : ""}
+      ${safe(billingProfile.invoiceTermsText)}<br />
+      Powered by seiGEN Commerce
     </div>
   </div>
 </body>

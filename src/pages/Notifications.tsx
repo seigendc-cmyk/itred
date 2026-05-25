@@ -227,6 +227,7 @@ export const Notifications: React.FC = () => {
     notification: ITredNotification,
     status: NotificationStatus,
   ) => {
+    if (isSaving || processingNotificationId === notification.id) return;
     const isOwn = notification.assignedToStaffId === currentStaffId;
     const denied = (message: string) => {
       setActionError(message);
@@ -537,7 +538,7 @@ export const Notifications: React.FC = () => {
                             <button
                               onClick={() => void handleStatus(notification, "read")}
                               disabled={isSaving || isProcessing}
-                              className="px-2 py-1 bg-brand-charcoal text-white text-[9px] uppercase font-bold disabled:opacity-50"
+                              className="px-2 py-1 bg-brand-charcoal text-white text-[9px] uppercase font-bold disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                               {isProcessing ? "Acknowledging..." : "Acknowledge"}
                             </button>
@@ -546,16 +547,16 @@ export const Notifications: React.FC = () => {
                             <button
                               onClick={() => void handleStatus(notification, "unread")}
                               disabled={isSaving || isProcessing}
-                              className="px-2 py-1 bg-stone-200 text-stone-700 text-[9px] uppercase font-bold disabled:opacity-50"
+                              className="px-2 py-1 bg-stone-200 text-stone-700 text-[9px] uppercase font-bold disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                              Unread
+                              {isProcessing ? "Updating..." : "Unread"}
                             </button>
                           )}
                           {notification.status !== "resolved" && (
                             <button
                               onClick={() => void handleStatus(notification, "resolved")}
                               disabled={isSaving || isProcessing}
-                              className="px-2 py-1 bg-emerald-700 text-white text-[9px] uppercase font-bold disabled:opacity-50"
+                              className="px-2 py-1 bg-emerald-700 text-white text-[9px] uppercase font-bold disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                               {isProcessing ? "Resolving..." : "Resolve"}
                             </button>
@@ -564,7 +565,7 @@ export const Notifications: React.FC = () => {
                             <button
                               onClick={() => void handleStatus(notification, "archived")}
                               disabled={isSaving || isProcessing}
-                              className="px-2 py-1 bg-red-700 text-white text-[9px] uppercase font-bold disabled:opacity-50"
+                              className="px-2 py-1 bg-red-700 text-white text-[9px] uppercase font-bold disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                               {isProcessing ? "Archiving..." : "Archive"}
                             </button>
@@ -668,7 +669,7 @@ export const Notifications: React.FC = () => {
                 <button
                   onClick={() => void handleStatus(selected, "read")}
                   disabled={isSaving || processingNotificationId === selected.id}
-                  className="px-3 py-2 bg-brand-charcoal text-white text-[10px] uppercase font-black tracking-widest flex items-center gap-2 disabled:opacity-50"
+                  className="px-3 py-2 bg-brand-charcoal text-white text-[10px] uppercase font-black tracking-widest flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <MailOpen size={14} /> {processingNotificationId === selected.id ? "Acknowledging..." : "Acknowledge"}
                 </button>
@@ -677,16 +678,16 @@ export const Notifications: React.FC = () => {
                 <button
                   onClick={() => void handleStatus(selected, "unread")}
                   disabled={isSaving || processingNotificationId === selected.id}
-                  className="px-3 py-2 bg-stone-200 text-stone-700 text-[10px] uppercase font-black tracking-widest flex items-center gap-2 disabled:opacity-50"
+                  className="px-3 py-2 bg-stone-200 text-stone-700 text-[10px] uppercase font-black tracking-widest flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <Bell size={14} /> Mark Unread
+                  <Bell size={14} /> {processingNotificationId === selected.id ? "Updating..." : "Mark Unread"}
                 </button>
               )}
               {selected.status !== "resolved" && (
                 <button
                   onClick={() => void handleStatus(selected, "resolved")}
                   disabled={isSaving || processingNotificationId === selected.id}
-                  className="px-3 py-2 bg-emerald-700 text-white text-[10px] uppercase font-black tracking-widest flex items-center gap-2 disabled:opacity-50"
+                  className="px-3 py-2 bg-emerald-700 text-white text-[10px] uppercase font-black tracking-widest flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Check size={14} /> {processingNotificationId === selected.id ? "Resolving..." : "Resolve"}
                 </button>
@@ -695,7 +696,7 @@ export const Notifications: React.FC = () => {
                 <button
                   onClick={() => void handleStatus(selected, "archived")}
                   disabled={isSaving || processingNotificationId === selected.id}
-                  className="px-3 py-2 bg-red-700 text-white text-[10px] uppercase font-black tracking-widest flex items-center gap-2 disabled:opacity-50"
+                  className="px-3 py-2 bg-red-700 text-white text-[10px] uppercase font-black tracking-widest flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Archive size={14} /> {processingNotificationId === selected.id ? "Archiving..." : "Archive"}
                 </button>

@@ -102,7 +102,7 @@ const MENU_GROUPS: {
     items: [
       { id: AppRoute.VENDOR_MGMT, label: 'Vendor Management', icon: Store },
       { id: AppRoute.PRODUCT_MGMT, label: 'Product Management', icon: Package },
-      { id: AppRoute.CATALOGUE_GEN, label: 'Create Catalogue', icon: FileCode },
+      { id: AppRoute.CATALOGUE_BUILDER_V2, label: 'Catalogue Builder', icon: FileCode },
       { id: AppRoute.VENDOR_STOREFRONT, label: 'Storefronts', icon: Globe }
     ]
   },
@@ -268,6 +268,7 @@ export const AppShell: React.FC<AppShellProps> = ({
     { id: number; message: string; type: string }[]
   >([])
   const [sessionIgnored, setSessionIgnored] = useState<Set<string>>(new Set())
+  const [processingNotificationId, setProcessingNotificationId] = useState<string | null>(null)
 
   console.log('AppShell mounted successfully')
 
@@ -332,6 +333,20 @@ export const AppShell: React.FC<AppShellProps> = ({
     : isOnline
       ? 'bg-emerald-500'
       : 'bg-amber-500'
+
+  const runNotificationAction = async (
+    notificationId: string,
+    action: () => Promise<unknown>
+  ) => {
+    if (processingNotificationId === notificationId) return
+    setProcessingNotificationId(notificationId)
+    try {
+      await action()
+      await loadNotifications()
+    } finally {
+      setProcessingNotificationId(null)
+    }
+  }
 
   useEffect(() => {
     void loadNotifications()
@@ -418,6 +433,7 @@ export const AppShell: React.FC<AppShellProps> = ({
       [AppRoute.PRICING]: 'pricing',
       [AppRoute.SUBSCRIPTIONS]: 'subscriptionsCollections',
       [AppRoute.CATALOGUE_GEN]: 'createCatalogue',
+      [AppRoute.CATALOGUE_BUILDER_V2]: 'createCatalogue',
       [AppRoute.VENDOR_STOREFRONT]: 'createStorefront',
       [AppRoute.ANALYTICS]: 'analytics',
       [AppRoute.BI_MARKET]: 'biMarketAnalytics',
@@ -816,25 +832,27 @@ export const AppShell: React.FC<AppShellProps> = ({
                             <button
                               onClick={e => {
                                 e.stopPropagation()
-                                void notificationService
-                                  .markRead(n.id)
-                                  .then(loadNotifications)
+                                void runNotificationAction(n.id, () =>
+                                  notificationService.markRead(n.id)
+                                )
                               }}
-                              className='px-2 py-1 bg-stone-100 text-[9px] uppercase font-bold text-stone-600 hover:bg-stone-200'
+                              disabled={processingNotificationId === n.id}
+                              className='px-2 py-1 bg-stone-100 text-[9px] uppercase font-bold text-stone-600 hover:bg-stone-200 disabled:cursor-not-allowed disabled:opacity-50'
                             >
-                              Mark Read
+                              {processingNotificationId === n.id ? 'Working...' : 'Mark Read'}
                             </button>
                             {permissionService.canResolveNotification() && (
                               <button
                                 onClick={e => {
                                   e.stopPropagation()
-                                  void notificationService
-                                    .resolve(n.id)
-                                    .then(loadNotifications)
+                                  void runNotificationAction(n.id, () =>
+                                    notificationService.resolve(n.id)
+                                  )
                                 }}
-                                className='px-2 py-1 bg-emerald-50 border border-emerald-100 text-[9px] uppercase font-bold text-emerald-700 hover:bg-emerald-100'
+                                disabled={processingNotificationId === n.id}
+                                className='px-2 py-1 bg-emerald-50 border border-emerald-100 text-[9px] uppercase font-bold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50'
                               >
-                                Resolve
+                                {processingNotificationId === n.id ? 'Working...' : 'Resolve'}
                               </button>
                             )}
                           </div>
@@ -926,7 +944,8 @@ export const AppShell: React.FC<AppShellProps> = ({
             </p>
             <div className='flex gap-3'>
               <button
-                className='flex-1 p-3 bg-stone-100 text-stone-600 text-[10px] tracking-wider font-bold uppercase hover:bg-stone-200 transition-colors'
+                className='flex-1 p-3 bg-stone-100 text-stone-600 text-[10px] tracking-wider font-bold uppercase hover:bg-stone-200 transition-colors disabled:cursor-not-allowed disabled:opacity-50'
+                disabled={processingNotificationId === criticalAlert.id}
                 onClick={() =>
                   setSessionIgnored(prev => new Set(prev).add(criticalAlert.id))
                 }
@@ -934,14 +953,15 @@ export const AppShell: React.FC<AppShellProps> = ({
                 Dismiss For Now
               </button>
               <button
-                className='flex-1 p-3 bg-brand-orange text-white text-[10px] tracking-wider font-bold uppercase hover:bg-brand-orange/90 transition-colors'
+                className='flex-1 p-3 bg-brand-orange text-white text-[10px] tracking-wider font-bold uppercase hover:bg-brand-orange/90 transition-colors disabled:cursor-not-allowed disabled:opacity-50'
+                disabled={processingNotificationId === criticalAlert.id}
                 onClick={() =>
-                  notificationService
-                    .markRead(criticalAlert.id)
-                    .then(async () => loadNotifications())
+                  void runNotificationAction(criticalAlert.id, () =>
+                    notificationService.markRead(criticalAlert.id)
+                  )
                 }
               >
-                Acknowledge
+                {processingNotificationId === criticalAlert.id ? 'Acknowledging...' : 'Acknowledge'}
               </button>
             </div>
           </div>
@@ -1020,24 +1040,26 @@ export const AppShell: React.FC<AppShellProps> = ({
                         {n.status === 'unread' && (
                           <button
                             onClick={() =>
-                              notificationService
-                                .markAsRead(n.id)
-                                .then(loadNotifications)
+                              void runNotificationAction(n.id, () =>
+                                notificationService.markAsRead(n.id)
+                              )
                             }
-                            className='text-[9px] font-bold uppercase tracking-wider bg-stone-100 text-stone-600 px-3 py-1.5 hover:bg-stone-200 transition-colors'
+                            disabled={processingNotificationId === n.id}
+                            className='text-[9px] font-bold uppercase tracking-wider bg-stone-100 text-stone-600 px-3 py-1.5 hover:bg-stone-200 transition-colors disabled:cursor-not-allowed disabled:opacity-50'
                           >
-                            Acknowledge
+                            {processingNotificationId === n.id ? 'Working...' : 'Acknowledge'}
                           </button>
                         )}
                         <button
                           onClick={() =>
-                            notificationService
-                              .markAsResolved(n.id)
-                              .then(loadNotifications)
+                            void runNotificationAction(n.id, () =>
+                              notificationService.markAsResolved(n.id)
+                            )
                           }
-                          className='text-[9px] font-bold uppercase tracking-wider bg-orange-50 text-brand-orange border border-orange-200 px-3 py-1.5 hover:bg-brand-orange hover:text-white transition-colors'
+                          disabled={processingNotificationId === n.id}
+                          className='text-[9px] font-bold uppercase tracking-wider bg-orange-50 text-brand-orange border border-orange-200 px-3 py-1.5 hover:bg-brand-orange hover:text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50'
                         >
-                          Resolve
+                          {processingNotificationId === n.id ? 'Working...' : 'Resolve'}
                         </button>
                       </div>
                     </div>

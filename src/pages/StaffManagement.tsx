@@ -555,6 +555,8 @@ export const StaffManagement: React.FC = () => {
     setIsApplyRoleModalOpen(false)
     setConfirmConfig(null)
     setIsDeleteModalOpen(false)
+    setStaffToDelete(null)
+    setDeleteReason('')
     setPasscodeModalConfig(null)
     setApplyRoleConfig(null)
     setTempPasscode('')
@@ -1420,6 +1422,105 @@ export const StaffManagement: React.FC = () => {
       showBrandedAlert({
         title: 'seiGEN Commerce',
         message: error.message || 'Failed to save staff.',
+        type: 'error'
+      })
+    }
+  }
+
+  const openStaffLogs = (staff: Staff) => {
+    setFilterStaff(staff.id)
+    setActiveTab('logs')
+    setView('list')
+    focusMainContent()
+  }
+
+  const requestOrDeleteStaff = async () => {
+    if (!staffToDelete) return
+    if (!deleteReason.trim()) {
+      showBrandedAlert({
+        title: 'seiGEN Commerce',
+        message: 'A delete/archive reason is required.',
+        type: 'warning'
+      })
+      return
+    }
+    if (staffService.isLastActiveSysAdmin(staffToDelete.id)) {
+      showBrandedAlert({
+        title: 'seiGEN Commerce',
+        message: 'At least one active SysAdmin must remain in the system.',
+        type: 'warning'
+      })
+      return
+    }
+
+    try {
+      const reason = deleteReason.trim()
+      if (permissionService.isSysAdmin()) {
+        staffService.deleteStaff(staffToDelete.id)
+        await staffAuditService.logAction({
+          eventType: 'RECORD_DELETED',
+          module: 'staff',
+          severity: 'high',
+          action: 'Permanently deleted staff record',
+          recordType: 'staff',
+          recordId: staffToDelete.id,
+          recordName: staffToDelete.displayName || staffToDelete.fullName,
+          beforeSnapshot: staffToDelete,
+          afterSnapshot: { reason }
+        })
+        analyticsService.logEvent({
+          eventType: 'STAFF_DELETED' as any,
+          actorType: 'admin',
+          actorName: 'SysAdmin',
+          result: 'deleted',
+          details: {
+            staffId: staffToDelete.id,
+            staffCode: staffToDelete.staffCode,
+            reason
+          }
+        })
+      } else {
+        await staffService.saveStaff({
+          ...staffToDelete,
+          status: 'archived',
+          deleteRequestedAt: new Date().toISOString(),
+          deleteRequestReason: reason,
+          updatedAt: new Date().toISOString(),
+          updatedBy: 'Delete request'
+        } as Staff)
+        analyticsService.logEvent({
+          eventType: 'STAFF_DELETE_REQUESTED' as any,
+          actorType: 'admin',
+          actorName: 'Staff Management',
+          result: 'submitted',
+          details: {
+            staffId: staffToDelete.id,
+            staffCode: staffToDelete.staffCode,
+            reason
+          }
+        })
+      }
+
+      setStaffToDelete(null)
+      setDeleteReason('')
+      setIsDeleteModalOpen(false)
+      setStaffList(asArray<Staff>(staffService.getAllStaff()))
+      window.setTimeout(() => {
+        void loadStaff()
+        void loadLogs()
+      }, 800)
+      showBrandedAlert({
+        title: 'seiGEN Commerce',
+        message: permissionService.isSysAdmin()
+          ? 'Staff record deleted.'
+          : 'Delete request captured and staff archived pending review.',
+        type: 'success'
+      })
+    } catch (error: any) {
+      console.error(error)
+      showBrandedAlert({
+        title: 'seiGEN Commerce',
+        message: error.message || 'Failed to process staff delete request.',
         type: 'error'
       })
     }
@@ -2339,6 +2440,7 @@ export const StaffManagement: React.FC = () => {
                                     }}
                                     className='p-1.5 border border-stone-200 rounded-none hover:bg-stone-100'
                                     title='Edit Staff'
+                                    aria-label={`Edit staff ${staff.displayName || staff.fullName}`}
                                   >
                                     <Edit2 size={12} />
                                   </button>
@@ -2360,6 +2462,7 @@ export const StaffManagement: React.FC = () => {
                                         ? 'Unlock Staff'
                                         : 'Lock Staff'
                                     }
+                                    aria-label={`${staff.isLocked ? 'Unlock' : 'Lock'} staff ${staff.displayName || staff.fullName}`}
                                   >
                                     {staff.isLocked ? (
                                       <Unlock size={12} />
@@ -2384,6 +2487,7 @@ export const StaffManagement: React.FC = () => {
                                     }}
                                     className='p-1.5 border border-stone-200 rounded-none hover:bg-stone-100'
                                     title='Reset Passcode (Force Change)'
+                                    aria-label={`Reset passcode for ${staff.displayName || staff.fullName}`}
                                   >
                                     <RotateCcw size={12} />
                                   </button>
@@ -2402,6 +2506,7 @@ export const StaffManagement: React.FC = () => {
                                     }}
                                     className='p-1.5 border border-stone-200 rounded-none hover:bg-stone-100'
                                     title='Override Passcode'
+                                    aria-label={`Override passcode for ${staff.displayName || staff.fullName}`}
                                   >
                                     <Shield size={12} />
                                   </button>
@@ -2417,6 +2522,7 @@ export const StaffManagement: React.FC = () => {
                                       }
                                       className='p-1.5 border border-stone-200 rounded-none hover:bg-stone-100 text-stone-400 hover:text-orange-500'
                                       title='Suspend Staff'
+                                      aria-label={`Suspend staff ${staff.displayName || staff.fullName}`}
                                     >
                                       <UserX size={12} />
                                     </button>
@@ -2432,6 +2538,7 @@ export const StaffManagement: React.FC = () => {
                                       }
                                       className='p-1.5 border border-stone-200 rounded-none hover:bg-stone-100 text-stone-400 hover:text-green-500'
                                       title='Reactivate Staff'
+                                      aria-label={`Reactivate staff ${staff.displayName || staff.fullName}`}
                                     >
                                       <UserX size={12} />
                                     </button>
@@ -2446,6 +2553,7 @@ export const StaffManagement: React.FC = () => {
                                     }
                                     className='p-1.5 border border-stone-200 rounded-none hover:bg-stone-100 text-stone-400 hover:text-brand-orange'
                                     title='Archive Staff'
+                                    aria-label={`Archive staff ${staff.displayName || staff.fullName}`}
                                   >
                                     <Archive size={12} />
                                   </button>
@@ -2463,6 +2571,7 @@ export const StaffManagement: React.FC = () => {
                                     }}
                                     className='p-1.5 border border-stone-200 rounded-none hover:bg-stone-100 text-stone-400 hover:text-red-500'
                                     title='Request Permanent Delete'
+                                    aria-label={`Request permanent delete for ${staff.displayName || staff.fullName}`}
                                   >
                                     <Trash2 size={12} />
                                   </button>
@@ -2480,8 +2589,19 @@ export const StaffManagement: React.FC = () => {
                                     }}
                                     className='p-1.5 border border-stone-200 rounded-none hover:bg-stone-100'
                                     title='Edit Permissions'
+                                    aria-label={`Edit permissions for ${staff.displayName || staff.fullName}`}
                                   >
                                     <Shield size={12} />
+                                  </button>
+                                )}
+                                {permissionService.hasMenuAccess('staffAccessLogs') && (
+                                  <button
+                                    onClick={() => openStaffLogs(staff)}
+                                    className='p-1.5 border border-stone-200 rounded-none hover:bg-stone-100'
+                                    title='View Staff Logs'
+                                    aria-label={`View logs for ${staff.displayName || staff.fullName}`}
+                                  >
+                                    <FileText size={12} />
                                   </button>
                                 )}
                               </div>
@@ -2572,6 +2692,7 @@ export const StaffManagement: React.FC = () => {
                               }}
                               className='border border-stone-200 p-2'
                               title='Edit Staff'
+                              aria-label={`Edit staff ${staff.displayName || staff.fullName}`}
                             >
                               <Edit2 size={12} />
                             </button>
@@ -2588,6 +2709,7 @@ export const StaffManagement: React.FC = () => {
                               title={
                                 staff.isLocked ? 'Unlock Staff' : 'Lock Staff'
                               }
+                              aria-label={`${staff.isLocked ? 'Unlock' : 'Lock'} staff ${staff.displayName || staff.fullName}`}
                             >
                               {staff.isLocked ? (
                                 <Unlock size={12} />
@@ -2609,8 +2731,82 @@ export const StaffManagement: React.FC = () => {
                               }}
                               className='border border-stone-200 p-2'
                               title='Reset Passcode'
+                              aria-label={`Reset passcode for ${staff.displayName || staff.fullName}`}
                             >
                               <RotateCcw size={12} />
+                            </button>
+                          )}
+                          {permissionService.isSysAdmin() && (
+                            <button
+                              onClick={() => {
+                                setPasscodeModalConfig({
+                                  staff,
+                                  isOverride: true
+                                })
+                                setTempPasscode('')
+                                setConfirmTempPasscode('')
+                                setIsPasscodeModalOpen(true)
+                              }}
+                              className='border border-stone-200 p-2'
+                              title='Override Passcode'
+                              aria-label={`Override passcode for ${staff.displayName || staff.fullName}`}
+                            >
+                              <Shield size={12} />
+                            </button>
+                          )}
+                          {permissionService.hasActionPermission(
+                            'staff.suspend' as any
+                          ) &&
+                            staff.status === 'active' && (
+                              <button
+                                onClick={() => triggerAction(staff, 'suspend')}
+                                className='border border-stone-200 p-2 text-stone-500'
+                                title='Suspend Staff'
+                                aria-label={`Suspend staff ${staff.displayName || staff.fullName}`}
+                              >
+                                <UserX size={12} />
+                              </button>
+                            )}
+                          {permissionService.hasActionPermission(
+                            'staff.reactivate' as any
+                          ) &&
+                            staff.status === 'suspended' && (
+                              <button
+                                onClick={() => triggerAction(staff, 'reactivate')}
+                                className='border border-stone-200 p-2 text-green-600'
+                                title='Reactivate Staff'
+                                aria-label={`Reactivate staff ${staff.displayName || staff.fullName}`}
+                              >
+                                <UserX size={12} />
+                              </button>
+                            )}
+                          {permissionService.hasActionPermission(
+                            'staff.archive' as any
+                          ) && (
+                            <button
+                              onClick={() => triggerAction(staff, 'archive')}
+                              className='border border-stone-200 p-2 text-brand-orange'
+                              title='Archive Staff'
+                              aria-label={`Archive staff ${staff.displayName || staff.fullName}`}
+                            >
+                              <Archive size={12} />
+                            </button>
+                          )}
+                          {(permissionService.hasActionPermission(
+                            'staff.requestDelete' as any
+                          ) ||
+                            permissionService.isSysAdmin()) && (
+                            <button
+                              onClick={() => {
+                                setStaffToDelete(staff)
+                                setDeleteReason('')
+                                setIsDeleteModalOpen(true)
+                              }}
+                              className='border border-stone-200 p-2 text-red-600'
+                              title='Request Permanent Delete'
+                              aria-label={`Request permanent delete for ${staff.displayName || staff.fullName}`}
+                            >
+                              <Trash2 size={12} />
                             </button>
                           )}
                           {permissionService.canEdit('staffManagement') && (
@@ -2623,8 +2819,19 @@ export const StaffManagement: React.FC = () => {
                               }}
                               className='border border-stone-200 p-2'
                               title='Edit Permissions'
+                              aria-label={`Edit permissions for ${staff.displayName || staff.fullName}`}
                             >
                               <Shield size={12} />
+                            </button>
+                          )}
+                          {permissionService.hasMenuAccess('staffAccessLogs') && (
+                            <button
+                              onClick={() => openStaffLogs(staff)}
+                              className='border border-stone-200 p-2'
+                              title='View Staff Logs'
+                              aria-label={`View logs for ${staff.displayName || staff.fullName}`}
+                            >
+                              <FileText size={12} />
                             </button>
                           )}
                         </div>
@@ -3815,8 +4022,20 @@ export const StaffManagement: React.FC = () => {
               </div>
 
               <div className='flex gap-4 mt-8'>
-                <PrimaryButton>Save Settings</PrimaryButton>
-                <SecondaryButton>Reset to Defaults</SecondaryButton>
+                <PrimaryButton
+                  disabled
+                  title='Security settings save is not enabled yet'
+                  aria-label='Security settings save is disabled'
+                >
+                  Save Settings
+                </PrimaryButton>
+                <SecondaryButton
+                  disabled
+                  title='Security settings reset is not enabled yet'
+                  aria-label='Security settings reset is disabled'
+                >
+                  Reset to Defaults
+                </SecondaryButton>
               </div>
             </div>
           </DataPanel>
@@ -3891,6 +4110,42 @@ export const StaffManagement: React.FC = () => {
             maxLength={6}
             required
           />
+        </div>
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        isOpen={isDeleteModalOpen}
+        title={
+          permissionService.isSysAdmin()
+            ? 'Permanently Delete Staff?'
+            : 'Request Staff Delete?'
+        }
+        message={
+          staffToDelete
+            ? `${permissionService.isSysAdmin() ? 'This permanently removes' : 'This archives and records a delete request for'} ${staffToDelete.displayName || staffToDelete.fullName}. Enter a reason to continue.`
+            : ''
+        }
+        variant='danger'
+        onConfirm={() => {
+          void requestOrDeleteStaff()
+        }}
+        onCancel={closeAllModals}
+      >
+        <div className='mt-4 space-y-3'>
+          <textarea
+            value={deleteReason}
+            onChange={e => setDeleteReason(e.target.value)}
+            className='form-input min-h-[96px] w-full'
+            placeholder='Reason for delete/archive request'
+            aria-label='Reason for delete or archive request'
+            required
+          />
+          {!permissionService.isSysAdmin() && (
+            <p className='text-xs font-bold uppercase text-stone-500'>
+              Non-SysAdmin delete actions are captured as archive/delete
+              requests for audit review.
+            </p>
+          )}
         </div>
       </ConfirmDialog>
 

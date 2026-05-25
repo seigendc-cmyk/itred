@@ -3,6 +3,7 @@ import {
   Vendor,
   VendorBillingLedgerEntry,
   VendorInvoice,
+  VendorInvoiceBillingProfile,
   VendorInvoiceLine,
   VendorInvoiceLineItemType,
   VendorJob,
@@ -19,6 +20,21 @@ const INVOICE_LINES_KEY = "vendorInvoiceLines";
 const PAYMENTS_KEY = "vendorPayments";
 const JOBS_KEY = "vendorJobs";
 const LEDGER_KEY = "vendorBillingLedger";
+const BILLING_PROFILE_KEY = "vendorInvoiceBillingProfile";
+export const VENDOR_INVOICE_PAYMENT_TERMS_DAYS = 30;
+export const DEFAULT_VENDOR_INVOICE_BILLING_PROFILE: VendorInvoiceBillingProfile = {
+  companyName: "Digital Commerce",
+  companyAddress: "49 Brechin Est. Commerce Valley, Marirangwe, Mhondoro",
+  phoneNumbers: ["+263775747198", "+263774479121", "+263789487287"],
+  ecocashNumber: "0773543642",
+  innBucksNumber: "0775747198",
+  mukuruNumber: "0775747198",
+  invoiceTermsText:
+    "Activation or renewal is processed after proof of payment verification.",
+  popInstructionText:
+    "Vendor must send POP to the attached company numbers for payment confirmation and activation. Payment should reference the invoice number and vendor name.",
+  useVendorAssignedRpnForPayments: true,
+};
 
 export const VENDOR_JOB_TYPES = [
   "stocktake",
@@ -35,6 +51,12 @@ export const VENDOR_JOB_TYPES = [
 const asArray = <T>(value: unknown): T[] => (Array.isArray(value) ? value : []);
 const nowIso = () => new Date().toISOString();
 const today = () => new Date().toISOString().slice(0, 10);
+const addDaysToDate = (dateKey: string, days: number) => {
+  const date = new Date(`${dateKey}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return today();
+  date.setDate(date.getDate() + days);
+  return date.toISOString().slice(0, 10);
+};
 const money = (value: unknown) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.round(parsed * 100) / 100 : 0;
@@ -43,6 +65,19 @@ const money = (value: unknown) => {
 const getAll = <T>(key: string): T[] => asArray<T>(localStorageService.get<T[]>(key));
 const setAll = <T>(key: string, rows: T[]) =>
   localStorageService.set(key, sanitizeForFirestore(rows) as T[]);
+const normalizeBillingProfile = (
+  profile?: Partial<VendorInvoiceBillingProfile> | null,
+): VendorInvoiceBillingProfile => ({
+  ...DEFAULT_VENDOR_INVOICE_BILLING_PROFILE,
+  ...(profile || {}),
+  phoneNumbers:
+    Array.isArray(profile?.phoneNumbers) && profile.phoneNumbers.length > 0
+      ? profile.phoneNumbers.map((phone) => String(phone || "").trim()).filter(Boolean)
+      : DEFAULT_VENDOR_INVOICE_BILLING_PROFILE.phoneNumbers,
+  useVendorAssignedRpnForPayments:
+    profile?.useVendorAssignedRpnForPayments ??
+    DEFAULT_VENDOR_INVOICE_BILLING_PROFILE.useVendorAssignedRpnForPayments,
+});
 
 const upsert = <T extends { id: string }>(rows: T[], row: T) => {
   const index = rows.findIndex((item) => item.id === row.id);
@@ -78,13 +113,54 @@ const lineTotals = (
 };
 
 const invoiceStatusFromBalance = (
-  invoice: Pick<VendorInvoice, "totalAmount" | "amountPaid" | "dueDate">,
+  invoice: Pick<VendorInvoice, "totalAmount" | "amountPaid" | "dueDate" | "status">,
 ): VendorInvoice["status"] => {
+  if (invoice.status === "cancelled" || invoice.status === "void" || invoice.status === "draft") return invoice.status;
   const balance = money(invoice.totalAmount - invoice.amountPaid);
   if (balance <= 0) return "paid";
-  if (invoice.amountPaid > 0) return "partially_paid";
   if (invoice.dueDate && invoice.dueDate < today()) return "overdue";
-  return "unpaid";
+  if (invoice.dueDate && invoice.dueDate <= addDaysToDate(today(), 7)) return "due_soon";
+  return "issued";
+};
+
+const collectionStatusFromInvoice = (
+  invoice: Pick<VendorInvoice, "status" | "dueDate" | "balanceDue">,
+): VendorInvoice["collectionStatus"] => {
+  if (invoice.status === "void") return "void";
+  if (invoice.status === "cancelled") return "cancelled";
+  if (invoice.status === "paid" || invoice.balanceDue <= 0) return "paid";
+  if (invoice.dueDate < today()) return "overdue";
+  if (invoice.dueDate <= addDaysToDate(today(), 7)) return "due_soon";
+  return "not_due";
+};
+
+const normalizeInvoice = (invoice: VendorInvoice): VendorInvoice => {
+  const invoiceDate = invoice.invoiceDate || invoice.issueDate || invoice.createdAt?.slice(0, 10) || today();
+  const paymentTermsDays = Number(invoice.paymentTermsDays || VENDOR_INVOICE_PAYMENT_TERMS_DAYS);
+  const dueDate = invoice.dueDate || addDaysToDate(invoiceDate, paymentTermsDays);
+  const balanceDue =
+    invoice.status === "void" ? 0 : Math.max(0, money(invoice.totalAmount - invoice.amountPaid));
+  const nextStatus = invoiceStatusFromBalance({
+    totalAmount: invoice.totalAmount,
+    amountPaid: invoice.amountPaid,
+    dueDate,
+    status: invoice.status,
+  });
+  return {
+    ...invoice,
+    invoiceDate,
+    issueDate: invoice.issueDate || invoiceDate,
+    dueDate,
+    paymentTermsDays,
+    balanceDue,
+    status: nextStatus,
+    collectionStatus: collectionStatusFromInvoice({
+      status: nextStatus,
+      dueDate,
+      balanceDue,
+    }),
+    reminderCount: Number(invoice.reminderCount || 0),
+  };
 };
 
 const addLedger = (entry: Omit<VendorBillingLedgerEntry, "id" | "createdAt">) => {
@@ -123,7 +199,25 @@ const audit = (
 };
 
 export const vendorBillingService = {
-  getInvoices: (): VendorInvoice[] => getAll<VendorInvoice>(INVOICES_KEY),
+  getBillingProfile: (): VendorInvoiceBillingProfile =>
+    normalizeBillingProfile(
+      localStorageService.get<VendorInvoiceBillingProfile>(BILLING_PROFILE_KEY),
+    ),
+  saveBillingProfile: (
+    profile: Partial<VendorInvoiceBillingProfile>,
+  ): VendorInvoiceBillingProfile => {
+    const saved = normalizeBillingProfile({
+      ...profile,
+      updatedAt: nowIso(),
+    });
+    localStorageService.set(
+      BILLING_PROFILE_KEY,
+      sanitizeForFirestore(saved) as VendorInvoiceBillingProfile,
+    );
+    audit("Updated vendor invoice billing profile", "vendor_invoice_billing_profile", "default", saved);
+    return saved;
+  },
+  getInvoices: (): VendorInvoice[] => getAll<VendorInvoice>(INVOICES_KEY).map(normalizeInvoice),
   getInvoiceLines: (invoiceId?: string): VendorInvoiceLine[] => {
     const rows = getAll<VendorInvoiceLine>(INVOICE_LINES_KEY);
     return invoiceId ? rows.filter((row) => row.invoiceId === invoiceId) : rows;
@@ -196,8 +290,8 @@ export const vendorBillingService = {
     const invoiceId = `VI-${Date.now()}`;
     const invoiceNumber = sequence("SCI-INV", invoices.length);
     const staff = currentStaff();
-    const issueDate = today();
-    const dueDate = input.dueDate || input.vendor.subscriptionDueDate || issueDate;
+    const invoiceDate = today();
+    const dueDate = addDaysToDate(invoiceDate, VENDOR_INVOICE_PAYMENT_TERMS_DAYS);
     const vendorName = input.vendor.tradingName || input.vendor.name || "Vendor";
     const currency = input.plan?.currency || "USD";
 
@@ -252,9 +346,11 @@ export const vendorBillingService = {
       vendorName,
       planId: input.plan?.id || input.vendor.planId || null,
       planName: input.plan?.name || null,
-      issueDate,
+      invoiceDate,
+      issueDate: invoiceDate,
       dueDate,
-      status: totalAmount > 0 ? "unpaid" : "draft",
+      paymentTermsDays: VENDOR_INVOICE_PAYMENT_TERMS_DAYS,
+      status: totalAmount > 0 ? "issued" : "draft",
       subtotal,
       taxAmount,
       totalAmount,
@@ -262,6 +358,18 @@ export const vendorBillingService = {
       balanceDue: totalAmount,
       currency,
       notes: input.notes || null,
+      collectionStatus:
+        totalAmount > 0
+          ? collectionStatusFromInvoice({
+              status: "issued",
+              dueDate,
+              balanceDue: totalAmount,
+            })
+          : "not_due",
+      lastReminderAt: null,
+      lastReminderChannel: null,
+      lastReminderMessage: null,
+      reminderCount: 0,
       generatedByStaffId: staff.staffId,
       generatedByStaffName: staff.staffName,
       createdAt: now,
@@ -291,7 +399,7 @@ export const vendorBillingService = {
   },
 
   saveInvoiceWithLines(invoice: VendorInvoice, lines: VendorInvoiceLine[]) {
-    setAll(INVOICES_KEY, upsert(vendorBillingService.getInvoices(), invoice));
+    setAll(INVOICES_KEY, upsert(vendorBillingService.getInvoices(), normalizeInvoice(invoice)));
     const retained = vendorBillingService
       .getInvoiceLines()
       .filter((line) => line.invoiceId !== invoice.id);
@@ -452,6 +560,7 @@ export const vendorBillingService = {
     const invoices = vendorBillingService.getInvoices();
     const invoice = invoices.find((item) => item.id === input.invoiceId);
     if (!invoice) throw new Error("Invoice not found.");
+    if (invoice.status === "void") throw new Error("Voided invoices cannot receive payments.");
     const staff = currentStaff();
     const now = nowIso();
     const amount = money(input.amount);
@@ -480,8 +589,9 @@ export const vendorBillingService = {
       status: invoiceStatusFromBalance({ ...invoice, amountPaid }),
       updatedAt: now,
     };
+    const normalizedInvoice = normalizeInvoice(nextInvoice);
     setAll(PAYMENTS_KEY, [...vendorBillingService.getPayments(), payment]);
-    setAll(INVOICES_KEY, upsert(invoices, nextInvoice));
+    setAll(INVOICES_KEY, upsert(invoices, normalizedInvoice));
     addLedger({
       vendorId: invoice.vendorId,
       vendorName: invoice.vendorName,
@@ -497,14 +607,51 @@ export const vendorBillingService = {
       createdByStaffName: staff.staffName,
     });
     audit(`Recorded payment for invoice ${invoice.invoiceNumber}`, "vendor_payment", payment.id, payment);
-    return { invoice: nextInvoice, payment };
+    return { invoice: normalizedInvoice, payment };
+  },
+
+  recordCollectionReminder(input: {
+    invoiceId: string;
+    channel: "whatsapp" | "call" | "manual";
+    message?: string | null;
+  }): VendorInvoice | undefined {
+    const invoices = vendorBillingService.getInvoices();
+    const invoice = invoices.find((item) => item.id === input.invoiceId);
+    if (!invoice) return undefined;
+    if (invoice.status === "void") return undefined;
+    const staff = currentStaff();
+    const now = nowIso();
+    const next = normalizeInvoice({
+      ...invoice,
+      lastReminderAt: now,
+      lastReminderChannel: input.channel,
+      lastReminderMessage: input.message || null,
+      reminderCount: Number(invoice.reminderCount || 0) + 1,
+      updatedAt: now,
+    });
+    setAll(INVOICES_KEY, upsert(invoices, next));
+    addLedger({
+      vendorId: next.vendorId,
+      vendorName: next.vendorName,
+      invoiceId: next.id,
+      invoiceNumber: next.invoiceNumber,
+      entryType: "collection_reminder_sent",
+      debit: 0,
+      credit: 0,
+      balanceImpact: 0,
+      notes: input.message || `${input.channel} collection reminder sent`,
+      createdByStaffId: staff.staffId,
+      createdByStaffName: staff.staffName,
+    });
+    audit(`Sent ${input.channel} collection reminder for ${next.invoiceNumber}`, "vendor_invoice", next.id, next);
+    return next;
   },
 
   cancelInvoice(invoiceId: string): VendorInvoice | undefined {
     const invoices = vendorBillingService.getInvoices();
     const invoice = invoices.find((item) => item.id === invoiceId);
     if (!invoice) return undefined;
-    const next = { ...invoice, status: "cancelled" as const, updatedAt: nowIso() };
+    const next = normalizeInvoice({ ...invoice, status: "cancelled" as const, updatedAt: nowIso() });
     setAll(INVOICES_KEY, upsert(invoices, next));
     const staff = currentStaff();
     addLedger({
@@ -521,6 +668,48 @@ export const vendorBillingService = {
       createdByStaffName: staff.staffName,
     });
     audit(`Cancelled invoice ${next.invoiceNumber}`, "vendor_invoice", next.id, next);
+    return next;
+  },
+
+  voidInvoice(input: {
+    invoiceId: string;
+    reason?: string | null;
+  }): VendorInvoice | undefined {
+    const invoices = vendorBillingService.getInvoices();
+    const invoice = invoices.find((item) => item.id === input.invoiceId);
+    if (!invoice) return undefined;
+    if (invoice.status === "void") return invoice;
+    if (invoice.status === "paid" || invoice.amountPaid > 0) {
+      throw new Error("Paid or partially paid invoices cannot be voided. Use the payment workflow for adjustments.");
+    }
+    const staff = currentStaff();
+    const now = nowIso();
+    const next = normalizeInvoice({
+      ...invoice,
+      status: "void",
+      balanceDue: 0,
+      collectionStatus: "void",
+      voidedAt: now,
+      voidedByStaffId: staff.staffId,
+      voidedByStaffName: staff.staffName,
+      voidReason: input.reason || "Voided from Vendor Bills / Receivables.",
+      updatedAt: now,
+    });
+    setAll(INVOICES_KEY, upsert(invoices, next));
+    addLedger({
+      vendorId: next.vendorId,
+      vendorName: next.vendorName,
+      invoiceId: next.id,
+      invoiceNumber: next.invoiceNumber,
+      entryType: "invoice_voided",
+      debit: 0,
+      credit: invoice.balanceDue,
+      balanceImpact: -invoice.balanceDue,
+      notes: next.voidReason || "Invoice voided",
+      createdByStaffId: staff.staffId,
+      createdByStaffName: staff.staffName,
+    });
+    audit(`Voided invoice ${next.invoiceNumber}`, "vendor_invoice", next.id, next);
     return next;
   },
 };

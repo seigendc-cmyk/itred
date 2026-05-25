@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
+  Ban,
   Briefcase,
   DollarSign,
   Eye,
   FileText,
+  MessageCircle,
   PlusCircle,
   Printer,
   Receipt,
@@ -22,6 +24,7 @@ import {
   CashBankAccount,
   Vendor,
   VendorInvoice,
+  VendorInvoiceBillingProfile,
   VendorInvoiceStatus,
   VendorJob,
 } from "../types.ts";
@@ -38,6 +41,7 @@ import {
   getEffectiveStocktakeLimit,
 } from "../services/entitlementEngine.ts";
 import {
+  VENDOR_INVOICE_PAYMENT_TERMS_DAYS,
   VENDOR_JOB_TYPES,
   vendorBillingService,
 } from "../services/vendorBillingService.ts";
@@ -50,20 +54,53 @@ const addDays = (days: number) => {
   date.setDate(date.getDate() + days);
   return date.toISOString().slice(0, 10);
 };
-const money = (value: number, currency = "USD") =>
-  `${currency} ${Number(value || 0).toFixed(2)}`;
+const money = (value: number) =>
+  `$${Math.round(Number(value || 0)).toLocaleString("en-US")}`;
+const moneyCellClass =
+  "whitespace-nowrap text-right font-mono text-[11px] leading-tight tabular-nums sm:text-xs";
 const inputClass =
   "w-full border border-stone-200 bg-white px-3 py-2 text-xs font-bold uppercase outline-none focus:border-brand-orange";
 
 const statusVariant = (status: VendorInvoiceStatus) => {
   if (status === "paid") return "success";
-  if (status === "overdue" || status === "cancelled") return "danger";
-  if (status === "partially_paid" || status === "unpaid") return "warning";
+  if (status === "overdue" || status === "cancelled" || status === "void") return "danger";
+  if (status === "due_soon" || status === "partially_paid" || status === "unpaid") return "warning";
   return "neutral";
 };
 
 const vendorName = (vendor?: Vendor) =>
   vendor?.tradingName || vendor?.name || "Unknown Vendor";
+
+const invoiceDate = (invoice: VendorInvoice) => invoice.invoiceDate || invoice.issueDate;
+
+const collectionLabel = (invoice: VendorInvoice) => {
+  if (invoice.collectionStatus) return invoice.collectionStatus.replace(/_/g, " ");
+  if (invoice.status === "paid" || invoice.status === "cancelled" || invoice.status === "void") return invoice.status;
+  if (invoice.dueDate < today()) return "overdue";
+  if (invoice.dueDate <= addDays(7)) return "due soon";
+  return "not due";
+};
+
+const whatsappNumber = (vendor?: Vendor) =>
+  String(vendor?.whatsappNumber || vendor?.whatsapp || vendor?.mainPhone || vendor?.phone || "")
+    .replace(/\D/g, "")
+    .replace(/^0+/, "");
+
+const buildCollectionReminderMessage = (invoice: VendorInvoice) =>
+  [
+    "iTred vendor invoice reminder",
+    "",
+    `Vendor: ${invoice.vendorName}`,
+    `Invoice: ${invoice.invoiceNumber}`,
+    `Invoice date: ${invoiceDate(invoice)}`,
+    `Due date: ${invoice.dueDate}`,
+    `Payment terms: ${invoice.paymentTermsDays || VENDOR_INVOICE_PAYMENT_TERMS_DAYS} days`,
+    `Balance due: ${money(invoice.balanceDue)}`,
+    "",
+    "Please arrange payment or send proof of payment for allocation.",
+    "",
+    "Powered by seiGEN Commerce",
+  ].join("\n");
 
 export const VendorBillsReceivables: React.FC = () => {
   const [vendors, setVendors] = useState<Vendor[]>([]);
@@ -73,6 +110,12 @@ export const VendorBillsReceivables: React.FC = () => {
   const [cashAccounts, setCashAccounts] = useState<CashBankAccount[]>([]);
   const [invoices, setInvoices] = useState<VendorInvoice[]>([]);
   const [jobs, setJobs] = useState<VendorJob[]>([]);
+  const [billingProfile, setBillingProfile] = useState<VendorInvoiceBillingProfile>(() =>
+    vendorBillingService.getBillingProfile(),
+  );
+  const [phoneNumbersText, setPhoneNumbersText] = useState(() =>
+    vendorBillingService.getBillingProfile().phoneNumbers.join("\n"),
+  );
   const [selectedInvoiceId, setSelectedInvoiceId] = useState("");
   const [jobVendorId, setJobVendorId] = useState("");
   const [paymentInvoiceId, setPaymentInvoiceId] = useState("");
@@ -120,6 +163,9 @@ export const VendorBillsReceivables: React.FC = () => {
     setInvoices(vendorBillingService.getInvoices());
     setJobs(vendorBillingService.getJobs());
     setCashAccounts(financeService.getActiveCashBankAccounts());
+    const nextProfile = vendorBillingService.getBillingProfile();
+    setBillingProfile(nextProfile);
+    setPhoneNumbersText(nextProfile.phoneNumbers.join("\n"));
   };
 
   useEffect(() => {
@@ -178,8 +224,8 @@ export const VendorBillsReceivables: React.FC = () => {
           (!filters.vendorId || invoice.vendorId === filters.vendorId) &&
           (filters.status === "all" || invoice.status === filters.status) &&
           dueMatch &&
-          (!filters.dateFrom || invoice.issueDate >= filters.dateFrom) &&
-          (!filters.dateTo || invoice.issueDate <= filters.dateTo) &&
+          (!filters.dateFrom || invoiceDate(invoice) >= filters.dateFrom) &&
+          (!filters.dateTo || invoiceDate(invoice) <= filters.dateTo) &&
           (!filters.planId || invoice.planId === filters.planId) &&
           (!filters.sector || vendor?.sector === filters.sector)
         );
@@ -218,7 +264,6 @@ export const VendorBillsReceivables: React.FC = () => {
     const result = vendorBillingService.generateInvoice({
       vendor,
       plan,
-      dueDate: vendor.subscriptionDueDate || addDays(7),
       includeCompletedJobs: true,
       notes: "Generated from Finance & Accounts receivables.",
     });
@@ -226,6 +271,19 @@ export const VendorBillsReceivables: React.FC = () => {
     setJobs(vendorBillingService.getJobs());
     setSelectedInvoiceId(result.invoice.id);
     setMessage(`Generated invoice ${result.invoice.invoiceNumber}.`);
+  };
+
+  const saveBillingProfile = () => {
+    const saved = vendorBillingService.saveBillingProfile({
+      ...billingProfile,
+      phoneNumbers: phoneNumbersText
+        .split(/\r?\n|,/)
+        .map((phone) => phone.trim())
+        .filter(Boolean),
+    });
+    setBillingProfile(saved);
+    setPhoneNumbersText(saved.phoneNumbers.join("\n"));
+    setMessage("Invoice billing profile saved.");
   };
 
   const recordPayment = () => {
@@ -339,6 +397,66 @@ export const VendorBillsReceivables: React.FC = () => {
     setMessage(`Print view opened for ${invoice.invoiceNumber}.`);
   };
 
+  const sendCollectionReminder = (invoice: VendorInvoice) => {
+    if (invoice.balanceDue <= 0 || invoice.status === "paid") {
+      return setMessage("This invoice is already paid.");
+    }
+    if (invoice.status === "cancelled") {
+      return setMessage("Cancelled invoices cannot receive collection reminders.");
+    }
+    if (invoice.status === "void") {
+      return setMessage("Voided invoices cannot receive collection reminders.");
+    }
+    const vendor = vendorById.get(invoice.vendorId);
+    const phone = whatsappNumber(vendor);
+    if (!phone) {
+      return setMessage("Vendor WhatsApp number is missing.");
+    }
+    const reminderMessage = buildCollectionReminderMessage(invoice);
+    const saved = vendorBillingService.recordCollectionReminder({
+      invoiceId: invoice.id,
+      channel: "whatsapp",
+      message: reminderMessage,
+    });
+    if (saved) {
+      setInvoices(vendorBillingService.getInvoices());
+      setSelectedInvoiceId(saved.id);
+    }
+    window.open(
+      `https://wa.me/${phone}?text=${encodeURIComponent(reminderMessage)}`,
+      "_blank",
+      "noopener,noreferrer",
+    );
+    setMessage(`WhatsApp reminder opened for ${invoice.invoiceNumber}.`);
+  };
+
+  const voidInvoice = (invoice: VendorInvoice) => {
+    if (invoice.status === "void") return setMessage("This invoice is already void.");
+    if (invoice.status === "paid" || invoice.amountPaid > 0) {
+      return setMessage("Paid or partially paid invoices cannot be voided. Use the payment workflow for adjustments.");
+    }
+    const reason = window.prompt(
+      `Void invoice ${invoice.invoiceNumber}? Enter the void reason for audit records.`,
+      "Incorrect or duplicate vendor bill.",
+    );
+    if (reason === null) return undefined;
+    const trimmedReason = reason.trim();
+    if (!trimmedReason) return setMessage("A void reason is required.");
+    try {
+      const saved = vendorBillingService.voidInvoice({
+        invoiceId: invoice.id,
+        reason: trimmedReason,
+      });
+      if (saved) {
+        setInvoices(vendorBillingService.getInvoices());
+        setSelectedInvoiceId(saved.id);
+        setMessage(`Invoice ${saved.invoiceNumber} was voided.`);
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to void invoice.");
+    }
+  };
+
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
@@ -371,7 +489,7 @@ export const VendorBillsReceivables: React.FC = () => {
             </select>
             <select value={filters.status} onChange={(e) => setFilters((p) => ({ ...p, status: e.target.value }))} className={inputClass}>
               <option value="all">All Statuses</option>
-              {["draft", "pending", "unpaid", "partially_paid", "paid", "overdue", "cancelled"].map((status) => (
+              {["draft", "issued", "due_soon", "pending", "unpaid", "partially_paid", "paid", "overdue", "cancelled", "void"].map((status) => (
                 <option key={status} value={status}>{status.replace(/_/g, " ")}</option>
               ))}
             </select>
@@ -392,10 +510,10 @@ export const VendorBillsReceivables: React.FC = () => {
           </div>
         </div>
         <div className="max-w-full overflow-x-auto">
-          <table className="min-w-[1120px] w-full text-left text-xs">
+          <table className="min-w-[1280px] w-full text-left text-xs">
             <thead className="bg-stone-100 text-[9px] font-black uppercase text-stone-500">
               <tr>
-                {["Vendor Name", "Active Plan", "Invoice Number", "Amount Due", "Amount Paid", "Balance Due", "Due Date", "Status", "Last Payment Date", "Actions"].map((header) => (
+                {["Vendor Name", "Active Plan", "Invoice Number", "Invoice Date", "Terms", "Amount Due", "Amount Paid", "Balance Due", "Due Date", "Collection", "Status", "Last Reminder", "Last Payment Date", "Actions"].map((header) => (
                   <th key={header} className="border-b border-stone-200 px-4 py-3">{header}</th>
                 ))}
               </tr>
@@ -410,17 +528,23 @@ export const VendorBillsReceivables: React.FC = () => {
                     <td className="px-4 py-3 font-bold uppercase">{invoice.vendorName}</td>
                     <td className="px-4 py-3">{invoice.planName || planById.get(vendor?.planId || "")?.name || "No plan"}</td>
                     <td className="px-4 py-3 font-mono">{invoice.invoiceNumber}</td>
-                    <td className="px-4 py-3 font-mono">{money(invoice.totalAmount, invoice.currency)}</td>
-                    <td className="px-4 py-3 font-mono">{money(invoice.amountPaid, invoice.currency)}</td>
-                    <td className="px-4 py-3 font-mono font-black">{money(invoice.balanceDue, invoice.currency)}</td>
+                    <td className="px-4 py-3">{invoiceDate(invoice)}</td>
+                    <td className="px-4 py-3 font-mono">{invoice.paymentTermsDays || VENDOR_INVOICE_PAYMENT_TERMS_DAYS} days</td>
+                    <td className={`px-4 py-3 ${moneyCellClass}`}>{money(invoice.totalAmount)}</td>
+                    <td className={`px-4 py-3 ${moneyCellClass}`}>{money(invoice.amountPaid)}</td>
+                    <td className={`px-4 py-3 font-black ${moneyCellClass}`}>{money(invoice.balanceDue)}</td>
                     <td className="px-4 py-3">{invoice.dueDate}</td>
+                    <td className="px-4 py-3 font-bold uppercase">{collectionLabel(invoice)}</td>
                     <td className="px-4 py-3"><StatusBadge status={invoice.status} variant={statusVariant(invoice.status) as any} /></td>
+                    <td className="px-4 py-3">{invoice.lastReminderAt ? invoice.lastReminderAt.slice(0, 10) : "-"}</td>
                     <td className="px-4 py-3">{lastPayment?.paymentDate || "-"}</td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-2">
                         <button className="border border-stone-200 p-2" onClick={() => setSelectedInvoiceId(invoice.id)} title="View"><Eye size={13} /></button>
                         <button className="border border-stone-200 p-2" onClick={() => printInvoice(invoice)} title="Print"><Printer size={13} /></button>
                         <button className="border border-stone-200 p-2" onClick={() => setPaymentInvoiceId(invoice.id)} title="Record payment"><DollarSign size={13} /></button>
+                        <button className="border border-stone-200 p-2" onClick={() => sendCollectionReminder(invoice)} title="WhatsApp reminder"><MessageCircle size={13} /></button>
+                        <button className="border border-stone-200 p-2 text-red-700" onClick={() => voidInvoice(invoice)} title="Void invoice"><Ban size={13} /></button>
                         <button className="border border-stone-200 p-2" onClick={() => setJobVendorId(invoice.vendorId)} title="Add job"><PlusCircle size={13} /></button>
                         <button className="border border-stone-200 px-2 py-1 text-[9px] font-black uppercase" onClick={() => window.location.assign(`/vendor-management`)}>
                           Open Vendor
@@ -440,18 +564,132 @@ export const VendorBillsReceivables: React.FC = () => {
         </div>
       </DataPanel>
 
+      <DataPanel
+        title="Invoice Settings"
+        subtitle="Company billing profile used on generated vendor invoice print/download output."
+      >
+        <div className="grid grid-cols-1 gap-3 p-4 lg:grid-cols-3">
+          <div className="space-y-3">
+            <input
+              value={billingProfile.companyName}
+              onChange={(event) =>
+                setBillingProfile((profile) => ({
+                  ...profile,
+                  companyName: event.target.value,
+                }))
+              }
+              className={inputClass}
+              placeholder="Company name"
+            />
+            <textarea
+              value={billingProfile.companyAddress}
+              onChange={(event) =>
+                setBillingProfile((profile) => ({
+                  ...profile,
+                  companyAddress: event.target.value,
+                }))
+              }
+              className={`${inputClass} min-h-20`}
+              placeholder="Company address"
+            />
+            <textarea
+              value={phoneNumbersText}
+              onChange={(event) => setPhoneNumbersText(event.target.value)}
+              className={`${inputClass} min-h-24`}
+              placeholder="Phone numbers, one per line"
+            />
+          </div>
+          <div className="space-y-3">
+            <input
+              value={billingProfile.ecocashNumber}
+              onChange={(event) =>
+                setBillingProfile((profile) => ({
+                  ...profile,
+                  ecocashNumber: event.target.value,
+                }))
+              }
+              className={inputClass}
+              placeholder="Ecocash number"
+            />
+            <input
+              value={billingProfile.innBucksNumber}
+              onChange={(event) =>
+                setBillingProfile((profile) => ({
+                  ...profile,
+                  innBucksNumber: event.target.value,
+                }))
+              }
+              className={inputClass}
+              placeholder="InnBucks number"
+            />
+            <input
+              value={billingProfile.mukuruNumber}
+              onChange={(event) =>
+                setBillingProfile((profile) => ({
+                  ...profile,
+                  mukuruNumber: event.target.value,
+                }))
+              }
+              className={inputClass}
+              placeholder="Mukuru number"
+            />
+            <label className="flex items-center gap-2 text-[10px] font-black uppercase text-stone-600">
+              <input
+                type="checkbox"
+                checked={billingProfile.useVendorAssignedRpnForPayments}
+                onChange={(event) =>
+                  setBillingProfile((profile) => ({
+                    ...profile,
+                    useVendorAssignedRpnForPayments: event.target.checked,
+                  }))
+                }
+                className="accent-brand-orange"
+              />
+              Use vendor assigned RPN for payment follow-up
+            </label>
+          </div>
+          <div className="space-y-3">
+            <textarea
+              value={billingProfile.popInstructionText}
+              onChange={(event) =>
+                setBillingProfile((profile) => ({
+                  ...profile,
+                  popInstructionText: event.target.value,
+                }))
+              }
+              className={`${inputClass} min-h-24`}
+              placeholder="POP instruction text"
+            />
+            <textarea
+              value={billingProfile.invoiceTermsText}
+              onChange={(event) =>
+                setBillingProfile((profile) => ({
+                  ...profile,
+                  invoiceTermsText: event.target.value,
+                }))
+              }
+              className={`${inputClass} min-h-24`}
+              placeholder="Invoice terms text"
+            />
+            <PrimaryButton onClick={saveBillingProfile} size="sm">
+              Save Invoice Settings
+            </PrimaryButton>
+          </div>
+        </div>
+      </DataPanel>
+
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <DataPanel title="Record Payment" subtitle="Payments update invoice amount paid, balance due and status.">
           <div className="space-y-3 p-4">
             <select value={paymentInvoiceId || selectedInvoiceId} onChange={(e) => setPaymentInvoiceId(e.target.value)} className={inputClass}>
               <option value="">Select Invoice</option>
-              {invoices.map((invoice) => <option key={invoice.id} value={invoice.id}>{invoice.invoiceNumber} / {invoice.vendorName} / {money(invoice.balanceDue, invoice.currency)}</option>)}
+              {invoices.map((invoice) => <option key={invoice.id} value={invoice.id}>{invoice.invoiceNumber} / {invoice.vendorName} / {money(invoice.balanceDue)}</option>)}
             </select>
             <select value={paymentForm.accountId} onChange={(e) => setPaymentForm((p) => ({ ...p, accountId: e.target.value }))} className={inputClass}>
               <option value="">Receiving Cash/Bank Account</option>
               {cashAccounts.map((account) => (
                 <option key={account.id} value={account.id}>
-                  {account.accountName} / {account.currency} {account.currentBalance.toFixed(2)}
+                  {account.accountName} / {money(account.currentBalance)}
                 </option>
               ))}
             </select>
@@ -542,13 +780,22 @@ export const VendorBillsReceivables: React.FC = () => {
           actions={<SecondaryButton onClick={() => printInvoice(selectedInvoice)} size="sm"><Printer size={13} className="mr-1 inline" /> Print</SecondaryButton>}
         >
           <div className="p-4">
-            <div className="grid grid-cols-2 gap-3 text-[10px] font-bold uppercase text-stone-500 md:grid-cols-5">
+            <div className="grid grid-cols-2 gap-3 text-[10px] font-bold uppercase text-stone-500 md:grid-cols-7">
               <div className="border border-stone-200 p-3">Vendor: {selectedInvoice.vendorName}</div>
+              <div className="border border-stone-200 p-3">Invoice Date: {invoiceDate(selectedInvoice)}</div>
               <div className="border border-stone-200 p-3">Due: {selectedInvoice.dueDate}</div>
-              <div className="border border-stone-200 p-3">Total: {money(selectedInvoice.totalAmount, selectedInvoice.currency)}</div>
-              <div className="border border-stone-200 p-3">Paid: {money(selectedInvoice.amountPaid, selectedInvoice.currency)}</div>
-              <div className="border border-stone-200 p-3">Balance: {money(selectedInvoice.balanceDue, selectedInvoice.currency)}</div>
+              <div className="border border-stone-200 p-3">Terms: {selectedInvoice.paymentTermsDays || VENDOR_INVOICE_PAYMENT_TERMS_DAYS} days</div>
+              <div className="min-w-0 border border-stone-200 p-3">Total: <span className="whitespace-nowrap tabular-nums">{money(selectedInvoice.totalAmount)}</span></div>
+              <div className="min-w-0 border border-stone-200 p-3">Paid: <span className="whitespace-nowrap tabular-nums">{money(selectedInvoice.amountPaid)}</span></div>
+              <div className="min-w-0 border border-stone-200 p-3">Balance: <span className="whitespace-nowrap tabular-nums">{money(selectedInvoice.balanceDue)}</span></div>
             </div>
+            {selectedInvoice.status === "void" && (
+              <div className="mt-3 border border-red-200 bg-red-50 p-3 text-[10px] font-bold uppercase text-red-800">
+                Void audit: {selectedInvoice.voidedAt ? selectedInvoice.voidedAt.slice(0, 10) : "Date unavailable"} /{" "}
+                {selectedInvoice.voidedByStaffName || "Staff unavailable"} /{" "}
+                {selectedInvoice.voidReason || "No reason supplied"}
+              </div>
+            )}
             <table className="mt-4 w-full text-left text-xs">
               <thead className="bg-stone-100 text-[9px] font-black uppercase text-stone-500">
                 <tr>
@@ -560,9 +807,9 @@ export const VendorBillsReceivables: React.FC = () => {
                   <tr key={line.id} className="border-b border-stone-100">
                     <td className="px-3 py-2 font-bold uppercase">{line.description}</td>
                     <td className="px-3 py-2 font-mono">{line.quantity}</td>
-                    <td className="px-3 py-2 font-mono">{money(line.unitPrice, selectedInvoice.currency)}</td>
-                    <td className="px-3 py-2 font-mono">{money(line.taxAmount, selectedInvoice.currency)}</td>
-                    <td className="px-3 py-2 font-mono">{money(line.grossAmount, selectedInvoice.currency)}</td>
+                    <td className={`px-3 py-2 ${moneyCellClass}`}>{money(line.unitPrice)}</td>
+                    <td className={`px-3 py-2 ${moneyCellClass}`}>{money(line.taxAmount)}</td>
+                    <td className={`px-3 py-2 ${moneyCellClass}`}>{money(line.grossAmount)}</td>
                   </tr>
                 ))}
               </tbody>

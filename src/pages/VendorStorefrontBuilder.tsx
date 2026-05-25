@@ -1637,12 +1637,18 @@ export const VendorStorefrontBuilder: React.FC = () => {
             className='shadow-sm border border-stone-200 rounded-none bg-white'
           >
             <div className='p-6 bg-stone-50 border-t border-stone-100'>
-              <textarea
-                className='w-full min-h-[400px] border-2 border-stone-200 bg-white p-4 text-[11px] font-mono text-stone-600 leading-relaxed outline-none focus:border-brand-orange transition-colors custom-scrollbar'
-                readOnly
-                value={selectedHtml}
-                placeholder='Generated HTML code will appear here...'
-              />
+              {selectedHtml ? (
+                <iframe
+                  title='Storefront HTML preview'
+                  srcDoc={selectedHtml}
+                  className='h-[720px] w-full border border-stone-200 bg-white'
+                  sandbox='allow-scripts allow-popups allow-forms allow-same-origin'
+                />
+              ) : (
+                <div className='flex min-h-[240px] items-center justify-center border border-dashed border-stone-200 bg-white p-6 text-center text-xs font-bold uppercase text-stone-400'>
+                  No storefront HTML generated yet.
+                </div>
+              )}
             </div>
           </DataPanel>
         </div>

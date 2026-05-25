@@ -13,44 +13,71 @@ import {
   X,
   AlertTriangle,
   Clock,
+  Loader2,
 } from "lucide-react";
 import { matchesFreeOrderSearch } from "../utils/searchUtils.ts";
 
 interface PrimaryButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   children: React.ReactNode;
   size?: "sm" | "md" | "lg";
+  isLoading?: boolean;
+  loadingText?: string;
 }
 
 export const PrimaryButton: React.FC<PrimaryButtonProps> = ({
   children,
   size = "md",
   className = "",
+  isLoading = false,
+  loadingText,
+  disabled,
   ...props
 }) => (
   <button
     className={`btn-primary ${size === "sm" ? "px-3 py-1.5 text-[9px]" : ""} ${className}`}
     {...props}
+    disabled={disabled || isLoading}
   >
-    {children}
+    {isLoading ? (
+      <span className="inline-flex items-center gap-2">
+        <Loader2 size={14} className="animate-spin" />
+        {loadingText || "Processing..."}
+      </span>
+    ) : (
+      children
+    )}
   </button>
 );
 
 interface SecondaryButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   children: React.ReactNode;
   size?: "sm" | "md" | "lg";
+  isLoading?: boolean;
+  loadingText?: string;
 }
 
 export const SecondaryButton: React.FC<SecondaryButtonProps> = ({
   children,
   size = "md",
   className = "",
+  isLoading = false,
+  loadingText,
+  disabled,
   ...props
 }) => (
   <button
     className={`btn-secondary ${size === "sm" ? "px-3 py-1.5 text-[9px]" : ""} ${className}`}
     {...props}
+    disabled={disabled || isLoading}
   >
-    {children}
+    {isLoading ? (
+      <span className="inline-flex items-center gap-2">
+        <Loader2 size={14} className="animate-spin" />
+        {loadingText || "Processing..."}
+      </span>
+    ) : (
+      children
+    )}
   </button>
 );
 
@@ -480,7 +507,7 @@ interface ConfirmDialogProps {
   message: string;
   confirmLabel?: string;
   cancelLabel?: string;
-  onConfirm: () => void;
+  onConfirm: () => void | Promise<void>;
   onCancel: () => void;
   variant?: "danger" | "warning" | "info" | "success";
   children?: React.ReactNode;
@@ -497,6 +524,12 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   variant = "info",
   children,
 }) => {
+  const [isConfirming, setIsConfirming] = React.useState(false);
+
+  React.useEffect(() => {
+    if (isOpen) setIsConfirming(false);
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const confirmClass =
@@ -507,6 +540,16 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
     variant === "danger" || variant === "warning"
       ? "bg-red-50 text-red-700 border-red-100"
       : "bg-orange-50 text-brand-orange border-orange-100";
+
+  const handleConfirm = async () => {
+    if (isConfirming) return;
+    setIsConfirming(true);
+    try {
+      await Promise.resolve(onConfirm());
+    } finally {
+      setIsConfirming(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-brand-charcoal/40 backdrop-blur-sm">
@@ -522,7 +565,8 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
           <button
             type="button"
             onClick={onCancel}
-            className="text-white/60 hover:text-white transition-colors"
+            disabled={isConfirming}
+            className="text-white/60 hover:text-white transition-colors disabled:opacity-40"
             aria-label="Close dialog"
           >
             <X size={16} />
@@ -545,16 +589,25 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
           <button
             type="button"
             onClick={onCancel}
-            className="px-4 py-2 bg-white border border-stone-200 text-[10px] uppercase font-bold text-stone-600 hover:bg-stone-100 transition-colors"
+            disabled={isConfirming}
+            className="px-4 py-2 bg-white border border-stone-200 text-[10px] uppercase font-bold text-stone-600 hover:bg-stone-100 transition-colors disabled:opacity-50"
           >
             {cancelLabel}
           </button>
           <button
             type="button"
-            onClick={onConfirm}
-            className={`px-4 py-2 border text-[10px] uppercase font-bold text-white shadow-sm transition-colors ${confirmClass}`}
+            onClick={handleConfirm}
+            disabled={isConfirming}
+            className={`px-4 py-2 border text-[10px] uppercase font-bold text-white shadow-sm transition-colors disabled:opacity-60 ${confirmClass}`}
           >
-            {confirmLabel}
+            {isConfirming ? (
+              <span className="inline-flex items-center gap-2">
+                <Loader2 size={12} className="animate-spin" />
+                Processing...
+              </span>
+            ) : (
+              confirmLabel
+            )}
           </button>
         </div>
       </motion.div>

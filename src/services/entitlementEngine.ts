@@ -8,9 +8,6 @@ import {
   getBillableProductsForVendor,
 } from "../utils/planQuotaUtils.ts";
 import { sanitizeForFirestore } from "../utils/firestoreSanitize.ts";
-import { inventorySpotCheckService } from "./inventorySpotCheckService.ts";
-import { vendorBillingService } from "./vendorBillingService.ts";
-import { vendorInventorySpotCheckService } from "./vendorInventorySpotCheckService.ts";
 
 export interface VendorUsage {
   products: number;
@@ -155,6 +152,40 @@ const numericLimit = (value: unknown, fallback = 0) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+export function resolveCatalogueProductLimit(
+  plan: any,
+): number | "unlimited" | null {
+  if (!plan) return null;
+
+  const features =
+    plan.features && !Array.isArray(plan.features) ? plan.features : {};
+  const entitlements =
+    plan.entitlements && !Array.isArray(plan.entitlements)
+      ? plan.entitlements
+      : {};
+  const candidates = [
+    plan.maxProductsPerCatalogue,
+    plan.catalogueProductLimit,
+    plan.productLimit,
+    plan.maxProducts,
+    plan.productsAllowed,
+    features.maxProductsPerCatalogue,
+    features.productLimit,
+    features.catalogueProductLimit,
+    entitlements.maxProductsPerCatalogue,
+    entitlements.productLimit,
+  ];
+
+  for (const value of candidates) {
+    if (value === undefined || value === null || value === "") continue;
+    if (isUnlimited(value)) return "unlimited";
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+  }
+
+  return null;
+}
+
 const isActiveBrandedProductsAddOn = (addOn: any) => {
   if (!addOn) return false;
   if (addOn.addOnKey !== "branded_products") return false;
@@ -166,27 +197,6 @@ const isActiveBrandedProductsAddOn = (addOn: any) => {
   if (addOn.endsAt && new Date(addOn.endsAt) < now) return false;
   return true;
 };
-
-const isActiveAddOn = (addOn: any, keys: string[]) => {
-  if (!addOn) return false;
-  if (!keys.includes(String(addOn.addOnKey || ""))) return false;
-  if (addOn.enabled === false) return false;
-  const status = String(addOn.status || "active").toLowerCase();
-  if (!["active", "trial", "paid"].includes(status)) return false;
-  const now = new Date();
-  if (addOn.startsAt && new Date(addOn.startsAt) > now) return false;
-  if (addOn.endsAt && new Date(addOn.endsAt) < now) return false;
-  return true;
-};
-
-const addQuota = (
-  included: number | "unlimited",
-  addOnQuantity: number,
-): number | "unlimited" =>
-  included === "unlimited" ? "unlimited" : Math.max(0, included + addOnQuantity);
-
-const monthKey = (value?: string) =>
-  String(value || new Date().toISOString().slice(0, 7)).slice(0, 7);
 
 export function getEffectiveBrandedProductLimit(
   plan: any,
@@ -200,7 +210,11 @@ export function getEffectiveBrandedProductLimit(
 
   const addOnQuantity = (subscription?.addOns || [])
     .filter(isActiveBrandedProductsAddOn)
-    .reduce((sum: number, addOn: any) => sum + Math.max(0, Number(addOn.quantity) || 0), 0);
+    .reduce(
+      (sum: number, addOn: any) =>
+        sum + Math.max(0, Number(addOn.quantity) || 0),
+      0,
+    );
 
   const total = included + addOnQuantity;
   const max = numericLimit(plan.maxBrandedProducts, total);
@@ -244,10 +258,9 @@ export function canUseBrandedProducts(input: {
           used: usage,
           limit: 0,
           overBy: usage + 1,
-          message:
-            addOnEnabled
-              ? "Branded Products add-on is available but not active for this vendor."
-              : "Branded Products is not enabled for this vendor.",
+          message: addOnEnabled
+            ? "Branded Products add-on is available but not active for this vendor."
+            : "Branded Products is not enabled for this vendor.",
         },
       ],
     };
@@ -271,192 +284,6 @@ export function canUseBrandedProducts(input: {
   }
 
   return { allowed: true, severity: "ok", reasons: [] };
-}
-
-export function getEffectiveSpotCheckLimit(
-  plan: any,
-  subscription?: any,
-): number | "unlimited" {
-  if (!plan) return 0;
-  const included = numericLimit(
-    plan.spotChecksIncludedPerMonth ?? plan.inventorySpotChecksPerMonth,
-    0,
-  );
-  if (included === "unlimited") return "unlimited";
-  const addOnQuantity = (subscription?.addOns || [])
-    .filter((addOn: any) =>
-      isActiveAddOn(addOn, ["spot_checks", "inventory_spot_checks"]),
-    )
-    .reduce(
-      (sum: number, addOn: any) =>
-        sum + Math.max(0, Number(addOn.quantity) || 0),
-      0,
-    );
-  return addQuota(included, addOnQuantity);
-}
-
-export function getEffectiveStocktakeLimit(
-  plan: any,
-  subscription?: any,
-): number | "unlimited" {
-  if (!plan) return 0;
-  const included = numericLimit(plan.stocktakesIncludedPerMonth, 0);
-  if (included === "unlimited") return "unlimited";
-  const addOnQuantity = (subscription?.addOns || [])
-    .filter((addOn: any) => isActiveAddOn(addOn, ["stocktake", "stocktakes"]))
-    .reduce(
-      (sum: number, addOn: any) =>
-        sum + Math.max(0, Number(addOn.quantity) || 0),
-      0,
-    );
-  return addQuota(included, addOnQuantity);
-}
-
-export function calculateSpotCheckUsage(
-  vendorId: string,
-  month = monthKey(),
-): number {
-  const monthPrefix = monthKey(month);
-  const legacyChecks = inventorySpotCheckService
-    .getSpotChecks()
-    .filter(
-      (check: any) =>
-        check.vendorId === vendorId &&
-        String(check.completedAt || check.checkDate || check.createdAt || "")
-          .slice(0, 7) === monthPrefix &&
-        check.status !== "cancelled",
-    ).length;
-  const inventoryChecks = vendorInventorySpotCheckService
-    .getSpotChecks()
-    .filter(
-      (check: any) =>
-        check.vendorId === vendorId &&
-        String(check.approvedAt || check.updatedAt || check.createdAt || "")
-          .slice(0, 7) === monthPrefix &&
-        check.status !== "cancelled" &&
-        check.status !== "rejected",
-    ).length;
-  return legacyChecks + inventoryChecks;
-}
-
-export function calculateStocktakeUsage(
-  vendorId: string,
-  month = monthKey(),
-): number {
-  const monthPrefix = monthKey(month);
-  return vendorBillingService
-    .getJobs(vendorId)
-    .filter(
-      (job: any) =>
-        job.jobType === "stocktake" &&
-        String(job.completedAt || job.jobDate || job.createdAt || "").slice(0, 7) ===
-          monthPrefix &&
-        job.status !== "cancelled",
-    ).length;
-}
-
-const inventoryControlCheck = (input: {
-  vendorId: string;
-  plan: any;
-  subscription?: any;
-  usage?: number;
-  limit: number | "unlimited";
-  enabled: boolean;
-  label: string;
-  addOnAllowed: boolean;
-  addOnName: string;
-}): EntitlementCheckResult => {
-  const usage = Number(input.usage || 0);
-  if (!input.enabled) {
-    return {
-      allowed: false,
-      severity: "blocked",
-      reasons: [
-        {
-          key: input.addOnName,
-          label: input.label,
-          used: usage,
-          limit: 0,
-          overBy: usage + 1,
-          message: input.addOnAllowed
-            ? `${input.label} add-on is available but not active for this vendor.`
-            : `${input.label} is not enabled for this vendor plan.`,
-        },
-      ],
-    };
-  }
-  if (input.limit !== "unlimited" && usage >= Number(input.limit)) {
-    return {
-      allowed: false,
-      severity: "blocked",
-      reasons: [
-        {
-          key: input.addOnName,
-          label: input.label,
-          used: usage + 1,
-          limit: Number(input.limit),
-          overBy: usage + 1 - Number(input.limit),
-          message: `${input.label} quota exceeded (${usage}/${input.limit}). Add the add-on or upgrade plan.`,
-        },
-      ],
-    };
-  }
-  return { allowed: true, severity: "ok", reasons: [] };
-};
-
-export function canUseInventorySpotChecks(input: {
-  vendorId: string;
-  plan: any;
-  subscription?: any;
-  usage?: number;
-}): EntitlementCheckResult {
-  const limit = getEffectiveSpotCheckLimit(input.plan, input.subscription);
-  const enabled =
-    !!input.plan?.enableInventorySpotChecks ||
-    !!input.plan?.isInventorySpotCheckIncluded ||
-    limit === "unlimited" ||
-    Number(limit) > 0 ||
-    (input.subscription?.addOns || []).some((addOn: any) =>
-      isActiveAddOn(addOn, ["spot_checks", "inventory_spot_checks"]),
-    );
-  return inventoryControlCheck({
-    vendorId: input.vendorId,
-    plan: input.plan,
-    subscription: input.subscription,
-    usage: input.usage ?? calculateSpotCheckUsage(input.vendorId),
-    limit,
-    enabled,
-    label: "Inventory Spot Checks",
-    addOnAllowed: !!input.plan?.allowSpotCheckAddOn,
-    addOnName: "inventorySpotChecks",
-  });
-}
-
-export function canUseStocktake(input: {
-  vendorId: string;
-  plan: any;
-  subscription?: any;
-  usage?: number;
-}): EntitlementCheckResult {
-  const limit = getEffectiveStocktakeLimit(input.plan, input.subscription);
-  const enabled =
-    !!input.plan?.enableStocktake ||
-    limit === "unlimited" ||
-    Number(limit) > 0 ||
-    (input.subscription?.addOns || []).some((addOn: any) =>
-      isActiveAddOn(addOn, ["stocktake", "stocktakes"]),
-    );
-  return inventoryControlCheck({
-    vendorId: input.vendorId,
-    plan: input.plan,
-    subscription: input.subscription,
-    usage: input.usage ?? calculateStocktakeUsage(input.vendorId),
-    limit,
-    enabled,
-    label: "Stocktake",
-    addOnAllowed: !!input.plan?.allowStocktakeAddOn,
-    addOnName: "stocktake",
-  });
 }
 
 /**
@@ -837,6 +664,7 @@ export function canGenerateCatalogue(input: {
   cataloguesThisPeriod?: number;
   allowOverage?: boolean;
   walletBalance?: number;
+  isMultiVendor?: boolean;
 }): EntitlementCheckResult {
   const {
     plan,
@@ -845,16 +673,48 @@ export function canGenerateCatalogue(input: {
     cataloguesThisPeriod = 0,
     allowOverage = false,
     walletBalance = 0,
+    isMultiVendor = false,
   } = input;
   const reasons: EntitlementReason[] = [];
 
-  const maxProducts = Number(plan.maxProducts || 0);
-  const maxImages = Number(plan.maxImagesPerCatalogue || 0);
-  const maxCatalogues = Number(plan.maxDeploymentsPerMonth || 0);
-
   let allowed = true;
 
-  if (selectedProductCount > maxProducts) {
+  if (plan.enableCatalogueGeneration === false) {
+    reasons.push({
+      key: "disabled",
+      label: "Feature",
+      used: 1,
+      limit: 1,
+      overBy: 0,
+      message: "Catalogue generation is disabled for this plan.",
+    });
+    allowed = false;
+  }
+
+  if (isMultiVendor && !plan.enableMultiVendorCatalogue) {
+    reasons.push({
+      key: "multi_vendor",
+      label: "Feature",
+      used: 1,
+      limit: 1,
+      overBy: 0,
+      message: "Multi-vendor catalogues are not enabled for this plan.",
+    });
+    allowed = false;
+  }
+
+  const resolvedProductLimit = resolveCatalogueProductLimit(plan);
+  const maxProducts = resolvedProductLimit ?? "unlimited";
+  const maxImages = isUnlimited(plan.maxImagesPerCatalogue)
+    ? "unlimited"
+    : Number(plan.maxImagesPerCatalogue ?? 0);
+  const maxCatalogues = isUnlimited(plan.cataloguesIncludedPerMonth)
+    ? "unlimited"
+    : Number(
+        plan.cataloguesIncludedPerMonth ?? plan.maxDeploymentsPerMonth ?? 0,
+      );
+
+  if (maxProducts !== "unlimited" && selectedProductCount > maxProducts) {
     reasons.push({
       key: "products",
       label: "Products",
@@ -866,7 +726,7 @@ export function canGenerateCatalogue(input: {
     allowed = false;
   }
 
-  if (selectedImageCount > maxImages) {
+  if (maxImages !== "unlimited" && selectedImageCount > maxImages) {
     reasons.push({
       key: "images",
       label: "Images",
@@ -878,7 +738,7 @@ export function canGenerateCatalogue(input: {
     allowed = false;
   }
 
-  if (cataloguesThisPeriod >= maxCatalogues) {
+  if (maxCatalogues !== "unlimited" && cataloguesThisPeriod >= maxCatalogues) {
     reasons.push({
       key: "catalogues",
       label: "Catalogues / Month",
@@ -890,14 +750,18 @@ export function canGenerateCatalogue(input: {
     allowed = false;
   }
 
-  if (!allowed && allowOverage) {
+  if (!allowed && allowOverage && plan.allowCatalogueOverage !== false) {
     // Check if wallet balance can cover the overage
-    const overageProducts = Math.max(0, selectedProductCount - maxProducts);
-    const overageCatalogues = Math.max(
-      0,
-      cataloguesThisPeriod + 1 - maxCatalogues,
-    );
+    const overageProducts =
+      maxProducts === "unlimited"
+        ? 0
+        : Math.max(0, selectedProductCount - maxProducts);
+    const overageCatalogues =
+      maxCatalogues === "unlimited"
+        ? 0
+        : Math.max(0, cataloguesThisPeriod + 1 - maxCatalogues);
     const productPrice =
+      plan.catalogueOveragePrice ??
       plan.catalogueProductOveragePrice ??
       plan.overageProductPrice ??
       plan.productOveragePrice ??
@@ -907,7 +771,7 @@ export function canGenerateCatalogue(input: {
     const cost =
       overageProducts * productPrice + overageCatalogues * cataloguePrice;
 
-    if (walletBalance >= cost) {
+    if (plan.allowCatalogueCredit !== false && walletBalance >= cost) {
       return {
         allowed: true,
         severity: "warning",
@@ -920,7 +784,7 @@ export function canGenerateCatalogue(input: {
         used: cost,
         limit: walletBalance,
         overBy: cost - walletBalance,
-        message: `Insufficient wallet balance to cover overage (Need ${cost}, have ${walletBalance})`,
+        message: `Insufficient wallet balance or credit not allowed to cover overage (Need ${cost}, have ${walletBalance})`,
       });
     }
   }
@@ -930,6 +794,198 @@ export function canGenerateCatalogue(input: {
     severity: allowed ? "ok" : allowOverage ? "warning" : "blocked",
     reasons,
   };
+}
+
+export const calculateSpotCheckUsage = (
+  vendorId: string,
+  month?: string,
+  spotChecks: Array<any> = [],
+): number => {
+  if (!vendorId) return 0;
+
+  const monthKey = month || new Date().toISOString().slice(0, 7);
+
+  return spotChecks.filter((item) => {
+    const itemVendorId = String(item.vendorId ?? "");
+    const itemDate = String(
+      item.createdAt ?? item.postedAt ?? item.completedAt ?? "",
+    );
+
+    return itemVendorId === vendorId && itemDate.startsWith(monthKey);
+  }).length;
+};
+
+export function getEffectiveSpotCheckLimit(
+  plan: any,
+  subscription?: any,
+): number | "unlimited" {
+  if (!plan) return 0;
+  if (isUnlimited(plan.spotChecksIncludedPerMonth)) return "unlimited";
+
+  const included = numericLimit(
+    plan.spotChecksIncludedPerMonth,
+    plan.inventorySpotChecksPerMonth || 0,
+  );
+  if (included === "unlimited") return "unlimited";
+
+  const addOnQuantity = (subscription?.addOns || [])
+    .filter((a: any) => a.addOnKey === "spot_checks" && a.status === "active")
+    .reduce(
+      (sum: number, a: any) => sum + Math.max(0, Number(a.quantity) || 0),
+      0,
+    );
+
+  return (Number(included) || 0) + addOnQuantity;
+}
+
+export function canUseInventorySpotChecks(input: {
+  vendorId: string;
+  plan: any;
+  subscription?: any;
+  usage?: number;
+  spotChecks?: any[];
+}): EntitlementCheckResult {
+  const { vendorId, plan, subscription } = input;
+  const usage =
+    input.usage ??
+    calculateSpotCheckUsage(vendorId, undefined, input.spotChecks || []);
+  const limit = getEffectiveSpotCheckLimit(plan, subscription);
+
+  const enabled =
+    !!plan?.isInventorySpotCheckIncluded ||
+    !!plan?.enableInventorySpotChecks ||
+    limit === "unlimited" ||
+    Number(limit) > 0;
+
+  if (!enabled) {
+    return {
+      allowed: false,
+      severity: "blocked",
+      reasons: [
+        {
+          key: "spotChecks",
+          label: "Inventory Spot Checks",
+          used: usage,
+          limit: 0,
+          overBy: usage + 1,
+          message:
+            "Inventory Spot Checks are not enabled for this vendor plan.",
+        },
+      ],
+    };
+  }
+
+  if (limit !== "unlimited" && usage >= Number(limit)) {
+    return {
+      allowed: false,
+      severity: "blocked",
+      reasons: [
+        {
+          key: "spotChecks",
+          label: "Inventory Spot Checks",
+          used: usage + 1,
+          limit: Number(limit),
+          overBy: usage + 1 - Number(limit),
+          message: `Spot check limit exceeded (${usage}/${limit}).`,
+        },
+      ],
+    };
+  }
+
+  return { allowed: true, severity: "ok", reasons: [] };
+}
+
+export const calculateStocktakeUsage = (
+  vendorId: string,
+  month?: string,
+  jobs: Array<any> = [],
+): number => {
+  if (!vendorId) return 0;
+  const monthKey = month || new Date().toISOString().slice(0, 7);
+  return jobs.filter((item) => {
+    const itemVendorId = String(item.vendorId ?? "");
+    const itemDate = String(
+      item.jobDate ?? item.createdAt ?? item.completedAt ?? "",
+    );
+    return (
+      itemVendorId === vendorId &&
+      item.jobType === "stocktake" &&
+      itemDate.startsWith(monthKey)
+    );
+  }).length;
+};
+
+export function getEffectiveStocktakeLimit(
+  plan: any,
+  subscription?: any,
+): number | "unlimited" {
+  if (!plan) return 0;
+  if (isUnlimited(plan.stocktakesIncludedPerMonth)) return "unlimited";
+
+  const included = numericLimit(plan.stocktakesIncludedPerMonth, 0);
+  if (included === "unlimited") return "unlimited";
+
+  const addOnQuantity = (subscription?.addOns || [])
+    .filter((a: any) => a.addOnKey === "stocktake" && a.status === "active")
+    .reduce(
+      (sum: number, a: any) => sum + Math.max(0, Number(a.quantity) || 0),
+      0,
+    );
+
+  return (Number(included) || 0) + addOnQuantity;
+}
+
+export function canUseStocktake(input: {
+  vendorId: string;
+  plan: any;
+  subscription?: any;
+  usage?: number;
+  jobs?: any[];
+}): EntitlementCheckResult {
+  const { vendorId, plan, subscription } = input;
+  const usage =
+    input.usage ??
+    calculateStocktakeUsage(vendorId, undefined, input.jobs || []);
+  const limit = getEffectiveStocktakeLimit(plan, subscription);
+
+  const enabled =
+    !!plan?.enableStocktake || limit === "unlimited" || Number(limit) > 0;
+
+  if (!enabled) {
+    return {
+      allowed: false,
+      severity: "blocked",
+      reasons: [
+        {
+          key: "stocktake",
+          label: "Stocktake",
+          used: usage,
+          limit: 0,
+          overBy: usage + 1,
+          message: "Stocktake is not enabled for this vendor plan.",
+        },
+      ],
+    };
+  }
+
+  if (limit !== "unlimited" && usage >= Number(limit)) {
+    return {
+      allowed: false,
+      severity: "blocked",
+      reasons: [
+        {
+          key: "stocktake",
+          label: "Stocktake",
+          used: usage + 1,
+          limit: Number(limit),
+          overBy: usage + 1 - Number(limit),
+          message: `Stocktake limit exceeded (${usage}/${limit}).`,
+        },
+      ],
+    };
+  }
+
+  return { allowed: true, severity: "ok", reasons: [] };
 }
 
 export const entitlementEngineTestHelpers = {

@@ -11,6 +11,7 @@ import {
   DeliveryStaff,
   CAHLink,
 } from "../types.ts";
+import { CATALOGUE_LEGAL_SOT } from "../features/catalogueBuilderV2/catalogueLegalSot.ts";
 
 const SIZE_LABELS = ["B", "KB", "MB"];
 
@@ -58,6 +59,26 @@ const getProductGalleryImages = (product: Product, limit = 6) => {
 };
 
 const smallerText = (text: string) => escapeHtml(text || "");
+
+const renderLegalParagraphs = (value: string) =>
+  String(value || "")
+    .split(/\n\s*\n/)
+    .map((paragraph) => `<p>${escapeHtml(paragraph.trim())}</p>`)
+    .join("");
+
+const renderStorefrontLegalSot = () => `
+        <h4>Privacy policy</h4>
+        ${renderLegalParagraphs(CATALOGUE_LEGAL_SOT.privacyPolicy)}
+
+        <h4>Business terms</h4>
+        ${renderLegalParagraphs(CATALOGUE_LEGAL_SOT.businessTerms)}
+
+        <h4>Warranties</h4>
+        ${renderLegalParagraphs(CATALOGUE_LEGAL_SOT.warranties)}
+
+        <h4>Indemnity and limitation of liability</h4>
+        ${renderLegalParagraphs(CATALOGUE_LEGAL_SOT.indemnity)}
+`;
 
 const normalizeLookup = (value?: string | null) =>
   String(value || "")
@@ -502,7 +523,8 @@ export const generateVendorStorefrontHtml = (
     .modal-content { background: var(--bg); width: 100%; max-width: 500px; max-height: 90vh; overflow-y: auto; position: relative; animation: slideUp 0.3s ease; }
     @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
     .modal-close { position: absolute; top: 12px; right: 12px; width: 32px; height: 32px; background: var(--bg); border: 1px solid var(--stone-200); display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: bold; cursor: pointer; z-index: 10; color: var(--charcoal); }
-    .modal-img { width: 100%; height: 300px; object-fit: cover; background: var(--stone-100); }
+    .storefront-modal-image-wrap { width: 100%; max-height: min(58vh, 420px); min-height: 220px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #f3f4f6; border-bottom: 1px solid var(--stone-100); }
+    .storefront-modal-image { width: 100%; height: 100%; max-height: min(58vh, 420px); object-fit: contain; object-position: center; display: block; background: #f3f4f6; }
     .modal-gallery { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; padding: 8px; border-bottom: 1px solid var(--stone-100); }
     .modal-thumb { height: 54px; width: 100%; object-fit: cover; border: 2px solid var(--stone-200); background: var(--stone-50); cursor: pointer; }
     .modal-thumb.active { border-color: var(--orange); }
@@ -590,6 +612,7 @@ export const generateVendorStorefrontHtml = (
     .cart-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; padding: 12px 0; border-top: 2px solid var(--stone-200); font-size: 14px; font-weight: 900; text-transform: uppercase; }
     .cart-actions { display: grid; gap: 8px; margin-top: 8px; }
     .cart-send { min-height: 44px; border: 0; background: #16a34a; color: #fff; font-size: 12px; font-weight: 900; text-transform: uppercase; cursor: pointer; }
+    .cart-send:disabled { background: var(--stone-200); color: var(--stone-500); cursor: not-allowed; }
     .cart-clear { min-height: 40px; border: 1px solid var(--stone-300, #d6d3d1); background: #fff; color: var(--stone-600); font-size: 11px; font-weight: 900; text-transform: uppercase; cursor: pointer; }
     .horizontal-scroll-container { display: flex; gap: 12px; overflow-x: auto; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; padding: 2px 18px 8px 0; scrollbar-width: none; }
     .horizontal-scroll-container::-webkit-scrollbar { display: none; }
@@ -683,20 +706,7 @@ export const generateVendorStorefrontHtml = (
 
     <div id="tab-terms" class="tab-pane">
       <div class="legal-text">
-        <h4>Pricing & Availability</h4>
-        <p>All products, pricing, and availability are subject to change. Please contact the vendor directly via WhatsApp or Call to confirm current stock levels before making any payment or traveling to a branch.</p>
-        
-        <h4>Warranty & Returns</h4>
-        <p>Warranty conditions and return policies are defined strictly by the listed vendor. Ensure you request and retain a valid receipt or invoice upon purchase.</p>
-      
-        <h4>Delivery</h4>
-        <p>Delivery terms, costs, and timelines are negotiated directly between the customer and the vendor or their listed delivery personnel.</p>
-      
-        <h4>Privacy</h4>
-        <p>This offline storefront does not automatically collect personal tracking data. Information shared via WhatsApp or calls is subject to the vendor's own privacy practices.</p>
-      
-        <h4>seiGEN Commerce Disclaimer</h4>
-        <p>Products are supplied by the listed vendor. iTred and seiGEN Commerce provide catalogue, visibility, and contact infrastructure. Final sale, warranty, product quality, and delivery terms remain between the customer and vendor unless otherwise stated.</p>
+        ${renderStorefrontLegalSot()}
       </div>
     </div>
     
@@ -734,16 +744,16 @@ export const generateVendorStorefrontHtml = (
       <div class="cart-body">
         <div id="cart-lines"></div>
         <div class="cart-fields">
-          <input id="cart-customer-name" type="text" placeholder="Customer Name (optional)" />
+          <input id="cart-customer-name" type="text" placeholder="Customer name" />
           <input id="cart-location" type="text" placeholder="Location (optional)" />
           <textarea id="cart-note" placeholder="Note (optional)"></textarea>
         </div>
         <div class="cart-summary">
           <span>Subtotal</span>
-          <span id="cart-subtotal">USD 0.00</span>
+          <span id="cart-subtotal">$0</span>
         </div>
         <div class="cart-actions">
-          <button class="cart-send" type="button" onclick="sendCartOrder()">Send Order on WhatsApp</button>
+          <button class="cart-send" type="button" onclick="sendCartOrder()" ${cleanWa(vendor.whatsappNumber) ? "" : "disabled aria-disabled=\"true\""}>${cleanWa(vendor.whatsappNumber) ? "Send Order on WhatsApp" : "Vendor WhatsApp number is missing."}</button>
           <button class="cart-clear" type="button" onclick="clearCart()">Clear Cart</button>
         </div>
       </div>
@@ -755,7 +765,9 @@ export const generateVendorStorefrontHtml = (
   <div id="modal-overlay" class="modal-overlay">
     <div class="modal-content">
       <button class="modal-close" onclick="closeModal()">×</button>
-      <img id="m-img" class="modal-img" onerror="this.style.display='none'" />
+      <div class="storefront-modal-image-wrap">
+        <img id="m-img" class="storefront-modal-image" onerror="this.style.display='none'" />
+      </div>
       <div id="m-gallery" class="modal-gallery"></div>
       <div class="modal-body">
         <h2 id="m-name" class="modal-title"></h2>
@@ -1347,8 +1359,35 @@ export const generateVendorStorefrontHtml = (
     }
 
     function formatMoney(currency, value) {
-      if (!Number.isFinite(Number(value))) return 'Price on enquiry';
-      return String(currency || 'USD') + ' ' + Number(value).toFixed(2);
+      const numberValue = Number(value);
+      if (!Number.isFinite(numberValue) || numberValue <= 0) return 'POR';
+      return '$' + Math.round(numberValue).toLocaleString('en-US');
+    }
+
+    function truncateText(text, len) {
+      text = String(text == null ? '' : text).replace(/\\s+/g, ' ').trim();
+      if (text.length <= len) return text;
+      return text.slice(0, Math.max(0, len - 3)).replace(/\\s+$/g, '') + '...';
+    }
+
+    function padRight(text, len) {
+      text = String(text == null ? '' : text);
+      if (text.length >= len) return text.slice(0, len);
+      return text + Array(len - text.length + 1).join(' ');
+    }
+
+    function padLeft(text, len) {
+      text = String(text == null ? '' : text);
+      if (text.length >= len) return text;
+      return Array(len - text.length + 1).join(' ') + text;
+    }
+
+    function receiptLine(len) {
+      return Array((len || 54) + 1).join('-');
+    }
+
+    function receiptDate() {
+      return new Date().toISOString().slice(0, 10);
     }
 
     function cartSubtotal(cart) {
@@ -1369,7 +1408,7 @@ export const generateVendorStorefrontHtml = (
         linesEl.innerHTML = '<div class="cart-empty">Your cart is empty.</div>';
       } else {
         linesEl.innerHTML = cart.map(function(item) {
-          const lineTotal = Number.isFinite(Number(item.price)) ? Number(item.price) * item.qty : null;
+          const lineTotal = Number.isFinite(Number(item.price)) && Number(item.price) > 0 ? Number(item.price) * item.qty : null;
           return '<div class="cart-line">' +
             '<img src="' + escapeHtml(item.imageUrl || '') + '" alt="' + escapeHtml(item.productName) + '" onerror="this.style.display=\\'none\\'" />' +
             '<div>' +
@@ -1381,7 +1420,7 @@ export const generateVendorStorefrontHtml = (
                   '<span>' + item.qty + '</span>' +
                   '<button type="button" onclick="updateCartQty(\\'' + escapeHtml(item.productId) + '\\',' + (item.qty + 1) + ')">+</button>' +
                 '</div>' +
-                '<div class="cart-line-total">' + escapeHtml(lineTotal === null ? 'Price on enquiry' : formatMoney(item.currency, lineTotal)) + '</div>' +
+                '<div class="cart-line-total">' + escapeHtml(lineTotal === null ? 'POR' : formatMoney(item.currency, lineTotal)) + '</div>' +
               '</div>' +
               '<button class="cart-remove" type="button" onclick="removeFromCart(\\'' + escapeHtml(item.productId) + '\\')">Remove</button>' +
             '</div>' +
@@ -1389,8 +1428,7 @@ export const generateVendorStorefrontHtml = (
         }).join('');
       }
       const subtotalEl = document.getElementById('cart-subtotal');
-      const currency = cart[0] ? cart[0].currency : 'USD';
-      if (subtotalEl) subtotalEl.textContent = formatMoney(currency, cartSubtotal(cart));
+      if (subtotalEl) subtotalEl.textContent = formatMoney('$', cartSubtotal(cart));
     }
 
     function hydrateCartCustomerFields() {
@@ -1422,27 +1460,39 @@ export const generateVendorStorefrontHtml = (
     }
 
     function buildCartOrderMessage(cart, customer) {
-      const currency = cart[0] ? cart[0].currency : 'USD';
+      const width = 54;
       const lines = [
-        'Hi ' + VENDOR_NAME + ', I want to enquire/order these products from your iTred storefront:',
-        ''
+        'iTred sales lead voucher',
+        '',
+        'Customer name: ' + customer.customerName,
+        'Vendor: ' + VENDOR_NAME,
+        'Date: ' + receiptDate(),
+        '',
+        'Products',
+        receiptLine(width),
+        padRight('No', 4) + padRight('Product', 24) + padLeft('Qty', 5) + padLeft('UP', 8) + padLeft('Amt', 10),
+        receiptLine(width)
       ];
       cart.forEach(function(item, index) {
-        const lineTotal = Number.isFinite(Number(item.price)) ? Number(item.price) * item.qty : null;
-        lines.push((index + 1) + '. ' + item.productName);
-        lines.push('   SKU: ' + (item.sku || 'N/A'));
-        lines.push('   Qty: ' + item.qty);
-        lines.push('   Price: ' + (item.price === null ? 'Price on enquiry' : formatMoney(item.currency, item.price)));
-        lines.push('   Line Total: ' + (lineTotal === null ? 'Price on enquiry' : formatMoney(item.currency, lineTotal)));
-        lines.push('');
+        const unitPrice = Number(item.price || 0);
+        const lineTotal = Number.isFinite(unitPrice) && unitPrice > 0 ? unitPrice * item.qty : 0;
+        lines.push(
+          padRight(String(index + 1) + '.', 4) +
+          padRight(truncateText(item.productName || 'Product', 24), 24) +
+          padLeft(item.qty, 5) +
+          padLeft(formatMoney(item.currency, unitPrice), 8) +
+          padLeft(lineTotal > 0 ? formatMoney(item.currency, lineTotal) : 'POR', 10)
+        );
       });
-      lines.push('Subtotal: ' + formatMoney(currency, cartSubtotal(cart)));
+      lines.push(receiptLine(width));
+      lines.push(padRight('Total sales lead value:', 36) + padLeft(formatMoney('$', cartSubtotal(cart)), 18));
+      lines.push(receiptLine(width));
       lines.push('');
-      if (customer.customerName) lines.push('Customer Name: ' + customer.customerName);
       if (customer.location) lines.push('Location: ' + customer.location);
       if (customer.note) lines.push('Note: ' + customer.note);
+      if (customer.location || customer.note) lines.push('');
+      lines.push('Please confirm stock availability, pricing, collection/delivery options and payment instructions.');
       lines.push('');
-      lines.push('Storefront: ' + (VENDOR_NAME || STOREFRONT_ID));
       lines.push('Powered by seiGEN Commerce');
       return lines.join('\\n');
     }
@@ -1456,11 +1506,22 @@ export const generateVendorStorefrontHtml = (
       }
       const num = VENDOR_WA;
       if (!num) {
-        showStorefrontMessage('WhatsApp number not available for this vendor.');
+        showStorefrontMessage('Vendor WhatsApp number is missing.');
         return;
       }
       saveCartCustomer();
       const customer = getCartCustomer();
+      if (!customer.customerName.trim()) {
+        const nameEl = document.getElementById('cart-customer-name');
+        if (nameEl) {
+          nameEl.focus();
+          nameEl.style.outline = '2px solid #f97316';
+        }
+        showStorefrontMessage('Please enter customer name.');
+        return;
+      }
+      const nameEl = document.getElementById('cart-customer-name');
+      if (nameEl) nameEl.style.outline = '';
       const message = buildCartOrderMessage(cart, customer);
       logOfflineEvent({ eventType: 'order_created', sourceType: 'storefront', storefrontId: STOREFRONT_ID, vendorId: VENDOR_ID, vendorName: VENDOR_NAME, payload: { itemCount: cart.length, subtotal: cartSubtotal(cart) } });
       logOfflineEvent({ eventType: 'whatsapp_order_click', sourceType: 'storefront', storefrontId: STOREFRONT_ID, vendorId: VENDOR_ID, vendorName: VENDOR_NAME, payload: { itemCount: cart.length } });
