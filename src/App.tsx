@@ -23,6 +23,7 @@ import { PricingPlans } from "./pages/PricingPlans.tsx";
 import { SubscriptionManagement } from "./pages/SubscriptionManagement.tsx";
 import { SectorCatalogueGenerator } from "./pages/SectorCatalogueGenerator.tsx";
 import { CatalogueBuilderV2 } from "./features/catalogueBuilderV2/CatalogueBuilderV2.tsx";
+import { OfflineShellBuilder } from "./features/offlineCommerceShell/OfflineShellBuilder.tsx";
 import { VendorStorefrontBuilder } from "./pages/VendorStorefrontBuilder.tsx";
 import { Analytics } from "./pages/Analytics.tsx";
 import { BIMarket } from "./pages/BIMarket.tsx";
@@ -169,6 +170,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     [AppRoute.VENDOR_REPORTS]: "Vendor Reports",
     [AppRoute.RPN_BI_PERFORMANCE]: "RPN BI Performance",
     [AppRoute.VIRAL_GROWTH]: "Viral Growth Intelligence",
+    [AppRoute.OFFLINE_COMMERCE_SHELL]: "Offline Commerce Shell",
   };
 
   const checkAccess = (route: string) => {
@@ -213,6 +215,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       "console-rpn-performance": "rpnPerformance",
       "console-viral-growth": "biMarketAnalytics",
       "how-to": "howTo",
+      "offline-commerce-shell": "offlineCommerceShell",
       dashboard: "dashboard",
       // Add other specific mappings if routes don't directly match MenuKey
     };
@@ -376,6 +379,16 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           element={
             checkAccess("vendor-storefront-builder") ? (
               <VendorStorefrontBuilder />
+            ) : (
+              <RestrictedAccess />
+            )
+          }
+        />
+        <Route
+          path="/offline-commerce-shell"
+          element={
+            checkAccess("offline-commerce-shell") ? (
+              <OfflineShellBuilder />
             ) : (
               <RestrictedAccess />
             )

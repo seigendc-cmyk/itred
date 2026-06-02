@@ -16,6 +16,8 @@ import {
   ChevronRight,
   ClipboardCheck,
   CreditCard,
+  Database,
+  Download,
   FileSpreadsheet,
   FileCode,
   FileText,
@@ -103,7 +105,8 @@ const MENU_GROUPS: {
       { id: AppRoute.VENDOR_MGMT, label: 'Vendor Management', icon: Store },
       { id: AppRoute.PRODUCT_MGMT, label: 'Product Management', icon: Package },
       { id: AppRoute.CATALOGUE_BUILDER_V2, label: 'Catalogue Builder', icon: FileCode },
-      { id: AppRoute.VENDOR_STOREFRONT, label: 'Storefronts', icon: Globe }
+      { id: AppRoute.VENDOR_STOREFRONT, label: 'Storefronts', icon: Globe },
+      { id: AppRoute.OFFLINE_COMMERCE_SHELL, label: 'Offline Commerce Shell', icon: Download }
     ]
   },
   {

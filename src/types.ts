@@ -45,6 +45,7 @@ export enum AppRoute {
   VENDOR_REPORTS = "console-vendor-reports",
   RPN_BI_PERFORMANCE = "console-rpn-performance",
   VIRAL_GROWTH = "console-viral-growth",
+  OFFLINE_COMMERCE_SHELL = "offline-commerce-shell",
 }
 export type DeskType =
   | "SysAdmin Desk"
@@ -118,7 +119,8 @@ export type MenuKey =
   | "aiReports"
   | "productTrends"
   | "vendorReports"
-  | "viralGrowth";
+  | "viralGrowth"
+  | "offlineCommerceShell";
 
 export type MenuPermissions = Partial<Record<MenuKey, PermissionLevel>>;
 
@@ -2122,7 +2124,13 @@ export interface VendorInvoice {
   balanceDue: number;
   currency: string;
   notes?: string | null;
-  collectionStatus?: "not_due" | "due_soon" | "overdue" | "paid" | "cancelled" | "void";
+  collectionStatus?:
+    | "not_due"
+    | "due_soon"
+    | "overdue"
+    | "paid"
+    | "cancelled"
+    | "void";
   lastReminderAt?: string | null;
   lastReminderChannel?: "whatsapp" | "call" | "manual" | null;
   lastReminderMessage?: string | null;
