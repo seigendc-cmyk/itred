@@ -183,6 +183,72 @@ Must support:
 - metadata
 - createdAt
 
+### WhatsApp Intelligence Log
+
+WhatsApp intelligence logs store enriched/enforced insight records derived from WhatsApp and other interactions.
+
+Must support:
+
+- id
+- createdAt
+- updatedAt
+- loggedByStaffId
+- loggedByStaffName
+- customerPhone
+- customerName?
+- vendorId?
+- vendorName?
+- productId?
+- productName?
+- category?
+- sector?
+- region?
+- province?
+- city?
+- source
+- interactionType
+- customerMessage
+- internalNotes?
+- actionRequired
+- urgencyLevel
+- resolutionStatus
+- assignedToStaffId?
+- assignedToStaffName?
+- followUpRequired
+- followUpDate?
+- tags
+- sentiment
+- biScore?
+- flaggedRisk?
+- duplicatePatternDetected?
+
+### Staff Audit Log
+
+Staff audit logs record important backoffice staff actions and security-sensitive events.
+
+Must support:
+
+- id
+- eventType
+- severity
+- staffId
+- staffName
+- staffRole?
+- module
+- action
+- recordType?
+- recordId?
+- recordName?
+- beforeSnapshot?
+- afterSnapshot?
+- reason?
+- managerComment?
+- deviceInfo?
+- sessionId?
+- createdAt
+
+
+
 ## Rule
 
 No AI assistant or developer should invent new collection names when an existing official collection already exists.
