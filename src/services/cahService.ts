@@ -7,17 +7,24 @@ import { CAHLink, CAHBooth, CAHBoothAsset } from "../types.ts";
 import { localStorageService } from "./localStorageService.ts";
 import {
   collection,
+  documentId,
   doc,
   getDocs,
+  limit,
+  orderBy,
+  query,
   setDoc,
   deleteDoc,
   serverTimestamp,
 } from "firebase/firestore";
 import { db } from "../lib/firebase.ts";
+import { dataCacheService } from "./dataCacheService.ts";
 
 const CAH_LINKS_KEY = "itred_cah_links";
 const CAH_BOOTHS_KEY = "itred_cah_booths";
 const CAH_BOOTH_ASSETS_KEY = "itred_cah_booth_assets";
+const CAH_LINKS_PAGE_SIZE = 250;
+const CAH_CACHE_TTL_MS = 60 * 1000;
 
 export const cahService = {
   getLinks: (): CAHLink[] => {
@@ -50,17 +57,25 @@ export const cahService = {
   },
 
   loadCAHLinksFromFirebase: async (): Promise<CAHLink[]> => {
-    const snapshot = await getDocs(collection(db, "itred_cah_links"));
-    const links = snapshot.docs.map((docSnap) => {
-      const data = docSnap.data();
-      return {
-        ...data,
-        id: data.id || docSnap.id,
-        firestoreDocId: docSnap.id,
-      } as CAHLink;
+    return dataCacheService.getOrFetch("cah-links", CAH_CACHE_TTL_MS, async () => {
+      const snapshot = await getDocs(
+        query(
+          collection(db, "itred_cah_links"),
+          orderBy(documentId()),
+          limit(CAH_LINKS_PAGE_SIZE),
+        ),
+      );
+      const links = snapshot.docs.map((docSnap) => {
+        const data = docSnap.data();
+        return {
+          ...data,
+          id: data.id || docSnap.id,
+          firestoreDocId: docSnap.id,
+        } as CAHLink;
+      });
+      cahService.saveLinks(links);
+      return Array.isArray(links) ? links : [];
     });
-    cahService.saveLinks(links);
-    return Array.isArray(links) ? links : [];
   },
 
   saveLinkToFirebase: async (link: CAHLink): Promise<void> => {
@@ -83,11 +98,13 @@ export const cahService = {
     );
 
     cahService.saveLink(linkToSave);
+    dataCacheService.clearCache("cah-links");
   },
 
   deleteLinkFromFirebase: async (id: string): Promise<void> => {
     await deleteDoc(doc(db, "itred_cah_links", id));
     cahService.deleteLink(id);
+    dataCacheService.clearCache("cah-links");
   },
 
   validateWhatsAppUrl: (url: string): boolean => {

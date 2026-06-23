@@ -189,6 +189,7 @@ export const ProductManagement: React.FC = () => {
   const [isSavingProduct, setIsSavingProduct] = useState(false)
   const [hasAttemptedProductSave, setHasAttemptedProductSave] = useState(false)
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [sectorFilter, setSectorFilter] = useState('all')
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [brandFilter, setBrandFilter] = useState('all')
@@ -321,6 +322,13 @@ export const ProductManagement: React.FC = () => {
   }, [])
 
   useEffect(() => {
+    const handle = window.setTimeout(() => {
+      setDebouncedSearch(search)
+    }, 300)
+    return () => window.clearTimeout(handle)
+  }, [search])
+
+  useEffect(() => {
     if (!editingProduct?.sector) {
       setCategories([])
       return
@@ -368,7 +376,7 @@ export const ProductManagement: React.FC = () => {
   )
 
   const filteredProducts = useMemo(() => {
-    const terms = search.toLowerCase().split(' ').filter(Boolean)
+    const terms = debouncedSearch.toLowerCase().split(' ').filter(Boolean)
     return products.filter(product => {
       const matchesSearch = terms.every(term =>
         product.searchableText.includes(term)
@@ -381,7 +389,7 @@ export const ProductManagement: React.FC = () => {
         brandFilter === 'all' || product.brand === brandFilter
       return matchesSearch && matchesSector && matchesCategory && matchesBrand
     })
-  }, [products, search, sectorFilter, categoryFilter, brandFilter])
+  }, [products, debouncedSearch, sectorFilter, categoryFilter, brandFilter])
 
   const stats = useMemo(
     () => ({

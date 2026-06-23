@@ -20,6 +20,10 @@ import { WhatsAppActivityLogs } from "./pages/WhatsAppActivityLogs.tsx";
 import { WhatsAppCommunityBI } from "./pages/WhatsAppCommunityBI.tsx";
 import { WhatsAppPerformanceReports } from "./pages/WhatsAppPerformanceReports.tsx";
 import { PricingPlans } from "./pages/PricingPlans.tsx";
+import { POSPlans } from "./pages/POSPlans.tsx";
+import { POSGovernance } from "./pages/POSGovernance.tsx";
+import { POSVendorOnboarding } from "./pages/POSVendorOnboarding.tsx";
+import { POSOnboardingReview } from "./pages/POSOnboardingReview.tsx";
 import { SubscriptionManagement } from "./pages/SubscriptionManagement.tsx";
 import { SectorCatalogueGenerator } from "./pages/SectorCatalogueGenerator.tsx";
 import { CatalogueBuilderV2 } from "./features/catalogueBuilderV2/CatalogueBuilderV2.tsx";
@@ -120,6 +124,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     if (location.pathname.startsWith("/finance/vendor-bills")) {
       return AppRoute.VENDOR_BILLS;
     }
+    if (location.pathname.startsWith("/plans/pos-plans")) {
+      return AppRoute.POS_PLANS;
+    }
     const path = location.pathname.split("/")[1] as AppRoute;
     return path || AppRoute.DASHBOARD;
   };
@@ -138,6 +145,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     [AppRoute.COMMUNITY_BI]: "Community BI",
     [AppRoute.WHATSAPP_REPORTS]: "WhatsApp Reports",
     [AppRoute.PRICING]: "Pricing",
+    [AppRoute.POS_PLANS]: "POS Plans",
+    [AppRoute.POS_GOVERNANCE]: "POS Governance",
+    [AppRoute.POS_VENDOR_ONBOARDING]: "Vendor POS Onboarding",
+    [AppRoute.POS_ONBOARDING_REVIEW]: "POS Onboarding Review",
     [AppRoute.SUBSCRIPTIONS]: "Subscriptions & Collections",
     [AppRoute.CATALOGUE_GEN]: "Create Catalogue",
     [AppRoute.CATALOGUE_BUILDER_V2]: "Catalogue Builder",
@@ -184,6 +195,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       "whatsapp-community-bi": "whatsappActivity",
       "whatsapp-performance-reports": "whatsappActivity",
       pricing: "pricing",
+      "plans/pos-plans": "posPlans",
+      "pos-governance": "posGovernance",
+      "pos-vendor-onboarding": "posVendorOnboarding",
+      "pos-onboarding-review": "posOnboardingReview",
       subscriptions: "subscriptionsCollections",
       "catalogue-generator": "createCatalogue",
       "catalogue-builder-v2": "createCatalogue",
@@ -342,6 +357,42 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           path="/pricing"
           element={
             checkAccess("pricing") ? <PricingPlans /> : <RestrictedAccess />
+          }
+        />
+        <Route
+          path="/plans/pos-plans"
+          element={
+            checkAccess("plans/pos-plans") ? <POSPlans /> : <RestrictedAccess />
+          }
+        />
+        <Route
+          path="/pos-governance"
+          element={
+            checkAccess("pos-governance") ? (
+              <POSGovernance />
+            ) : (
+              <RestrictedAccess />
+            )
+          }
+        />
+        <Route
+          path="/pos-vendor-onboarding"
+          element={
+            checkAccess("pos-vendor-onboarding") ? (
+              <POSVendorOnboarding />
+            ) : (
+              <RestrictedAccess />
+            )
+          }
+        />
+        <Route
+          path="/pos-onboarding-review"
+          element={
+            checkAccess("pos-onboarding-review") ? (
+              <POSOnboardingReview />
+            ) : (
+              <RestrictedAccess />
+            )
           }
         />
         <Route
@@ -754,10 +805,25 @@ export default function App() {
     };
   }, [isLoggedIn, timeoutSettings, handleLogout]);
 
-  const handleLoginSuccess = () => {
+  const handleLoginSuccess = (session: any) => {
     lastActivity.current = Date.now();
     setIsLoggedIn(true);
     setLogoutMessage(null);
+    window.history.replaceState(null, "", "/dashboard");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+
+    window.setTimeout(() => {
+      const hasSession = Boolean(localStorage.getItem("activeStaffSession"));
+      const loginFormStillVisible = Boolean(
+        document.querySelector("[data-staff-login-form='true']"),
+      );
+      if (hasSession && loginFormStillVisible) {
+        console.warn("Staff login gate did not dismiss after login; redirecting to dashboard.", {
+          staffId: session?.staffId || session?.id,
+        });
+        window.location.replace("/dashboard");
+      }
+    }, 500);
   };
 
   return (

@@ -424,6 +424,7 @@ export const RPNManagement: React.FC = () => {
 
   // Filter State
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [rpnFilter, setRpnFilter] = useState('All')
   const [pipelineStageFilter, setPipelineStageFilter] = useState('All')
   const [staffFilter, setStaffFilter] = useState('All')
@@ -700,17 +701,26 @@ export const RPNManagement: React.FC = () => {
     loadData()
   }, [])
 
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      setDebouncedSearch(search)
+    }, 300)
+    return () => window.clearTimeout(handle)
+  }, [search])
+
   const loadData = async () => {
     setIsLoadingData(true)
     const startMs = performance.now()
     try {
       const rawRpns = rpnService.getAll()
-      const rawVendors = await vendorService.getVendors()
       const rawCollections = rpnService.getCollections()
       const rawProspects = rpnService.getProspects()
       const rawAppointments = rpnService.getAppointments()
-      const rawStaff = await staffService.getAllStaff()
       const rawFollowUps = rpnService.getFollowUps()
+      const [rawVendors, rawStaff] = await Promise.all([
+        vendorService.getVendors(),
+        staffService.getAllStaff()
+      ])
 
       setRpns(asArray<RPN>(rawRpns))
       setVendors(asArray<Vendor>(rawVendors))
@@ -751,15 +761,17 @@ export const RPNManagement: React.FC = () => {
   }
 
   const filteredRPNs = useMemo(() => {
+    const normalizedSearch = debouncedSearch.toLowerCase()
     return safeRpns.filter(
       r =>
-        (r.name.toLowerCase().includes(search.toLowerCase()) ||
-          r.id.toLowerCase().includes(search.toLowerCase())) &&
+        (r.name.toLowerCase().includes(normalizedSearch) ||
+          r.id.toLowerCase().includes(normalizedSearch)) &&
         (rpnFilter === 'All' || r.status === rpnFilter)
     )
-  }, [rpns, search, rpnFilter])
+  }, [rpns, debouncedSearch, rpnFilter])
 
   const filteredProspects = useMemo(() => {
+    const normalizedSearch = debouncedSearch.toLowerCase()
     return safeProspects.filter(p => {
       const matchesSearch = buildSearchText([
         p.prospectName,
@@ -775,7 +787,7 @@ export const RPNManagement: React.FC = () => {
         p.suburb,
         p.city,
         p.notes
-      ]).includes(search.toLowerCase())
+      ]).includes(normalizedSearch)
 
       const matchesRpn = rpnFilter === 'All' || p.assignedRpnId === rpnFilter
       const matchesStaff =
@@ -838,7 +850,7 @@ export const RPNManagement: React.FC = () => {
     })
   }, [
     prospects,
-    search,
+    debouncedSearch,
     rpnFilter,
     staffFilter,
     sourceTypeFilter,

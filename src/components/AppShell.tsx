@@ -65,6 +65,11 @@ interface AppShellProps {
   onLogout?: () => void
 }
 
+type BeforeInstallPromptEvent = Event & {
+  prompt: () => Promise<void>
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>
+}
+
 const MENU_GROUPS: {
   id: string
   label: string
@@ -103,6 +108,17 @@ const MENU_GROUPS: {
     icon: Store,
     items: [
       { id: AppRoute.VENDOR_MGMT, label: 'Vendor Management', icon: Store },
+      {
+        id: AppRoute.POS_VENDOR_ONBOARDING,
+        label: 'Vendor POS Onboarding',
+        icon: UserCheck
+      },
+      {
+        id: AppRoute.POS_ONBOARDING_REVIEW,
+        label: 'POS Onboarding Review',
+        icon: ClipboardCheck
+      },
+      { id: AppRoute.POS_GOVERNANCE, label: 'POS Governance', icon: Database },
       { id: AppRoute.PRODUCT_MGMT, label: 'Product Management', icon: Package },
       { id: AppRoute.CATALOGUE_BUILDER_V2, label: 'Catalogue Builder', icon: FileCode },
       { id: AppRoute.VENDOR_STOREFRONT, label: 'Storefronts', icon: Globe },
@@ -162,6 +178,7 @@ const MENU_GROUPS: {
     icon: Wallet,
     items: [
       { id: AppRoute.PRICING, label: 'Pricing', icon: CreditCard },
+      { id: AppRoute.POS_PLANS, label: 'POS Plans', icon: CreditCard },
       { id: AppRoute.SUBSCRIPTIONS, label: 'Collections', icon: Wallet }
     ]
   },
@@ -272,12 +289,55 @@ export const AppShell: React.FC<AppShellProps> = ({
   >([])
   const [sessionIgnored, setSessionIgnored] = useState<Set<string>>(new Set())
   const [processingNotificationId, setProcessingNotificationId] = useState<string | null>(null)
+  const [deferredInstallPrompt, setDeferredInstallPrompt] =
+    useState<BeforeInstallPromptEvent | null>(null)
+  const [installMessage, setInstallMessage] = useState<string | null>(null)
 
   console.log('AppShell mounted successfully')
 
   useEffect(() => {
     void masterDataCacheService.bootstrap()
   }, [])
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (event: Event) => {
+      event.preventDefault()
+      setDeferredInstallPrompt(event as BeforeInstallPromptEvent)
+      setInstallMessage(null)
+    }
+
+    const handleAppInstalled = () => {
+      setDeferredInstallPrompt(null)
+      setInstallMessage('iTredVD app installed.')
+    }
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+    window.addEventListener('appinstalled', handleAppInstalled)
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+      window.removeEventListener('appinstalled', handleAppInstalled)
+    }
+  }, [])
+
+  const handleInstallApp = async () => {
+    if (!deferredInstallPrompt) {
+      setInstallMessage('Use browser menu > Install app or Add to Home screen.')
+      window.setTimeout(() => setInstallMessage(null), 5000)
+      return
+    }
+
+    const promptEvent = deferredInstallPrompt
+    setDeferredInstallPrompt(null)
+    await promptEvent.prompt()
+    const choice = await promptEvent.userChoice
+    setInstallMessage(
+      choice.outcome === 'accepted'
+        ? 'iTredVD app install started.'
+        : 'Install cancelled.'
+    )
+    window.setTimeout(() => setInstallMessage(null), 5000)
+  }
 
   const loadNotifications = useCallback(async () => {
     try {
@@ -434,6 +494,10 @@ export const AppShell: React.FC<AppShellProps> = ({
       [AppRoute.COMMUNITY_BI]: 'whatsappActivity',
       [AppRoute.WHATSAPP_REPORTS]: 'whatsappActivity',
       [AppRoute.PRICING]: 'pricing',
+      [AppRoute.POS_PLANS]: 'posPlans',
+      [AppRoute.POS_GOVERNANCE]: 'posGovernance',
+      [AppRoute.POS_VENDOR_ONBOARDING]: 'posVendorOnboarding',
+      [AppRoute.POS_ONBOARDING_REVIEW]: 'posOnboardingReview',
       [AppRoute.SUBSCRIPTIONS]: 'subscriptionsCollections',
       [AppRoute.CATALOGUE_GEN]: 'createCatalogue',
       [AppRoute.CATALOGUE_BUILDER_V2]: 'createCatalogue',
@@ -882,6 +946,22 @@ export const AppShell: React.FC<AppShellProps> = ({
                   {staffRole || 'Role'} / {staffDesk || 'Desk'}
                 </p>
               </div>
+            </div>
+            <div className='relative'>
+              <button
+                type='button'
+                onClick={() => void handleInstallApp()}
+                title='Install iTredVD App'
+                aria-label='Install iTredVD App'
+                className='h-8 w-8 shrink-0 border border-stone-200 bg-gray-100 text-brand-charcoal flex items-center justify-center transition-colors hover:border-brand-orange hover:bg-brand-orange hover:text-white'
+              >
+                <Download size={15} />
+              </button>
+              {installMessage && (
+                <div className='absolute right-0 top-10 z-[100] w-64 border border-stone-200 bg-white p-3 text-[10px] font-bold uppercase leading-relaxed text-brand-charcoal shadow-2xl'>
+                  {installMessage}
+                </div>
+              )}
             </div>
             {onLogout && (
               <button

@@ -392,6 +392,7 @@ export const VendorManagement: React.FC = () => {
 
   // Filter State
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [filterSector, setFilterSector] = useState('All')
   const [filterRPN, setFilterRPN] = useState('All')
   const [filterSubStatus, setFilterSubStatus] = useState('All')
@@ -501,6 +502,13 @@ export const VendorManagement: React.FC = () => {
     loadData()
   }, [])
 
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      setDebouncedSearch(search)
+    }, 300)
+    return () => window.clearTimeout(handle)
+  }, [search])
+
   const loadData = async () => {
     setIsLoadingData(true)
     const startMs = performance.now()
@@ -546,22 +554,25 @@ export const VendorManagement: React.FC = () => {
         )
       }
     })
-    const v = asArray<Vendor>(await Promise.resolve(vendorService.getVendors()))
-    const r = asArray<RPN>(await Promise.resolve(rpnService.getAll()))
-    const c = asArray<CatalogueGeneration>(
-      await Promise.resolve(catalogueService.getHistory())
-    )
-    const pl = asArray<PricingPlan>(
-      await Promise.resolve(pricingPlanService.getPlans())
-    )
-    const vo = asArray<VendorProductOffer>(
-      await Promise.resolve(productService.getVendorProductOffers())
-    )
-    const st = asArray<Staff>(await Promise.resolve(staffService.getAllStaff()))
-    const cm = asArray<MarketingCampaign>(
-      await Promise.resolve(rpnService.getCampaigns())
-    )
-    const settings = await settingsService.getSettings()
+    const [v, r, c, pl, vo, st, cm, settings, sectors] = await Promise.all([
+      Promise.resolve(vendorService.getVendors()).then(rows => asArray<Vendor>(rows)),
+      Promise.resolve(rpnService.getAll()).then(rows => asArray<RPN>(rows)),
+      Promise.resolve(catalogueService.getHistory()).then(rows =>
+        asArray<CatalogueGeneration>(rows)
+      ),
+      Promise.resolve(pricingPlanService.getPlans()).then(rows =>
+        asArray<PricingPlan>(rows)
+      ),
+      Promise.resolve(productService.getVendorProductOffers()).then(rows =>
+        asArray<VendorProductOffer>(rows)
+      ),
+      Promise.resolve(staffService.getAllStaff()).then(rows => asArray<Staff>(rows)),
+      Promise.resolve(rpnService.getCampaigns()).then(rows =>
+        asArray<MarketingCampaign>(rows)
+      ),
+      settingsService.getSettings(),
+      taxonomyService.getSectors()
+    ])
 
     setVendors(v)
     setRpns(r)
@@ -570,7 +581,7 @@ export const VendorManagement: React.FC = () => {
     setStaffList(st)
     setCampaigns(cm)
     setSystemSettings(settings)
-    setSharedSectors(await taxonomyService.getSectors())
+    setSharedSectors(sectors)
 
     // Calculate counts
     const pCounts: Record<string, number> = {}
@@ -815,11 +826,12 @@ export const VendorManagement: React.FC = () => {
   }
 
   const filtered = vendors.filter(v => {
+    const normalizedSearch = debouncedSearch.toLowerCase()
     const matchesSearch =
-      v.name.toLowerCase().includes(search.toLowerCase()) ||
+      v.name.toLowerCase().includes(normalizedSearch) ||
       (v.systemCode &&
-        v.systemCode.toLowerCase().includes(search.toLowerCase())) ||
-      v.id.toLowerCase().includes(search.toLowerCase())
+        v.systemCode.toLowerCase().includes(normalizedSearch)) ||
+      v.id.toLowerCase().includes(normalizedSearch)
     const matchesSector = filterSector === 'All' || v.sector === filterSector
     const matchesRPN = filterRPN === 'All' || v.assignedRPNId === filterRPN
     const matchesSub =

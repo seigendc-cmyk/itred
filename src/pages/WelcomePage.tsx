@@ -30,6 +30,10 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
   const [passcode, setPasscode] = useState<string>("");
   const [showPasscode, setShowPasscode] = useState<boolean>(false);
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
+  const [loginStatusMessage, setLoginStatusMessage] = useState<string | null>(
+    null,
+  );
   const [isSetupMode, setIsSetupMode] = useState<boolean>(false);
 
   const [setupFullName, setSetupFullName] = useState<string>("");
@@ -63,7 +67,9 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
   const selectedStaff = allStaff.find((staff) => staff.id === selectedStaffId);
 
   const handleLogin = async () => {
+    if (isLoggingIn) return;
     setLoginError(null);
+    setLoginStatusMessage(null);
 
     if (!selectedStaffId) {
       setLoginError("Please select your name.");
@@ -131,6 +137,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
 
     try {
       if (passcode === staffToLogin.passcode) {
+        setIsLoggingIn(true);
         const session = {
           staffId: staffToLogin.id,
           staffCode: staffToLogin.staffCode,
@@ -145,6 +152,8 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
         };
 
         localStorage.setItem("activeStaffSession", JSON.stringify(session));
+        setLoginStatusMessage("Access granted. Opening console...");
+        onLoginSuccess(session);
 
         const updatedStaff: Staff = {
           ...staffToLogin,
@@ -153,27 +162,36 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
           updatedAt: new Date().toISOString(),
         };
 
-        await staffService.saveStaff(updatedStaff);
+        void staffService
+          .saveStaff(updatedStaff)
+          .catch((error) =>
+            console.error("Failed to persist successful staff login state", {
+              error,
+              staffId: staffToLogin?.id,
+            }),
+          );
 
-        analyticsService.logEvent({
-          eventType: "STAFF_LOGIN_SUCCESS",
-          actorType:
-            staffToLogin.role === "Admin" || staffToLogin.role === "SysAdmin"
-              ? "admin"
-              : "backend_staff",
-          actorName: staffToLogin.fullName,
-          actorId: staffToLogin.id,
-          result: "success",
-          details: {
-            staffId: staffToLogin.id,
-            staffName: staffToLogin.fullName,
-            role: staffToLogin.role,
-            desk: staffToLogin.desk,
-            googleEmail,
-          },
-        });
-
-        onLoginSuccess(session);
+        try {
+          analyticsService.logEvent({
+            eventType: "STAFF_LOGIN_SUCCESS",
+            actorType:
+              staffToLogin.role === "Admin" || staffToLogin.role === "SysAdmin"
+                ? "admin"
+                : "backend_staff",
+            actorName: staffToLogin.fullName,
+            actorId: staffToLogin.id,
+            result: "success",
+            details: {
+              staffId: staffToLogin.id,
+              staffName: staffToLogin.fullName,
+              role: staffToLogin.role,
+              desk: staffToLogin.desk,
+              googleEmail,
+            },
+          });
+        } catch (error) {
+          console.error("Failed to log staff login success", error);
+        }
         return;
       }
 
@@ -229,6 +247,8 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
     } catch (error) {
       console.error("Login handling error", error);
       setLoginError("An error occurred during login. Please try again.");
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
@@ -237,6 +257,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
     setPasscode("");
     setShowPasscode(false);
     setLoginError(null);
+    setLoginStatusMessage(null);
   };
 
   const handleFinishSetup = async () => {
@@ -601,7 +622,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
           )}
 
           {selectedStaff && !isSetupMode && (
-            <div style={styles.loginForm}>
+            <div style={styles.loginForm} data-staff-login-form="true">
               {selectedStaff.status === "suspended" && (
                 <div style={styles.warningBox}>
                   <Lock size={16} style={{ color: "#EF4444" }} />
@@ -639,14 +660,14 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
                       setLoginError(null);
                     }}
                     maxLength={6}
-                    disabled={isSelectedStaffBlocked}
+                    disabled={isSelectedStaffBlocked || isLoggingIn}
                   />
 
                   <button
                     type="button"
                     onClick={() => setShowPasscode((current) => !current)}
                     style={styles.togglePasscodeButton}
-                    disabled={isSelectedStaffBlocked}
+                    disabled={isSelectedStaffBlocked || isLoggingIn}
                   >
                     {showPasscode ? <EyeOff size={16} /> : <Eye size={16} />}
                   </button>
@@ -660,27 +681,41 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
                 </div>
               )}
 
+              {loginStatusMessage && !loginError && (
+                <div style={styles.successBox}>
+                  <UserCheck size={16} style={{ color: "#16A34A" }} />
+                  <span style={styles.successText}>{loginStatusMessage}</span>
+                </div>
+              )}
+
               <div style={styles.buttonGroup}>
                 <button
                   type="button"
                   onClick={handleLogin}
                   style={
-                    !passcode || passcode.length !== 6 || isSelectedStaffBlocked
+                    !passcode ||
+                    passcode.length !== 6 ||
+                    isSelectedStaffBlocked ||
+                    isLoggingIn
                       ? styles.loginButtonDisabled
                       : styles.loginButton
                   }
                   disabled={
-                    !passcode || passcode.length !== 6 || isSelectedStaffBlocked
+                    !passcode ||
+                    passcode.length !== 6 ||
+                    isSelectedStaffBlocked ||
+                    isLoggingIn
                   }
                 >
                   <LogIn size={16} style={{ marginRight: "8px" }} />
-                  Enter Staff Desk
+                  {isLoggingIn ? "Opening Console..." : "Enter Staff Desk"}
                 </button>
 
                 <button
                   type="button"
                   onClick={handleCancel}
                   style={styles.cancelButton}
+                  disabled={isLoggingIn}
                 >
                   <XCircle size={16} style={{ marginRight: "8px" }} />
                   Cancel Selection
@@ -995,6 +1030,21 @@ const styles: { [key: string]: React.CSSProperties } = {
   errorText: {
     fontSize: "12px",
     color: "#EF4444",
+    fontWeight: "bold",
+  },
+  successBox: {
+    display: "flex",
+    alignItems: "center",
+    gap: "10px",
+    backgroundColor: "#ECFDF5",
+    border: "1px solid #16A34A",
+    padding: "12px",
+    marginBottom: "20px",
+    textAlign: "left",
+  },
+  successText: {
+    fontSize: "12px",
+    color: "#166534",
     fontWeight: "bold",
   },
   supportText: {

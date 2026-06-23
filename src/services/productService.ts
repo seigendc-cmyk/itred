@@ -591,6 +591,105 @@ export const productService = {
     });
   },
 
+  async saveVendorProductOffersDelta(
+    inputOffers: VendorProductOffer[],
+    existingOffersSnapshot?: VendorProductOffer[],
+  ): Promise<void> {
+    const incoming = asArray<VendorProductOffer>(inputOffers).map(
+      normalizeVendorProductOffer,
+    );
+    if (incoming.length === 0) return;
+
+    const existing =
+      existingOffersSnapshot ??
+      (await productService.getVendorProductOffers());
+    const existingById = new Map(existing.map((offer) => [offer.id, offer]));
+    const linkedKeys = new Map<string, string>();
+    existing.forEach((offer) => {
+      if (offer.productMode === "branded_product") return;
+      const productId = String(offer.masterProductId || offer.productId || "");
+      if (offer.vendorId && productId) {
+        linkedKeys.set(`${offer.vendorId}::${productId}`, offer.id);
+      }
+    });
+
+    incoming.forEach((offer) => {
+      if (offer.productMode === "branded_product") return;
+      const productId = String(offer.masterProductId || offer.productId || "");
+      if (!offer.vendorId || !productId) return;
+      const key = `${offer.vendorId}::${productId}`;
+      const existingId = linkedKeys.get(key);
+      if (existingId && existingId !== offer.id) {
+        throw new Error("This vendor is already linked to the selected master product.");
+      }
+      linkedKeys.set(key, offer.id);
+    });
+
+    const incomingById = new Map<string, VendorProductOffer>();
+    incoming.forEach((offer) => incomingById.set(offer.id, offer));
+    const comparableOffer = (offer: VendorProductOffer) => {
+      const { updatedAt, ...stableOffer } = normalizeVendorProductOffer(offer) as any;
+      return sanitizeForFirestore(stableOffer);
+    };
+    const changedIncoming = Array.from(incomingById.values()).filter((offer) => {
+      const existingOffer = existingById.get(offer.id);
+      if (!existingOffer) return true;
+      return (
+        JSON.stringify(comparableOffer(offer)) !==
+        JSON.stringify(comparableOffer(existingOffer))
+      );
+    });
+
+    if (changedIncoming.length === 0) return;
+
+    const storage = getStorageAdapter();
+    const usedPerRecordBatchWrite = Boolean(storage.batchSetItems);
+    if (storage.batchSetItems) {
+      await storage.batchSetItems<VendorProductOffer>(
+        VENDOR_OFFERS_KEY,
+        sanitizeForFirestore(changedIncoming) as VendorProductOffer[],
+      );
+    } else {
+      // Fallback adapters without per-record batch writes can only persist the merged collection.
+      // Reuse the supplied snapshot when available so the delta save does not perform an extra full read.
+      changedIncoming.forEach((offer) => existingById.set(offer.id, offer));
+      await storage.setItem(
+        VENDOR_OFFERS_KEY,
+        sanitizeForFirestore(Array.from(existingById.values())),
+      );
+    }
+
+    dataCacheService.clearCache();
+    console.info("productService.saveVendorProductOffersDelta completed", {
+      incomingCount: incoming.length,
+      changedCount: changedIncoming.length,
+      existingSnapshotProvided: Boolean(existingOffersSnapshot),
+      storageWriteCount: usedPerRecordBatchWrite
+        ? changedIncoming.length
+        : existingById.size,
+      writeMode: usedPerRecordBatchWrite ? "per-record-batch" : "merged-collection",
+    });
+
+    const existingIds = new Set(existing.map((offer) => offer.id));
+    changedIncoming.forEach((safeOffer) => {
+      void analyticsService.logEvent({
+        eventType: existingIds.has(safeOffer.id)
+          ? "PRODUCT_UPDATED"
+          : "PRODUCT_CREATED",
+        actorType: "admin",
+        actorName: "Vendor Offer Desk",
+        productId: safeOffer.productId,
+        vendorId: safeOffer.vendorId,
+        details: {
+          layer: "vendor_product_offer",
+          productMode: safeOffer.productMode || "linked_product",
+          saveMode: "delta",
+        },
+        metadata: { productMode: safeOffer.productMode || "linked_product" },
+      });
+    });
+  },
+
   async deleteVendorProductOffer(id: string): Promise<void> {
     const currentOffers = await productService.getVendorProductOffers();
     const deletedOffer = currentOffers.find((offer) => offer.id === id);

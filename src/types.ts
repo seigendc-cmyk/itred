@@ -11,6 +11,10 @@ export enum AppRoute {
   CAH = "commerce-access-hub",
   PRICING = "pricing",
   SUBSCRIPTIONS = "itred_subscriptions",
+  POS_PLANS = "plans/pos-plans",
+  POS_GOVERNANCE = "pos-governance",
+  POS_VENDOR_ONBOARDING = "pos-vendor-onboarding",
+  POS_ONBOARDING_REVIEW = "pos-onboarding-review",
   CATALOGUE_GEN = "catalogue-generator",
   CATALOGUE_BUILDER_V2 = "catalogue-builder-v2",
   VENDOR_STOREFRONT = "vendor-storefront-builder",
@@ -90,6 +94,10 @@ export type MenuKey =
   | "accessHub"
   | "cahBooths"
   | "pricing"
+  | "posPlans"
+  | "posGovernance"
+  | "posVendorOnboarding"
+  | "posOnboardingReview"
   | "subscriptionsCollections"
   | "collectionCalendar"
   | "createCatalogue"

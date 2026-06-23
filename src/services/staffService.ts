@@ -4,11 +4,16 @@ import { analyticsService } from "./analyticsService.ts";
 import { db } from "../lib/firebase.ts";
 import {
   collection,
+  documentId,
   doc,
   getDocs,
+  limit,
+  orderBy,
+  query,
   setDoc,
   deleteDoc,
   serverTimestamp,
+  where,
 } from "firebase/firestore";
 import { CACHE_TTL, dataCacheService } from "./dataCacheService.ts";
 import { readDiagnosticsService } from "./readDiagnosticsService.ts";
@@ -17,6 +22,7 @@ const STAFF_KEY = "itred_staff_records";
 const ROLE_TEMPLATES_KEY = "itred_role_templates";
 const FIRESTORE_STAFF_COLLECTION = "itred_console_staff";
 const FIRESTORE_SETTINGS_COLLECTION = "itred_system_settings";
+const STAFF_READ_LIMIT = 250;
 
 const removeUndefinedDeep = <T>(value: T): T => {
   if (Array.isArray(value)) {
@@ -87,7 +93,13 @@ const syncStaffToFirestore = async (staff: Staff): Promise<void> => {
 };
 
 const loadStaffFromFirestore = async (): Promise<Staff[]> => {
-  const snapshot = await getDocs(collection(db, FIRESTORE_STAFF_COLLECTION));
+  const snapshot = await getDocs(
+    query(
+      collection(db, FIRESTORE_STAFF_COLLECTION),
+      orderBy(documentId()),
+      limit(STAFF_READ_LIMIT),
+    ),
+  );
 
   return snapshot.docs.map((staffDoc) => {
     const data = staffDoc.data() as Partial<Staff>;
@@ -104,7 +116,41 @@ const loadStaffFromFirestore = async (): Promise<Staff[]> => {
 const validateUniqueStaffIdentity = async (staff: Staff): Promise<void> => {
   let remoteStaff: Staff[] = [];
   try {
-    remoteStaff = await loadStaffFromFirestore();
+    const checks = [
+      staff.staffCode
+        ? getDocs(
+            query(
+              collection(db, FIRESTORE_STAFF_COLLECTION),
+              where("staffCode", "==", staff.staffCode),
+              limit(10),
+            ),
+          )
+        : Promise.resolve(null),
+      staff.email
+        ? getDocs(
+            query(
+              collection(db, FIRESTORE_STAFF_COLLECTION),
+              where("email", "==", staff.email),
+              where("status", "==", "active"),
+              limit(10),
+            ),
+          )
+        : Promise.resolve(null),
+    ];
+    const snapshots = await Promise.all(checks);
+    remoteStaff = snapshots.flatMap((snapshot) =>
+      snapshot
+        ? snapshot.docs.map((staffDoc) => {
+            const data = staffDoc.data() as Partial<Staff>;
+            return {
+              ...data,
+              id: data.id || staffDoc.id,
+              docId: staffDoc.id,
+              firestoreDocId: staffDoc.id,
+            } as Staff;
+          })
+        : [],
+    );
   } catch (e) {
     remoteStaff = getLocalStaff();
   }
@@ -184,6 +230,10 @@ const DEFAULT_STAFF: Staff[] = [
       accessHub: "full",
       cahBooths: "full",
       pricing: "full",
+      posPlans: "full",
+      posGovernance: "full",
+      posVendorOnboarding: "full",
+      posOnboardingReview: "full",
       subscriptionsCollections: "full",
       collectionCalendar: "full",
       createCatalogue: "full",
@@ -296,6 +346,8 @@ const DEFAULT_STAFF: Staff[] = [
       subscriptionsCollections: "view",
       activityLogs: "view",
       pricing: "view",
+      posVendorOnboarding: "edit",
+      posOnboardingReview: "approve",
       inventorySpotChecks: "view",
     },
     createdBy: "system",
@@ -331,6 +383,8 @@ const DEFAULT_STAFF: Staff[] = [
       subscriptionsCollections: "view",
       activityLogs: "view",
       pricing: "view",
+      posVendorOnboarding: "edit",
+      posOnboardingReview: "approve",
       inventorySpotChecks: "view",
     },
     createdBy: "system",
@@ -353,6 +407,10 @@ const ROLE_TEMPLATES_OBJECT: Record<string, any> = {
     accessHub: "full",
     cahBooths: "full",
     pricing: "full",
+    posPlans: "full",
+    posGovernance: "full",
+    posVendorOnboarding: "full",
+    posOnboardingReview: "full",
     subscriptionsCollections: "full",
     collectionCalendar: "full",
     createCatalogue: "full",
@@ -388,6 +446,10 @@ const ROLE_TEMPLATES_OBJECT: Record<string, any> = {
     accessHub: "full",
     cahBooths: "full",
     pricing: "full",
+    posPlans: "full",
+    posGovernance: "full",
+    posVendorOnboarding: "full",
+    posOnboardingReview: "full",
     subscriptionsCollections: "full",
     collectionCalendar: "full",
     createCatalogue: "full",
@@ -424,6 +486,8 @@ const ROLE_TEMPLATES_OBJECT: Record<string, any> = {
     subscriptionsCollections: "view",
     activityLogs: "view",
     pricing: "view",
+    posVendorOnboarding: "edit",
+    posOnboardingReview: "approve",
     inventorySpotChecks: "view",
     staffTasks: "view",
     notifications: "view",
@@ -691,7 +755,19 @@ export const staffService = {
 
     let allStaff: Staff[] = [];
     try {
-      allStaff = await loadStaffFromFirestore();
+      const snapshot = await getDocs(
+        query(
+          collection(db, FIRESTORE_STAFF_COLLECTION),
+          where("staffCode", ">=", prefix),
+          where("staffCode", "<", `${prefix}\uf8ff`),
+          orderBy("staffCode", "desc"),
+          limit(1),
+        ),
+      );
+      allStaff = snapshot.docs.map((staffDoc) => ({
+        ...(staffDoc.data() as Partial<Staff>),
+        id: staffDoc.id,
+      })) as Staff[];
     } catch (e) {
       allStaff = getLocalStaff();
     }

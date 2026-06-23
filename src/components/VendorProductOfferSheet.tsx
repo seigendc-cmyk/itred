@@ -176,6 +176,7 @@ const productSearchBlob = (product: MasterProduct) =>
 const MASTER_SEARCH_RESULT_LIMIT = 30;
 const MASTER_SEARCH_CACHE_LIMIT = 25;
 const SELECTED_DRAFT_RENDER_LIMIT = 120;
+const SAVE_BATCH_CHUNK_SIZE = 400;
 const isDevDiagnostics = () =>
   typeof import.meta !== "undefined" && Boolean(import.meta.env?.DEV);
 
@@ -204,11 +205,15 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
     setSelectedOfferDraftsByProductId,
   ] = useState<Record<string, SelectedVendorOfferDraft>>({});
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [dirtyDraftProductIds, setDirtyDraftProductIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [bulkBranchId, setBulkBranchId] = useState("");
   const [bulkPublish, setBulkPublish] = useState(true);
   const [bulkDelivery, setBulkDelivery] = useState(true);
   const [bulkActive, setBulkActive] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [saveProgressMessage, setSaveProgressMessage] = useState("");
   const [isImporting, setIsImporting] = useState(false);
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const masterSearchCacheRef = useRef<
@@ -271,6 +276,7 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
   useEffect(() => {
     if (!open) return;
     setSelectedOfferDraftsByProductId({});
+    setDirtyDraftProductIds(new Set());
     setHasUnsavedChanges(false);
   }, [open, vendorId]);
 
@@ -328,6 +334,11 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
     });
     return map;
   }, [existingOffers]);
+
+  const existingOfferById = useMemo(
+    () => new Map(existingOffers.map((offer) => [offer.id, offer])),
+    [existingOffers],
+  );
 
   const sourceVendorOptions = useMemo(() => {
     const map = new Map<
@@ -401,6 +412,25 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
     () => Object.values(selectedOfferDraftsByProductId),
     [selectedOfferDraftsByProductId],
   );
+
+  const markDraftDirty = (productId: string) => {
+    setDirtyDraftProductIds((current) => {
+      if (current.has(productId)) return current;
+      const next = new Set(current);
+      next.add(productId);
+      return next;
+    });
+    setHasUnsavedChanges(true);
+  };
+
+  const clearDraftDirty = (productIds: string[]) => {
+    if (productIds.length === 0) return;
+    setDirtyDraftProductIds((current) => {
+      const next = new Set(current);
+      productIds.forEach((productId) => next.delete(productId));
+      return next;
+    });
+  };
 
   const visibleSelectedOfferDrafts = useMemo(
     () =>
@@ -667,9 +697,9 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
       return;
     }
 
+    markDraftDirty(product.id);
     setSelectedOfferDraftsByProductId((prev) => {
       if (prev[product.id]) return prev;
-      setHasUnsavedChanges(true);
       return {
         ...prev,
         [product.id]: {
@@ -761,7 +791,7 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
         createdAt: new Date().toISOString(),
       },
     }));
-    setHasUnsavedChanges(true);
+    markDraftDirty(productId);
     focusSelectedDraft(productId);
   };
 
@@ -770,10 +800,10 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
     field: K,
     value: SelectedVendorOfferDraft[K],
   ) => {
+    markDraftDirty(productId);
     setSelectedOfferDraftsByProductId((prev) => {
       const current = prev[productId];
       if (!current) return prev;
-      setHasUnsavedChanges(true);
       return {
         ...prev,
         [productId]: {
@@ -847,6 +877,7 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
       delete next[productId];
       return next;
     });
+    clearDraftDirty([productId]);
     setHasUnsavedChanges(true);
   };
 
@@ -858,10 +889,12 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
       return;
     }
     setSelectedOfferDraftsByProductId({});
+    setDirtyDraftProductIds(new Set());
     setHasUnsavedChanges(true);
   };
 
   const applyBranchToAll = () => {
+    const productIds = selectedOfferDrafts.map((row) => row.productId);
     setSelectedOfferDraftsByProductId((current) =>
       Object.fromEntries(
         Object.entries(current).map(([productId, row]) => [
@@ -870,6 +903,11 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
         ]),
       ),
     );
+    setDirtyDraftProductIds((current) => {
+      const next = new Set(current);
+      productIds.forEach((productId) => next.add(productId));
+      return next;
+    });
     setHasUnsavedChanges(true);
   };
 
@@ -877,6 +915,7 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
     key: "publish" | "delivery" | "active",
     value: boolean,
   ) => {
+    const productIds = selectedOfferDrafts.map((row) => row.productId);
     setSelectedOfferDraftsByProductId((current) =>
       Object.fromEntries(
         Object.entries(current).map(([productId, row]) => [
@@ -885,13 +924,25 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
         ]),
       ),
     );
+    setDirtyDraftProductIds((current) => {
+      const next = new Set(current);
+      productIds.forEach((productId) => next.add(productId));
+      return next;
+    });
     setHasUnsavedChanges(true);
   };
 
-  const validateRows = (): SelectedVendorOfferDraft[] => {
-    const seen = new Set<string>();
+  const validateRows = (
+    rowsToValidate: SelectedVendorOfferDraft[] = selectedOfferDrafts,
+    sheetRows: SelectedVendorOfferDraft[] = selectedOfferDrafts,
+  ): SelectedVendorOfferDraft[] => {
+    const sheetKeyCounts = new Map<string, number>();
+    sheetRows.forEach((row) => {
+      const key = `${row.vendorId}::${row.productId}`;
+      sheetKeyCounts.set(key, (sheetKeyCounts.get(key) || 0) + 1);
+    });
 
-    return selectedOfferDrafts.map((row) => {
+    return rowsToValidate.map((row) => {
       let error = "";
       if (!row.vendorId) error = "Vendor is required.";
       else if (!row.productId) error = "Product is required.";
@@ -925,20 +976,160 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
         const isExistingDuplicate =
           matchedExisting &&
           existingLinkedKeyByOfferId.get(String(currentLinkId || "")) !== key;
-        const isSheetDuplicate = seen.has(key);
+        const isSheetDuplicate = (sheetKeyCounts.get(key) || 0) > 1;
         if (
           row.productMode !== "branded_product" &&
           (isExistingDuplicate || isSheetDuplicate)
         ) {
           error = "This master product is already linked to this vendor.";
         }
-        seen.add(key);
       }
       return { ...row, error };
     });
   };
 
+  const comparableImages = (source: Partial<VendorProductOffer>) =>
+    normalizeListingImages(source, 6).map((image, index) => ({
+      url: image.url || "",
+      alt: image.alt || null,
+      sortOrder: index,
+      isPrimary: index === 0,
+    }));
+
+  const comparableOfferMetadata = (offer: Partial<VendorProductOffer>) => {
+    const productMode = offer.productMode || "linked_product";
+    const images = comparableImages(offer);
+    return {
+      vendorId: offer.vendorId || "",
+      productId: String(offer.masterProductId || offer.productId || ""),
+      productMode,
+      productName: productMode === "branded_product" ? offer.productName || "" : "",
+      category: offer.category || "",
+      sector: offer.sector || "",
+      description: offer.description || "",
+      brandDisplayName: offer.brandDisplayName || "",
+      brandLogoUrl: offer.brandLogoUrl || "",
+      brandBannerUrl: offer.brandBannerUrl || "",
+      branchId: offer.branchId || "",
+      openingQty: numberOrZero((offer as any).openingQty),
+      vendorReceipts: numberOrZero((offer as any).vendorReceipts),
+      vendorSales: numberOrZero((offer as any).vendorSales),
+      currentQty: numberOrZero((offer as any).currentQty ?? offer.stockQuantity),
+      stockQuantity: numberOrZero(offer.stockQuantity),
+      sellingPrice: numberOrZero(offer.sellingPrice),
+      buyingPrice:
+        offer.buyingPrice === undefined || offer.buyingPrice === null
+          ? null
+          : numberOrZero(offer.buyingPrice),
+      discountPrice:
+        offer.discountPrice === undefined || offer.discountPrice === null
+          ? null
+          : numberOrZero(offer.discountPrice),
+      vendorSku: offer.vendorSku || "",
+      vendorProductImage: images[0]?.url || offer.vendorProductImage || "",
+      images,
+      publishToCatalogue: offer.publishToCatalogue !== false,
+      deliveryAvailable: offer.deliveryAvailable !== false,
+      active: offer.active !== false,
+      notes: offer.notes || "",
+    };
+  };
+
+  const hasOfferMetadataChanged = (
+    nextOffer: VendorProductOffer,
+    existingOffer?: VendorProductOffer,
+  ) => {
+    if (!existingOffer) return true;
+    return (
+      JSON.stringify(comparableOfferMetadata(nextOffer)) !==
+      JSON.stringify(comparableOfferMetadata(existingOffer))
+    );
+  };
+
+  const buildOfferFromRow = (
+    row: SelectedVendorOfferDraft,
+    now: string,
+  ): {
+    safeOffer: VendorProductOffer;
+    existingOffer?: VendorProductOffer;
+    product?: MasterProduct;
+  } => {
+    const product = productById.get(row.productId);
+    const existingOffer =
+      row.existingLinkId || row.offerId
+        ? existingOfferById.get(row.existingLinkId || row.offerId || "")
+        : undefined;
+    const offer: VendorProductOffer = {
+      ...(existingOffer || {}),
+      id: row.existingLinkId || row.offerId || generateVendorOfferId(),
+      vendorId: row.vendorId,
+      productId: row.productId,
+      productMode: row.productMode,
+      sourceType:
+        row.productMode === "branded_product"
+          ? "vendor_branded"
+          : "master_linked",
+      masterProductId:
+        row.productMode === "branded_product" ? null : row.productId,
+      brandOwnerVendorId:
+        row.productMode === "branded_product" ? row.vendorId : undefined,
+      isVendorBranded: row.productMode === "branded_product",
+      productName: product?.productName || row.productName,
+      category: row.category,
+      sector: row.sector,
+      description: row.description,
+      brandDisplayName: row.brandDisplayName,
+      brandLogoUrl: row.brandLogoUrl,
+      brandBannerUrl: row.brandBannerUrl,
+      branchId: row.branchId || "",
+      openingQty: numberOrZero(row.openingQty),
+      vendorReceipts: numberOrZero(row.vendorReceipts),
+      vendorSales: numberOrZero(row.vendorSales),
+      currentQty: numberOrZero(row.qty),
+      stockQuantity: numberOrZero(row.qty),
+      stockStatus: stockStatusFromQuantity(numberOrZero(row.qty)),
+      sellingPrice: numberOrZero(row.sellingPrice),
+      buyingPrice: numberOrZero(row.buyingPrice),
+      discountPrice: numberOrZero(row.discountPrice),
+      vendorSku: row.vendorSku || "",
+      vendorProductImage: row.images?.[0]?.url || existingOffer?.vendorProductImage || "",
+      images: (row.images || []).map((image, index) => ({
+        ...image,
+        sortOrder: index,
+        isPrimary: index === 0,
+      })),
+      publishToCatalogue: row.publish,
+      deliveryAvailable: row.delivery,
+      active: row.active,
+      featured: existingOffer?.featured || false,
+      notes: row.notes || "",
+      createdAt: row.createdAt || existingOffer?.createdAt || now,
+      updatedAt: now,
+    } as VendorProductOffer;
+
+    const safeOffer = sanitizeForFirestore({
+      ...offer,
+      branchId: offer.branchId || null,
+      buyingPrice:
+        row.buyingPrice === null ? null : numberOrZero(row.buyingPrice),
+      discountPrice:
+        row.discountPrice === null ? null : numberOrZero(row.discountPrice),
+      notes: row.notes || "",
+      category: row.category || null,
+      sector: row.sector || null,
+      description: row.description || null,
+      brandDisplayName: row.brandDisplayName || null,
+      brandLogoUrl: row.brandLogoUrl || null,
+      brandBannerUrl: row.brandBannerUrl || null,
+      images: offer.images || [],
+    }) as VendorProductOffer;
+
+    return { safeOffer, existingOffer, product };
+  };
+
   const saveSheet = async () => {
+    if (isSaving) return;
+
     if (!canSave) {
       showAlert("You do not have permission to save vendor product offers.", "warning");
       return;
@@ -955,95 +1146,86 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
       return;
     }
 
-    const validated = validateRows();
-    setSelectedOfferDraftsByProductId(
-      Object.fromEntries(validated.map((row) => [row.productId, row])),
+    const rowsWithUnsavedChanges = selectedOfferDrafts.filter(
+      (row) =>
+        dirtyDraftProductIds.has(row.productId) ||
+        row.linkMode === "new" ||
+        !row.existingLinkId,
     );
+
+    if (rowsWithUnsavedChanges.length === 0) {
+      setHasUnsavedChanges(false);
+      showAlert("No product sheet changes to save.", "info");
+      return;
+    }
+
+    const validated = validateRows(rowsWithUnsavedChanges, selectedOfferDrafts);
+    setSelectedOfferDraftsByProductId((current) => ({
+      ...current,
+      ...Object.fromEntries(validated.map((row) => [row.productId, row])),
+    }));
     if (validated.some((row) => row.error)) {
       showAlert("Fix validation errors before saving the product sheet.", "error");
       return;
     }
 
     setIsSaving(true);
+    setSaveProgressMessage("Preparing product metadata...");
+    const saveStartedAt = performance.now();
+    console.time("VendorProductOfferSheet.save");
     try {
       const now = new Date().toISOString();
-      const savedOffers: VendorProductOffer[] = [];
+      const preparedOffers = validated.map((row) => ({
+        row,
+        ...buildOfferFromRow(row, now),
+      }));
+      const dirtyOffers = preparedOffers.filter(({ safeOffer, existingOffer }) =>
+        hasOfferMetadataChanged(safeOffer, existingOffer),
+      );
+      const savedOffers = dirtyOffers.map(({ safeOffer }) => safeOffer);
 
-      for (const row of validated) {
-        const product = productById.get(row.productId);
-        const existingOffer = row.existingLinkId || row.offerId
-          ? existingOffers.find(
-              (offer) =>
-                offer.id === (row.existingLinkId || row.offerId),
-            )
-          : undefined;
-        const offer: VendorProductOffer = {
-          ...(existingOffer || {}),
-          id: row.existingLinkId || row.offerId || generateVendorOfferId(),
-          vendorId: row.vendorId,
-          productId: row.productId,
-          productMode: row.productMode,
-          sourceType:
-            row.productMode === "branded_product"
-              ? "vendor_branded"
-              : "master_linked",
-          masterProductId:
-            row.productMode === "branded_product" ? null : row.productId,
-          brandOwnerVendorId:
-            row.productMode === "branded_product" ? row.vendorId : undefined,
-          isVendorBranded: row.productMode === "branded_product",
-          productName: product?.productName || row.productName,
-          category: row.category,
-          sector: row.sector,
-          description: row.description,
-          brandDisplayName: row.brandDisplayName,
-          brandLogoUrl: row.brandLogoUrl,
-          brandBannerUrl: row.brandBannerUrl,
-          branchId: row.branchId || "",
-          openingQty: numberOrZero(row.openingQty),
-          vendorReceipts: numberOrZero(row.vendorReceipts),
-          vendorSales: numberOrZero(row.vendorSales),
-          currentQty: numberOrZero(row.qty),
-          stockQuantity: numberOrZero(row.qty),
-          stockStatus: stockStatusFromQuantity(numberOrZero(row.qty)),
-          sellingPrice: numberOrZero(row.sellingPrice),
-          buyingPrice: numberOrZero(row.buyingPrice),
-          discountPrice: numberOrZero(row.discountPrice),
-          vendorSku: row.vendorSku || "",
-          vendorProductImage: row.images?.[0]?.url || existingOffer?.vendorProductImage || "",
-          images: (row.images || []).map((image, index) => ({
-            ...image,
-            sortOrder: index,
-            isPrimary: index === 0,
-          })),
-          publishToCatalogue: row.publish,
-          deliveryAvailable: row.delivery,
-          active: row.active,
-          featured: existingOffer?.featured || false,
-          notes: row.notes || "",
-          createdAt: row.createdAt || existingOffer?.createdAt || now,
-          updatedAt: now,
-        } as VendorProductOffer;
+      if (savedOffers.length === 0) {
+        clearDraftDirty(validated.map((row) => row.productId));
+        setHasUnsavedChanges(false);
+        showAlert("No product sheet changes to save.", "info");
+        return;
+      }
 
-        const safeOffer = sanitizeForFirestore({
-          ...offer,
-          branchId: offer.branchId || null,
-          buyingPrice:
-            row.buyingPrice === null ? null : numberOrZero(row.buyingPrice),
-          discountPrice:
-            row.discountPrice === null ? null : numberOrZero(row.discountPrice),
-          notes: row.notes || "",
-          category: row.category || null,
-          sector: row.sector || null,
-          description: row.description || null,
-          brandDisplayName: row.brandDisplayName || null,
-          brandLogoUrl: row.brandLogoUrl || null,
-          brandBannerUrl: row.brandBannerUrl || null,
-          images: offer.images || [],
-        }) as VendorProductOffer;
+      const chunkCount = Math.ceil(savedOffers.length / SAVE_BATCH_CHUNK_SIZE);
+      console.info("VendorProductOfferSheet.save started", {
+        selectedRows: selectedOfferDrafts.length,
+        dirtyRows: rowsWithUnsavedChanges.length,
+        changedRows: savedOffers.length,
+        chunkCount,
+        chunkSize: SAVE_BATCH_CHUNK_SIZE,
+        vendorId: activeVendorId,
+      });
 
-        savedOffers.push(safeOffer);
+      if (isDevDiagnostics()) console.time("vendor offer sheet delta batch write");
+      for (let index = 0; index < savedOffers.length; index += SAVE_BATCH_CHUNK_SIZE) {
+        const chunk = savedOffers.slice(index, index + SAVE_BATCH_CHUNK_SIZE);
+        const chunkNumber = Math.floor(index / SAVE_BATCH_CHUNK_SIZE) + 1;
+        setSaveProgressMessage(
+          `Saving ${index + 1} of ${savedOffers.length} product${savedOffers.length === 1 ? "" : "s"}...`,
+        );
+        try {
+          await productService.saveVendorProductOffersDelta(chunk, existingOffers);
+        } catch (chunkError) {
+          console.error("Vendor product sheet chunk save failed", {
+            error: chunkError,
+            chunkNumber,
+            chunkSize: chunk.length,
+            firstProductNumber: index + 1,
+            totalProducts: savedOffers.length,
+            offerIds: chunk.map((offer) => offer.id),
+            vendorIds: Array.from(new Set(chunk.map((offer) => offer.vendorId))),
+          });
+          throw chunkError;
+        }
+      }
+      if (isDevDiagnostics()) console.timeEnd("vendor offer sheet delta batch write");
 
+      dirtyOffers.forEach(({ row, safeOffer, existingOffer, product }) => {
         try {
           void staffAuditService.logAction({
             eventType:
@@ -1063,24 +1245,46 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
             },
           });
         } catch (auditError) {
-          console.error("Vendor product offer audit logging failed", auditError);
+          console.error("Vendor product offer audit logging failed", {
+            error: auditError,
+            offerId: safeOffer.id,
+            productId: safeOffer.productId,
+            vendorId: safeOffer.vendorId,
+          });
         }
-      }
+      });
+
+      setSaveProgressMessage(
+        `Saved ${savedOffers.length} of ${savedOffers.length} product${savedOffers.length === 1 ? "" : "s"}...`,
+      );
+      console.info("VendorProductOfferSheet.save completed", {
+        changedRows: savedOffers.length,
+        chunkCount,
+        elapsedMs: Math.round(performance.now() - saveStartedAt),
+        vendorId: activeVendorId,
+      });
 
       if (savedOffers.length > 0) {
-        if (isDevDiagnostics()) console.time("vendor offer sheet batch write");
-        await productService.saveVendorProductOffersBatch(savedOffers);
-        if (isDevDiagnostics()) console.timeEnd("vendor offer sheet batch write");
+        onSaved(savedOffers);
       }
-
-      onSaved(savedOffers);
       setSelectedOfferDraftsByProductId({});
+      setDirtyDraftProductIds(new Set());
       setHasUnsavedChanges(false);
       setSearch("");
       setSelectedSheetSearch("");
-      showAlert("Vendor product sheet saved successfully.", "success");
+      showAlert(
+        `Vendor product sheet saved successfully. ${savedOffers.length} changed product${savedOffers.length === 1 ? "" : "s"} saved.`,
+        "success",
+      );
     } catch (error) {
-      console.error("Vendor product sheet save failed", error);
+      console.error("Vendor product sheet save failed", {
+        error,
+        selectedRowCount: selectedOfferDrafts.length,
+        dirtyRowCount: rowsWithUnsavedChanges.length,
+        dirtyProductIds: rowsWithUnsavedChanges.map((row) => row.productId),
+        validatedRowCount: validated.length,
+        vendorId: activeVendorId,
+      });
       showAlert(
         error instanceof Error
           ? error.message
@@ -1089,6 +1293,8 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
       );
     } finally {
       setIsSaving(false);
+      setSaveProgressMessage("");
+      console.timeEnd("VendorProductOfferSheet.save");
     }
   };
 
@@ -1323,7 +1529,7 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
                     />
                     <div className="h-10 w-10 shrink-0 border border-stone-200 bg-stone-50 flex items-center justify-center overflow-hidden">
                       {product.imageUrl ? (
-                        <img src={product.imageUrl} alt="" className="h-full w-full object-cover" />
+                        <img src={product.imageUrl} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />
                       ) : (
                         <PackageSearch size={16} className="text-stone-300" />
                       )}
@@ -1731,7 +1937,7 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
                                     className="h-12 border border-stone-200 bg-stone-50"
                                     title="Remove image"
                                   >
-                                    <img src={image.url} alt="" className="h-full w-full object-cover" />
+                                    <img src={image.url} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />
                                   </button>
                                 ))}
                               </div>
@@ -1856,7 +2062,7 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
                       value={row.vendorId}
                       disabled={lockVendor}
                       onChange={(event) => {
-                        setHasUnsavedChanges(true);
+                        markDraftDirty(row.productId);
                         setSelectedOfferDraftsByProductId((prev) => ({
                           ...prev,
                           [row.productId]: {
@@ -1951,7 +2157,7 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
                                 className="h-16 border border-stone-200 bg-stone-50"
                                 title="Remove image"
                               >
-                                <img src={image.url} alt="" className="h-full w-full object-cover" />
+                                <img src={image.url} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />
                               </button>
                             ))}
                           </div>
@@ -1992,7 +2198,7 @@ export const VendorProductOfferSheet: React.FC<VendorProductOfferSheetProps> = (
           <SecondaryButton onClick={handleClose}>Close</SecondaryButton>
           <PrimaryButton onClick={saveSheet} disabled={isSaving || !canSave}>
             <Save size={14} className="mr-2 inline" />
-            {isSaving ? "Saving Product Sheet..." : "Save Product Sheet"}
+            {isSaving ? saveProgressMessage || "Saving Product Sheet..." : "Save Product Sheet"}
           </PrimaryButton>
         </div>
       </div>
