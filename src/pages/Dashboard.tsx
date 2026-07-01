@@ -91,11 +91,11 @@ const safeLoadArray = async <T,>(
 }
 
 export const Dashboard: React.FC = () => {
-  console.log('Dashboard mounted successfully')
   const [data, setData] = useState<DashboardData>(EMPTY_DASHBOARD_DATA)
   const [isLoadingData, setIsLoadingData] = useState(true)
 
   useEffect(() => {
+    console.log('Dashboard mounted successfully')
     if (typeof window === 'undefined') return
 
     let mounted = true

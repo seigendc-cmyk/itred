@@ -609,6 +609,12 @@ export const staffService = {
   },
 
   loadStaffFromFirebase: async (): Promise<Staff[]> => {
+    const cached = dataCacheService.getCached<Staff[]>("staff-list", CACHE_TTL.STAFF);
+    if (cached && cached.length > 0) {
+      console.info("[Firebase Diagnostic] loadStaffFromFirebase: Using cached staff records.");
+      return cached;
+    }
+
     const currentUser = auth.currentUser;
     if (currentUser && !isUserAuthorizedForStaff()) {
       console.info(

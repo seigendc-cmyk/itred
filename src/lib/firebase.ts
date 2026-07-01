@@ -4,7 +4,7 @@ import {
   CACHE_SIZE_UNLIMITED,
   initializeFirestore,
   persistentLocalCache,
-  persistentMultipleTabManager,
+  persistentSingleTabManager,
 } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { getAnalytics, isSupported } from "firebase/analytics";
@@ -25,7 +25,7 @@ export const auth = getAuth(app);
 
 export const db = initializeFirestore(app, {
   localCache: persistentLocalCache({
-    tabManager: persistentMultipleTabManager(),
+    tabManager: persistentSingleTabManager(),
     cacheSizeBytes: CACHE_SIZE_UNLIMITED,
   }),
 });

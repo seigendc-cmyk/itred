@@ -95,11 +95,6 @@ export const dataCacheService = {
   ): Promise<T> {
     const cached = dataCacheService.getCached<T>(key, ttlMs);
     if (cached !== null) {
-      setTimeout(() => {
-        fetcher()
-          .then((fresh) => dataCacheService.setCached(key, fresh))
-          .catch((e) => console.warn(`Background fetch failed for ${key}`, e));
-      }, 0);
       return cached;
     }
     try {

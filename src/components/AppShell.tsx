@@ -293,9 +293,8 @@ export const AppShell: React.FC<AppShellProps> = ({
     useState<BeforeInstallPromptEvent | null>(null)
   const [installMessage, setInstallMessage] = useState<string | null>(null)
 
-  console.log('AppShell mounted successfully')
-
   useEffect(() => {
+    console.log('AppShell mounted successfully')
     void masterDataCacheService.bootstrap()
   }, [])
 
