@@ -5,6 +5,7 @@ import {
   EyeOff,
   Lock,
   LogIn,
+  RefreshCw,
   Shield,
   UserCheck,
   XCircle,
@@ -12,6 +13,16 @@ import {
 import { StatusBadge } from "../components/CommonUI.tsx";
 import { staffService } from "../services/staffService.ts";
 import { analyticsService } from "../services/analyticsService.ts";
+import { localStorageService } from "../services/localStorageService.ts";
+import { db, auth } from "../lib/firebase.ts";
+import { doc, serverTimestamp, setDoc } from "firebase/firestore";
+
+const isUserAuthorizedForStaff = (): boolean => {
+  const currentUser = auth.currentUser;
+  if (!currentUser) return false;
+  const allowedEmails = ["seigendc@gmail.com"];
+  return !!currentUser.email && allowedEmails.includes(currentUser.email);
+};
 import { Staff } from "../types.ts";
 
 interface WelcomePageProps {
@@ -19,6 +30,70 @@ interface WelcomePageProps {
   onLoginSuccess: (session: any) => void;
   sessionMessage?: string | null;
 }
+
+const STAFF_KEY = "itred_staff_records";
+const FIRESTORE_STAFF_COLLECTION = "itred_console_staff";
+const STAFF_SYNC_TIMEOUT_MS = 3500;
+
+const withTimeout = async <T,>(promise: Promise<T>, ms: number): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("Staff sync timeout")), ms);
+  });
+
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+};
+
+const mergeLocalStaff = (staff: Staff) => {
+  const current = localStorageService.get<Staff[]>(STAFF_KEY);
+  const staffList = Array.isArray(current) ? current : [];
+  const index = staffList.findIndex((item) => item.id === staff.id);
+  const next = [...staffList];
+
+  if (index >= 0) {
+    next[index] = staff;
+  } else {
+    next.push(staff);
+  }
+
+  localStorageService.set(STAFF_KEY, next);
+  return next;
+};
+
+const patchStaffRecordFast = (staff: Staff) => {
+  const docId = staff.id || staff.staffCode;
+  if (!docId) return;
+
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    console.info("[Firebase Diagnostic] Unauthenticated session. Fast staff state patch skipped.");
+    return;
+  }
+  if (!isUserAuthorizedForStaff()) {
+    console.info("[Firebase Diagnostic] User is not authorized to modify staff records in Firestore. Fast staff state patch skipped.");
+    return;
+  }
+
+  void setDoc(
+    doc(db, FIRESTORE_STAFF_COLLECTION, docId),
+    {
+      id: docId,
+      staffCode: staff.staffCode || "",
+      failedAttemptCount: staff.failedAttemptCount || 0,
+      isLocked: !!staff.isLocked,
+      status: staff.status || "active",
+      updatedAt: staff.updatedAt || new Date().toISOString(),
+      firestoreUpdatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  ).catch((error) => {
+    console.warn("Fast staff state patch failed; local session remains available.", error);
+  });
+};
 
 const WelcomePage: React.FC<WelcomePageProps> = ({
   googleEmail = "seiGEN Commerce",
@@ -30,11 +105,9 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
   const [passcode, setPasscode] = useState<string>("");
   const [showPasscode, setShowPasscode] = useState<boolean>(false);
   const [loginError, setLoginError] = useState<string | null>(null);
-  const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
-  const [loginStatusMessage, setLoginStatusMessage] = useState<string | null>(
-    null,
-  );
   const [isSetupMode, setIsSetupMode] = useState<boolean>(false);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [syncMessage, setSyncMessage] = useState<string>("");
 
   const [setupFullName, setSetupFullName] = useState<string>("");
   const [setupDisplayName, setSetupDisplayName] = useState<string>("");
@@ -43,33 +116,67 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
   const [setupConfirmPasscode, setSetupConfirmPasscode] = useState<string>("");
   const [setupShowPass, setSetupShowPass] = useState<boolean>(false);
 
-  const refreshStaff = async () => {
+  const publishStaff = (staffList: Staff[]) => {
+    const safeStaff = Array.isArray(staffList) ? staffList : [];
+    setAllStaff(safeStaff);
+    setIsSetupMode(safeStaff.length === 0);
+    return safeStaff;
+  };
+
+  const refreshStaff = async (options: { blocking?: boolean } = {}) => {
+    const localStaff = staffService.getAllStaff();
+    if (localStaff.length > 0 || !options.blocking) {
+      publishStaff(localStaff);
+    }
+
+    setIsSyncing(true);
+    setSyncMessage(localStaff.length > 0 ? "Refreshing staff records in background." : "Loading staff records.");
+
     try {
-      const firebaseStaff = await staffService.loadStaffFromFirebase();
-      const safeStaff = Array.isArray(firebaseStaff) ? firebaseStaff : [];
-      setAllStaff(safeStaff);
-      setIsSetupMode(safeStaff.length === 0);
+      const firebaseStaff = options.blocking
+        ? await staffService.loadStaffFromFirebase()
+        : await withTimeout(staffService.loadStaffFromFirebase(), STAFF_SYNC_TIMEOUT_MS);
+
+      const safeStaff = publishStaff(firebaseStaff);
+      setSyncMessage("Staff records are up to date.");
       return safeStaff;
     } catch (error) {
-      console.error("Failed to load staff from Firebase", error);
-      const localStaff = staffService.getAllStaff();
-      const safeLocalStaff = Array.isArray(localStaff) ? localStaff : [];
-      setAllStaff(safeLocalStaff);
-      setIsSetupMode(safeLocalStaff.length === 0);
+      const fallback = staffService.getAllStaff();
+      const safeLocalStaff = publishStaff(fallback);
+      setSyncMessage(
+        safeLocalStaff.length > 0
+          ? "Using saved staff records while cloud sync continues."
+          : "Unable to load staff records. Check connection and try again.",
+      );
+      console.warn("Staff sync did not complete quickly; continuing with local staff records.", error);
       return safeLocalStaff;
+    } finally {
+      setIsSyncing(false);
     }
   };
 
   useEffect(() => {
-    void refreshStaff();
+    const localStaff = staffService.getAllStaff();
+    publishStaff(localStaff);
+    void refreshStaff({ blocking: localStaff.length === 0 });
   }, []);
 
   const selectedStaff = allStaff.find((staff) => staff.id === selectedStaffId);
 
+  const updateStaffStateFast = (staff: Staff) => {
+    const nextStaff = {
+      ...staff,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const nextStaffList = mergeLocalStaff(nextStaff);
+    setAllStaff(nextStaffList);
+    patchStaffRecordFast(nextStaff);
+    return nextStaff;
+  };
+
   const handleLogin = async () => {
-    if (isLoggingIn) return;
     setLoginError(null);
-    setLoginStatusMessage(null);
 
     if (!selectedStaffId) {
       setLoginError("Please select your name.");
@@ -79,21 +186,17 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
     let staffToLogin = allStaff.find((staff) => staff.id === selectedStaffId);
 
     if (!staffToLogin) {
-      const latestStaff = await refreshStaff();
+      const latestStaff = await refreshStaff({ blocking: true });
       staffToLogin = latestStaff.find((staff) => staff.id === selectedStaffId);
 
       if (!staffToLogin) {
-        setLoginError(
-          "Selected staff profile was not found. Refresh and try again.",
-        );
+        setLoginError("Selected staff profile was not found. Refresh and try again.");
         return;
       }
     }
 
     if (staffToLogin.status !== "active") {
-      setLoginError(
-        "This staff account is not active. Contact SysAdmin.",
-      );
+      setLoginError("This staff account is not active. Contact SysAdmin.");
       try {
         analyticsService.logEvent({
           eventType: "STAFF_LOGIN_BLOCKED_INACTIVE",
@@ -111,9 +214,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
     }
 
     if (staffToLogin.isLocked) {
-      setLoginError(
-        "This account is locked due to too many failed attempts. Contact SysAdmin.",
-      );
+      setLoginError("This account is locked due to too many failed attempts. Contact SysAdmin.");
       try {
         analyticsService.logEvent({
           eventType: "STAFF_LOGIN_BLOCKED_LOCKED",
@@ -135,131 +236,87 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
       return;
     }
 
-    try {
-      if (passcode === staffToLogin.passcode) {
-        setIsLoggingIn(true);
-        const session = {
-          staffId: staffToLogin.id,
-          staffCode: staffToLogin.staffCode,
-          staffName: staffToLogin.fullName,
-          displayName: staffToLogin.displayName,
-          role: staffToLogin.role,
-          desk: staffToLogin.desk,
-          menuPermissions: staffToLogin.menuPermissions,
-          actionPermissions: staffToLogin.actionPermissions,
-          loginAt: new Date().toISOString(),
-          googleEmailUsed: googleEmail,
-        };
-
-        localStorage.setItem("activeStaffSession", JSON.stringify(session));
-        setLoginStatusMessage("Access granted. Opening console...");
-        onLoginSuccess(session);
-
-        const updatedStaff: Staff = {
-          ...staffToLogin,
-          failedAttemptCount: 0,
-          isLocked: false,
-          updatedAt: new Date().toISOString(),
-        };
-
-        void staffService
-          .saveStaff(updatedStaff)
-          .catch((error) =>
-            console.error("Failed to persist successful staff login state", {
-              error,
-              staffId: staffToLogin?.id,
-            }),
-          );
-
-        try {
-          analyticsService.logEvent({
-            eventType: "STAFF_LOGIN_SUCCESS",
-            actorType:
-              staffToLogin.role === "Admin" || staffToLogin.role === "SysAdmin"
-                ? "admin"
-                : "backend_staff",
-            actorName: staffToLogin.fullName,
-            actorId: staffToLogin.id,
-            result: "success",
-            details: {
-              staffId: staffToLogin.id,
-              staffName: staffToLogin.fullName,
-              role: staffToLogin.role,
-              desk: staffToLogin.desk,
-              googleEmail,
-            },
-          });
-        } catch (error) {
-          console.error("Failed to log staff login success", error);
-        }
-        return;
-      }
-
-      const failedAttemptCount = (staffToLogin.failedAttemptCount || 0) + 1;
-      const isLocked = failedAttemptCount >= 5;
-
-      const updatedStaff: Staff = {
+    if (passcode === staffToLogin.passcode) {
+      const updatedStaff = updateStaffStateFast({
         ...staffToLogin,
-        failedAttemptCount,
-        isLocked,
-        updatedAt: new Date().toISOString(),
+        failedAttemptCount: 0,
+        isLocked: false,
+      });
+
+      const session = {
+        staffId: updatedStaff.id,
+        staffCode: updatedStaff.staffCode,
+        staffName: updatedStaff.fullName,
+        displayName: updatedStaff.displayName,
+        role: updatedStaff.role,
+        desk: updatedStaff.desk,
+        menuPermissions: updatedStaff.menuPermissions,
+        actionPermissions: updatedStaff.actionPermissions,
+        loginAt: new Date().toISOString(),
+        googleEmailUsed: googleEmail,
       };
 
-      await staffService.saveStaff(updatedStaff);
+      localStorage.setItem("activeStaffSession", JSON.stringify(session));
 
-      if (isLocked) {
-        setLoginError(
-          "Too many failed attempts. Your account has been locked. Contact SysAdmin.",
-        );
+      analyticsService.logEvent({
+        eventType: "STAFF_LOGIN_SUCCESS",
+        actorType:
+          updatedStaff.role === "Admin" || updatedStaff.role === "SysAdmin"
+            ? "admin"
+            : "backend_staff",
+        actorName: updatedStaff.fullName,
+        actorId: updatedStaff.id,
+        result: "success",
+        details: {
+          staffId: updatedStaff.id,
+          staffName: updatedStaff.fullName,
+          role: updatedStaff.role,
+          desk: updatedStaff.desk,
+          googleEmail,
+        },
+      });
 
-        analyticsService.logEvent({
-          eventType: "STAFF_LOCKED_AFTER_FAILED_ATTEMPTS",
-          actorType: "system",
-          actorName: "Login System",
-          actorId: staffToLogin.id,
-          result: "locked",
-          details: {
-            staffId: staffToLogin.id,
-            staffName: staffToLogin.fullName,
-            attempts: failedAttemptCount,
-          },
-        });
-      } else {
-        setLoginError(
-          `Invalid passcode. ${5 - failedAttemptCount} attempts remaining.`,
-        );
+      onLoginSuccess(session);
+      return;
+    }
 
-        analyticsService.logEvent({
-          eventType: "STAFF_LOGIN_FAILED",
-          actorType: "system",
-          actorName: "Login System",
-          actorId: staffToLogin.id,
-          result: "failed",
-          details: {
-            staffId: staffToLogin.id,
-            staffName: staffToLogin.fullName,
-            attempts: failedAttemptCount,
-          },
-        });
-      }
+    const failedAttemptCount = (staffToLogin.failedAttemptCount || 0) + 1;
+    const isLocked = failedAttemptCount >= 5;
 
-      await refreshStaff();
-    } catch (error: any) {
-      console.error("Login handling error", error);
-      const isPermissionDenied =
-        error?.code === "permission-denied" ||
-        (error?.message &&
-          (error.message.includes("permission") ||
-            error.message.includes("unauthorized") ||
-            error.message.includes("insufficient")));
+    const updatedStaff = updateStaffStateFast({
+      ...staffToLogin,
+      failedAttemptCount,
+      isLocked,
+    });
 
-      if (isPermissionDenied) {
-        setLoginError("FirebaseError: Missing or insufficient permissions. You are not authorized to modify staff records.");
-      } else {
-        setLoginError("An error occurred during login. Please try again.");
-      }
-    } finally {
-      setIsLoggingIn(false);
+    if (isLocked) {
+      setLoginError("Too many failed attempts. Your account has been locked. Contact SysAdmin.");
+      analyticsService.logEvent({
+        eventType: "STAFF_LOCKED_AFTER_FAILED_ATTEMPTS",
+        actorType: "system",
+        actorName: "Login System",
+        actorId: updatedStaff.id,
+        result: "locked",
+        details: {
+          staffId: updatedStaff.id,
+          staffName: updatedStaff.fullName,
+          attempts: failedAttemptCount,
+        },
+      });
+    } else {
+      setLoginError(`Invalid passcode. ${5 - failedAttemptCount} attempts remaining.`);
+      analyticsService.logEvent({
+        eventType: "STAFF_LOGIN_FAILED",
+        actorType: "system",
+        actorName: "Login System",
+        actorId: updatedStaff.id,
+        result: "failed",
+        details: {
+          staffId: updatedStaff.id,
+          staffName: updatedStaff.fullName,
+          attempts: failedAttemptCount,
+        },
+      });
     }
   };
 
@@ -268,7 +325,6 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
     setPasscode("");
     setShowPasscode(false);
     setLoginError(null);
-    setLoginStatusMessage(null);
   };
 
   const handleFinishSetup = async () => {
@@ -320,8 +376,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
           staffService.ROLE_TEMPLATES["SysAdmin"] ||
           {},
         actionPermissions:
-          (staffService.ROLE_TEMPLATES["SysAdmin"] as any)?.actionPermissions ||
-          {},
+          (staffService.ROLE_TEMPLATES["SysAdmin"] as any)?.actionPermissions || {},
         createdBy: "system",
         updatedBy: "system",
         createdAt: now,
@@ -348,7 +403,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
         console.error("Analytics log failed", analyticsError);
       }
 
-      const latestStaff = await refreshStaff();
+      const latestStaff = await refreshStaff({ blocking: true });
 
       const savedStaff =
         latestStaff.find((s) => s.id === defaultSysAdmin.id) ||
@@ -356,13 +411,9 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
         latestStaff.find((s) => s.email === defaultSysAdmin.email);
 
       if (!savedStaff) {
-        setLoginError(
-          "SysAdmin was saved but could not be reloaded. Refresh the page and check Staff Management.",
-        );
+        setLoginError("SysAdmin was saved but could not be reloaded. Refresh the page and check Staff Management.");
       } else {
-        setLoginError(
-          "First SysAdmin profile created. Please enter your passcode to access the desk.",
-        );
+        setLoginError("First SysAdmin profile created. Please enter your passcode to access the desk.");
       }
 
       setIsSetupMode(false);
@@ -383,8 +434,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
   };
 
   const isSelectedStaffBlocked =
-    !!selectedStaff &&
-    (selectedStaff.status !== "active" || selectedStaff.isLocked);
+    !!selectedStaff && (selectedStaff.status !== "active" || selectedStaff.isLocked);
 
   const selectableStaff = useMemo(() => {
     const activeById = new Map<string, Staff>();
@@ -408,9 +458,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
       <div style={styles.container}>
         <div style={styles.header}>
           <h1 style={styles.appName}>iTred</h1>
-          <p style={styles.subtitle}>
-            Backend Catalogue & Storefront Operations Console
-          </p>
+          <p style={styles.subtitle}>Backend Catalogue & Storefront Operations Console</p>
         </div>
 
         <div style={styles.panel}>
@@ -419,11 +467,15 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
             <span style={styles.googleEmailText}>{googleEmail}</span>
           </div>
 
-          <div style={styles.formGroup}>
-            <label htmlFor="staff-select" style={styles.label}>
-              Select Your Name
-            </label>
+          {syncMessage && (
+            <div style={styles.syncNotice}>
+              <RefreshCw size={14} style={{ color: "#FF6B00" }} />
+              <span>{isSyncing ? "Syncing: " : "Sync: "}{syncMessage}</span>
+            </div>
+          )}
 
+          <div style={styles.formGroup}>
+            <label htmlFor="staff-select" style={styles.label}>Select Your Name</label>
             <select
               id="staff-select"
               style={styles.select}
@@ -446,115 +498,50 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
                   ))}
                 </>
               ) : (
-                <option value="" disabled>
-                  No active staff profiles available.
-                </option>
+                <option value="" disabled>No active staff profiles available.</option>
               )}
             </select>
             {!isSetupMode && selectableStaff.length === 0 && (
-              <div style={styles.emptyStaffState}>
-                No active staff profiles available.
-              </div>
+              <div style={styles.emptyStaffState}>No active staff profiles available.</div>
             )}
-            <div
-              style={{
-                fontSize: "10px",
-                color: "#888",
-                marginTop: "4px",
-                textAlign: "right",
-              }}
-            >
-              Loaded staff profiles: {allStaff.length} | Selectable profiles:{" "}
-              {selectableStaff.length}
-            </div>
           </div>
 
           {isSetupMode && (
             <div style={styles.setupContainer}>
               <div style={styles.setupCard}>
-                <Lock
-                  size={24}
-                  style={{ color: "#FF6B00", marginBottom: "15px" }}
-                />
-
+                <Lock size={24} style={{ color: "#FF6B00", marginBottom: "15px" }} />
                 <h3 style={styles.setupCardTitle}>System Initialisation</h3>
-
                 <p style={styles.setupCardText}>
-                  No staff profiles detected. Create the primary SysAdmin
-                  profile to activate the operations console.
+                  No staff profiles detected. Create the primary SysAdmin profile to activate the operations console.
                 </p>
 
                 <div style={styles.setupForm}>
                   <div style={styles.formGroup}>
                     <label style={styles.label}>Full Legal Name</label>
-                    <input
-                      style={styles.inputNormal}
-                      value={setupFullName}
-                      onChange={(event) => setSetupFullName(event.target.value)}
-                      placeholder="E.G. JOHN DOE"
-                    />
+                    <input style={styles.inputNormal} value={setupFullName} onChange={(event) => setSetupFullName(event.target.value)} placeholder="E.G. JOHN DOE" />
                   </div>
-
                   <div style={styles.formGroup}>
                     <label style={styles.label}>Display Name</label>
-                    <input
-                      style={styles.inputNormal}
-                      value={setupDisplayName}
-                      onChange={(event) =>
-                        setSetupDisplayName(event.target.value)
-                      }
-                      placeholder="E.G. ADMIN-J"
-                    />
+                    <input style={styles.inputNormal} value={setupDisplayName} onChange={(event) => setSetupDisplayName(event.target.value)} placeholder="E.G. ADMIN-J" />
                   </div>
-
                   <div style={styles.formGroup}>
                     <label style={styles.label}>Email Address Optional</label>
-                    <input
-                      style={styles.inputNormal}
-                      value={setupEmail}
-                      onChange={(event) => setSetupEmail(event.target.value)}
-                      placeholder="ADMIN@ITRED.COM"
-                    />
+                    <input style={styles.inputNormal} value={setupEmail} onChange={(event) => setSetupEmail(event.target.value)} placeholder="ADMIN@ITRED.COM" />
                   </div>
 
                   <div style={styles.grid2}>
                     <div style={styles.formGroup}>
                       <label style={styles.label}>6-Digit Passcode</label>
-                      <input
-                        type={setupShowPass ? "text" : "password"}
-                        style={styles.inputCenter}
-                        maxLength={6}
-                        value={setupPasscode}
-                        onChange={(event) =>
-                          setSetupPasscode(
-                            event.target.value.replace(/\D/g, "").slice(0, 6),
-                          )
-                        }
-                      />
+                      <input type={setupShowPass ? "text" : "password"} style={styles.inputCenter} maxLength={6} value={setupPasscode} onChange={(event) => setSetupPasscode(event.target.value.replace(/\D/g, "").slice(0, 6))} />
                     </div>
-
                     <div style={styles.formGroup}>
                       <label style={styles.label}>Confirm Passcode</label>
-                      <input
-                        type={setupShowPass ? "text" : "password"}
-                        style={styles.inputCenter}
-                        maxLength={6}
-                        value={setupConfirmPasscode}
-                        onChange={(event) =>
-                          setSetupConfirmPasscode(
-                            event.target.value.replace(/\D/g, "").slice(0, 6),
-                          )
-                        }
-                      />
+                      <input type={setupShowPass ? "text" : "password"} style={styles.inputCenter} maxLength={6} value={setupConfirmPasscode} onChange={(event) => setSetupConfirmPasscode(event.target.value.replace(/\D/g, "").slice(0, 6))} />
                     </div>
                   </div>
 
                   <div style={styles.showPasscodeRow}>
-                    <button
-                      type="button"
-                      onClick={() => setSetupShowPass((current) => !current)}
-                      style={styles.linkButton}
-                    >
+                    <button type="button" onClick={() => setSetupShowPass((current) => !current)} style={styles.linkButton}>
                       {setupShowPass ? "Hide Passcodes" : "Show Passcodes"}
                     </button>
                   </div>
@@ -569,20 +556,8 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
                   <button
                     type="button"
                     onClick={handleFinishSetup}
-                    style={
-                      !setupFullName ||
-                      !setupDisplayName ||
-                      setupPasscode.length !== 6 ||
-                      setupPasscode !== setupConfirmPasscode
-                        ? styles.setupButtonDisabled
-                        : styles.setupButton
-                    }
-                    disabled={
-                      !setupFullName ||
-                      !setupDisplayName ||
-                      setupPasscode.length !== 6 ||
-                      setupPasscode !== setupConfirmPasscode
-                    }
+                    style={!setupFullName || !setupDisplayName || setupPasscode.length !== 6 || setupPasscode !== setupConfirmPasscode ? styles.setupButtonDisabled : styles.setupButton}
+                    disabled={!setupFullName || !setupDisplayName || setupPasscode.length !== 6 || setupPasscode !== setupConfirmPasscode}
                   >
                     <Shield size={16} style={{ marginRight: "8px" }} />
                     Initialise System
@@ -595,68 +570,29 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
           {selectedStaff && !isSetupMode && (
             <div style={styles.staffDetailsPreview}>
               <h4 style={styles.previewTitle}>Selected Profile Overview</h4>
-
-              <div style={styles.previewRow}>
-                <span style={styles.previewLabel}>Name:</span>
-                <span style={styles.previewValue}>
-                  {selectedStaff.displayName || selectedStaff.fullName}
-                </span>
-              </div>
-
-              <div style={styles.previewRow}>
-                <span style={styles.previewLabel}>Role:</span>
-                <span style={styles.previewValue}>{selectedStaff.role}</span>
-              </div>
-
-              <div style={styles.previewRow}>
-                <span style={styles.previewLabel}>Desk:</span>
-                <span style={styles.previewValue}>{selectedStaff.desk}</span>
-              </div>
-
+              <div style={styles.previewRow}><span style={styles.previewLabel}>Name:</span><span style={styles.previewValue}>{selectedStaff.displayName || selectedStaff.fullName}</span></div>
+              <div style={styles.previewRow}><span style={styles.previewLabel}>Role:</span><span style={styles.previewValue}>{selectedStaff.role}</span></div>
+              <div style={styles.previewRow}><span style={styles.previewLabel}>Desk:</span><span style={styles.previewValue}>{selectedStaff.desk}</span></div>
               <div style={styles.previewRow}>
                 <span style={styles.previewLabel}>Status:</span>
                 <span style={styles.previewValue}>
-                  <StatusBadge
-                    status={
-                      selectedStaff.isLocked ? "locked" : selectedStaff.status
-                    }
-                    variant={
-                      selectedStaff.status === "active" &&
-                      !selectedStaff.isLocked
-                        ? "success"
-                        : "warning"
-                    }
-                  />
+                  <StatusBadge status={selectedStaff.isLocked ? "locked" : selectedStaff.status} variant={selectedStaff.status === "active" && !selectedStaff.isLocked ? "success" : "warning"} />
                 </span>
               </div>
             </div>
           )}
 
           {selectedStaff && !isSetupMode && (
-            <div style={styles.loginForm} data-staff-login-form="true">
+            <div style={styles.loginForm}>
               {selectedStaff.status === "suspended" && (
-                <div style={styles.warningBox}>
-                  <Lock size={16} style={{ color: "#EF4444" }} />
-                  <span style={styles.warningText}>
-                    Account Suspended. Contact SysAdmin.
-                  </span>
-                </div>
+                <div style={styles.warningBox}><Lock size={16} style={{ color: "#EF4444" }} /><span style={styles.warningText}>Account Suspended. Contact SysAdmin.</span></div>
               )}
-
               {selectedStaff.isLocked && (
-                <div style={styles.warningBox}>
-                  <Lock size={16} style={{ color: "#EF4444" }} />
-                  <span style={styles.warningText}>
-                    Account Locked. Contact SysAdmin.
-                  </span>
-                </div>
+                <div style={styles.warningBox}><Lock size={16} style={{ color: "#EF4444" }} /><span style={styles.warningText}>Account Locked. Contact SysAdmin.</span></div>
               )}
 
               <div style={styles.formGroup}>
-                <label htmlFor="passcode" style={styles.label}>
-                  6-Digit Passcode
-                </label>
-
+                <label htmlFor="passcode" style={styles.label}>6-Digit Passcode</label>
                 <div style={styles.passcodeInputContainer}>
                   <input
                     id="passcode"
@@ -664,22 +600,14 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
                     style={styles.input}
                     value={passcode}
                     onChange={(event) => {
-                      const value = event.target.value
-                        .replace(/[^0-9]/g, "")
-                        .slice(0, 6);
+                      const value = event.target.value.replace(/[^0-9]/g, "").slice(0, 6);
                       setPasscode(value);
                       setLoginError(null);
                     }}
                     maxLength={6}
-                    disabled={isSelectedStaffBlocked || isLoggingIn}
+                    disabled={isSelectedStaffBlocked}
                   />
-
-                  <button
-                    type="button"
-                    onClick={() => setShowPasscode((current) => !current)}
-                    style={styles.togglePasscodeButton}
-                    disabled={isSelectedStaffBlocked || isLoggingIn}
-                  >
+                  <button type="button" onClick={() => setShowPasscode((current) => !current)} style={styles.togglePasscodeButton} disabled={isSelectedStaffBlocked}>
                     {showPasscode ? <EyeOff size={16} /> : <Eye size={16} />}
                   </button>
                 </div>
@@ -692,42 +620,12 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
                 </div>
               )}
 
-              {loginStatusMessage && !loginError && (
-                <div style={styles.successBox}>
-                  <UserCheck size={16} style={{ color: "#16A34A" }} />
-                  <span style={styles.successText}>{loginStatusMessage}</span>
-                </div>
-              )}
-
               <div style={styles.buttonGroup}>
-                <button
-                  type="button"
-                  onClick={handleLogin}
-                  style={
-                    !passcode ||
-                    passcode.length !== 6 ||
-                    isSelectedStaffBlocked ||
-                    isLoggingIn
-                      ? styles.loginButtonDisabled
-                      : styles.loginButton
-                  }
-                  disabled={
-                    !passcode ||
-                    passcode.length !== 6 ||
-                    isSelectedStaffBlocked ||
-                    isLoggingIn
-                  }
-                >
+                <button type="button" onClick={handleLogin} style={!passcode || passcode.length !== 6 || isSelectedStaffBlocked ? styles.loginButtonDisabled : styles.loginButton} disabled={!passcode || passcode.length !== 6 || isSelectedStaffBlocked}>
                   <LogIn size={16} style={{ marginRight: "8px" }} />
-                  {isLoggingIn ? "Opening Console..." : "Enter Staff Desk"}
+                  Enter Staff Desk
                 </button>
-
-                <button
-                  type="button"
-                  onClick={handleCancel}
-                  style={styles.cancelButton}
-                  disabled={isLoggingIn}
-                >
+                <button type="button" onClick={handleCancel} style={styles.cancelButton}>
                   <XCircle size={16} style={{ marginRight: "8px" }} />
                   Cancel Selection
                 </button>
@@ -736,17 +634,9 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
           )}
 
           {!isSetupMode && !selectedStaff && sessionMessage && !loginError && (
-            <div
-              style={{
-                ...styles.errorBox,
-                backgroundColor: "#FFF7ED",
-                borderColor: "#FF6B00",
-              }}
-            >
+            <div style={{ ...styles.errorBox, backgroundColor: "#FFF7ED", borderColor: "#FF6B00" }}>
               <AlertTriangle size={16} style={{ color: "#FF6B00" }} />
-              <span style={{ ...styles.errorText, color: "#FF6B00" }}>
-                {sessionMessage}
-              </span>
+              <span style={{ ...styles.errorText, color: "#FF6B00" }}>{sessionMessage}</span>
             </div>
           )}
 
@@ -759,56 +649,23 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
 
           <div style={styles.securityNotice}>
             <AlertTriangle size={16} style={{ color: "#FF6B00" }} />
-            <p style={styles.securityText}>
-              Access is restricted to authorised staff only. All login attempts
-              and system activity are logged.
-            </p>
+            <p style={styles.securityText}>Access is restricted to authorised staff only. All login attempts and system activity are logged.</p>
           </div>
 
           <div style={styles.deskExplanation}>
             <h4 style={styles.deskExplanationTitle}>Staff Desks Overview</h4>
-
             <ul style={styles.deskList}>
-              <li>
-                <strong>SysAdmin Desk:</strong> Full system control and staff
-                management.
-              </li>
-              <li>
-                <strong>Backoffice Desk:</strong> Vendor, product, catalogue and
-                general operations.
-              </li>
-              <li>
-                <strong>Product Data Desk:</strong> Product entry, image uploads
-                and price updates.
-              </li>
-              <li>
-                <strong>Catalogue Deployment Desk:</strong> Catalogue and
-                storefront generation.
-              </li>
-              <li>
-                <strong>Collections Desk:</strong> Due subscriptions,
-                collections and follow-ups.
-              </li>
-              <li>
-                <strong>RPN Management Desk:</strong> Field collection, assigned
-                vendors and spot checks.
-              </li>
-              <li>
-                <strong>CAH Operations Desk:</strong> Access Hub links, booths
-                and follower updates.
-              </li>
-              <li>
-                <strong>BI & Analytics Desk:</strong> Analytics, BI scores and
-                performance metrics.
-              </li>
-              <li>
-                <strong>Viewer Desk:</strong> Read-only system summary.
-              </li>
+              <li><strong>SysAdmin Desk:</strong> Full system control and staff management.</li>
+              <li><strong>Backoffice Desk:</strong> Vendor, product, catalogue and general operations.</li>
+              <li><strong>Product Data Desk:</strong> Product entry, image uploads and price updates.</li>
+              <li><strong>Catalogue Deployment Desk:</strong> Catalogue and storefront generation.</li>
+              <li><strong>Collections Desk:</strong> Due subscriptions, collections and follow-ups.</li>
+              <li><strong>RPN Management Desk:</strong> Field collection, assigned vendors and spot checks.</li>
+              <li><strong>CAH Operations Desk:</strong> Access Hub links, booths and follower updates.</li>
+              <li><strong>BI & Analytics Desk:</strong> Analytics, BI scores and performance metrics.</li>
+              <li><strong>Viewer Desk:</strong> Read-only system summary.</li>
             </ul>
-
-            <p style={styles.supportText}>
-              Contact SysAdmin if your passcode is locked or forgotten.
-            </p>
+            <p style={styles.supportText}>Contact SysAdmin if your passcode is locked or forgotten.</p>
           </div>
         </div>
 
@@ -819,403 +676,55 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
 };
 
 const styles: { [key: string]: React.CSSProperties } = {
-  page: {
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center",
-    minHeight: "100vh",
-    backgroundColor: "#F8F8F8",
-    fontFamily: "Arial, sans-serif",
-    color: "#2E2E2E",
-  },
-  container: {
-    width: "100%",
-    maxWidth: "560px",
-    padding: "20px",
-    textAlign: "center",
-  },
-  header: {
-    marginBottom: "30px",
-  },
-  appName: {
-    fontSize: "48px",
-    fontWeight: 900,
-    color: "#FF6B00",
-    margin: 0,
-    letterSpacing: "-2px",
-  },
-  subtitle: {
-    fontSize: "14px",
-    fontWeight: "bold",
-    color: "#2E2E2E",
-    margin: "5px 0 0",
-    textTransform: "uppercase",
-    letterSpacing: "1px",
-  },
-  panel: {
-    backgroundColor: "#FFFFFF",
-    border: "1px solid #E0E0E0",
-    boxShadow: "none",
-    padding: "30px",
-    marginBottom: "20px",
-  },
-  googleEmailDisplay: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: "10px",
-    backgroundColor: "#F0F0F0",
-    padding: "12px",
-    marginBottom: "25px",
-    fontSize: "13px",
-    fontWeight: "bold",
-    color: "#2E2E2E",
-    textTransform: "uppercase",
-  },
-  googleEmailText: {
-    opacity: 0.8,
-    overflowWrap: "anywhere",
-  },
-  formGroup: {
-    marginBottom: "20px",
-    textAlign: "left",
-  },
-  label: {
-    display: "block",
-    fontSize: "11px",
-    fontWeight: "bold",
-    textTransform: "uppercase",
-    color: "#666666",
-    marginBottom: "8px",
-    letterSpacing: "0.5px",
-  },
-  select: {
-    width: "100%",
-    boxSizing: "border-box",
-    padding: "12px",
-    border: "1px solid #D0D0D0",
-    backgroundColor: "#FFFFFF",
-    fontSize: "14px",
-    color: "#2E2E2E",
-    appearance: "none",
-    backgroundImage:
-      "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%232E2E2E' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E\")",
-    backgroundRepeat: "no-repeat",
-    backgroundPosition: "right 12px center",
-    cursor: "pointer",
-  },
-  emptyStaffState: {
-    marginTop: "8px",
-    padding: "10px",
-    border: "1px solid #E0E0E0",
-    backgroundColor: "#F8F8F8",
-    color: "#666666",
-    fontSize: "12px",
-    fontWeight: "bold",
-    textTransform: "uppercase",
-  },
-  loginForm: {
-    marginTop: "25px",
-    borderTop: "1px solid #E0E0E0",
-    paddingTop: "25px",
-  },
-  passcodeInputContainer: {
-    position: "relative",
-  },
-  input: {
-    width: "100%",
-    boxSizing: "border-box",
-    padding: "12px",
-    border: "1px solid #D0D0D0",
-    fontSize: "18px",
-    fontWeight: "bold",
-    textAlign: "center",
-    letterSpacing: "2px",
-    color: "#2E2E2E",
-    backgroundColor: "#FFFFFF",
-  },
-  inputNormal: {
-    width: "100%",
-    boxSizing: "border-box",
-    padding: "12px",
-    border: "1px solid #D0D0D0",
-    fontSize: "14px",
-    fontWeight: "bold",
-    color: "#2E2E2E",
-    backgroundColor: "#FFFFFF",
-  },
-  inputCenter: {
-    width: "100%",
-    boxSizing: "border-box",
-    padding: "12px",
-    border: "1px solid #D0D0D0",
-    textAlign: "center",
-    fontSize: "16px",
-    fontWeight: "bold",
-    letterSpacing: "4px",
-  },
-  togglePasscodeButton: {
-    position: "absolute",
-    right: "10px",
-    top: "50%",
-    transform: "translateY(-50%)",
-    background: "none",
-    border: "none",
-    cursor: "pointer",
-    color: "#666666",
-    padding: "5px",
-  },
-  buttonGroup: {
-    marginTop: "30px",
-    display: "flex",
-    flexDirection: "column",
-    gap: "10px",
-  },
-  loginButton: {
-    width: "100%",
-    padding: "15px",
-    backgroundColor: "#FF6B00",
-    color: "#FFFFFF",
-    border: "none",
-    fontSize: "14px",
-    fontWeight: "bold",
-    textTransform: "uppercase",
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  loginButtonDisabled: {
-    width: "100%",
-    padding: "15px",
-    backgroundColor: "#CCCCCC",
-    color: "#FFFFFF",
-    border: "none",
-    fontSize: "14px",
-    fontWeight: "bold",
-    textTransform: "uppercase",
-    cursor: "not-allowed",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  cancelButton: {
-    width: "100%",
-    padding: "15px",
-    backgroundColor: "#F0F0F0",
-    color: "#666666",
-    border: "1px solid #D0D0D0",
-    fontSize: "14px",
-    fontWeight: "bold",
-    textTransform: "uppercase",
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  warningBox: {
-    display: "flex",
-    alignItems: "center",
-    gap: "10px",
-    backgroundColor: "#FEE2E2",
-    border: "1px solid #EF4444",
-    padding: "12px",
-    marginBottom: "20px",
-    textAlign: "left",
-  },
-  warningText: {
-    fontSize: "12px",
-    color: "#EF4444",
-    fontWeight: "bold",
-  },
-  errorBox: {
-    display: "flex",
-    alignItems: "center",
-    gap: "10px",
-    backgroundColor: "#FEE2E2",
-    border: "1px solid #EF4444",
-    padding: "12px",
-    marginBottom: "20px",
-    textAlign: "left",
-  },
-  errorText: {
-    fontSize: "12px",
-    color: "#EF4444",
-    fontWeight: "bold",
-  },
-  successBox: {
-    display: "flex",
-    alignItems: "center",
-    gap: "10px",
-    backgroundColor: "#ECFDF5",
-    border: "1px solid #16A34A",
-    padding: "12px",
-    marginBottom: "20px",
-    textAlign: "left",
-  },
-  successText: {
-    fontSize: "12px",
-    color: "#166534",
-    fontWeight: "bold",
-  },
-  supportText: {
-    fontSize: "11px",
-    color: "#666666",
-    marginTop: "25px",
-    lineHeight: "1.5",
-  },
-  footer: {
-    marginTop: "30px",
-    fontSize: "11px",
-    color: "#999999",
-    textTransform: "uppercase",
-    letterSpacing: "0.5px",
-  },
-  securityNotice: {
-    display: "flex",
-    alignItems: "center",
-    gap: "10px",
-    backgroundColor: "#F0F0F0",
-    border: "1px solid #D0D0D0",
-    padding: "12px",
-    marginTop: "25px",
-    textAlign: "left",
-  },
-  securityText: {
-    fontSize: "11px",
-    color: "#666666",
-    fontWeight: "bold",
-    margin: 0,
-  },
-  deskExplanation: {
-    marginTop: "25px",
-    borderTop: "1px solid #E0E0E0",
-    paddingTop: "25px",
-    textAlign: "left",
-  },
-  deskExplanationTitle: {
-    fontSize: "12px",
-    fontWeight: "bold",
-    textTransform: "uppercase",
-    color: "#2E2E2E",
-    marginBottom: "15px",
-    letterSpacing: "0.5px",
-  },
-  deskList: {
-    listStyle: "none",
-    padding: 0,
-    margin: 0,
-    fontSize: "11px",
-    lineHeight: "1.8",
-    color: "#444444",
-  },
-  staffDetailsPreview: {
-    marginTop: "25px",
-    borderTop: "1px solid #E0E0E0",
-    paddingTop: "25px",
-    textAlign: "left",
-    marginBottom: "25px",
-  },
-  previewTitle: {
-    fontSize: "12px",
-    fontWeight: "bold",
-    textTransform: "uppercase",
-    color: "#2E2E2E",
-    marginBottom: "10px",
-    letterSpacing: "0.5px",
-  },
-  previewRow: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: "12px",
-    padding: "5px 0",
-    borderBottom: "1px dotted #F0F0F0",
-    fontSize: "11px",
-  },
-  previewLabel: {
-    fontWeight: "bold",
-    color: "#666666",
-  },
-  previewValue: {
-    color: "#2E2E2E",
-    textAlign: "right",
-  },
-  setupContainer: {
-    marginTop: "25px",
-  },
-  setupCard: {
-    backgroundColor: "#FFFBEB",
-    border: "1px solid #FCD34D",
-    padding: "30px",
-    textAlign: "center",
-  },
-  setupCardTitle: {
-    fontSize: "18px",
-    fontWeight: "bold",
-    color: "#2E2E2E",
-    textTransform: "uppercase",
-    letterSpacing: "1px",
-    marginBottom: "10px",
-  },
-  setupCardText: {
-    fontSize: "12px",
-    color: "#666666",
-    marginBottom: "20px",
-    lineHeight: "1.5",
-  },
-  setupForm: {
-    textAlign: "left",
-    marginTop: "25px",
-    paddingTop: "25px",
-    borderTop: "1px solid #E0E0E0",
-  },
-  setupButton: {
-    width: "100%",
-    padding: "12px 20px",
-    backgroundColor: "#FF6B00",
-    color: "#FFFFFF",
-    border: "none",
-    fontSize: "13px",
-    fontWeight: "bold",
-    textTransform: "uppercase",
-    cursor: "pointer",
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  setupButtonDisabled: {
-    width: "100%",
-    padding: "12px 20px",
-    backgroundColor: "#CCCCCC",
-    color: "#FFFFFF",
-    border: "none",
-    fontSize: "13px",
-    fontWeight: "bold",
-    textTransform: "uppercase",
-    cursor: "not-allowed",
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  showPasscodeRow: {
-    textAlign: "right",
-    marginBottom: "15px",
-  },
-  linkButton: {
-    background: "none",
-    border: "none",
-    color: "#666666",
-    fontSize: "10px",
-    fontWeight: "bold",
-    cursor: "pointer",
-    textTransform: "uppercase",
-  },
-  grid2: {
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
-    gap: "15px",
-  },
+  page: { display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh", backgroundColor: "#F8F8F8", fontFamily: "Arial, sans-serif", color: "#2E2E2E" },
+  container: { width: "100%", maxWidth: "560px", padding: "20px", textAlign: "center" },
+  header: { marginBottom: "30px" },
+  appName: { fontSize: "48px", fontWeight: 900, color: "#FF6B00", margin: 0, letterSpacing: "-2px" },
+  subtitle: { fontSize: "14px", fontWeight: "bold", color: "#2E2E2E", margin: "5px 0 0", textTransform: "uppercase", letterSpacing: "1px" },
+  panel: { backgroundColor: "#FFFFFF", border: "1px solid #E0E0E0", boxShadow: "none", padding: "30px", marginBottom: "20px" },
+  googleEmailDisplay: { display: "flex", alignItems: "center", justifyContent: "center", gap: "10px", backgroundColor: "#F0F0F0", padding: "12px", marginBottom: "14px", fontSize: "13px", fontWeight: "bold", color: "#2E2E2E", textTransform: "uppercase" },
+  googleEmailText: { opacity: 0.8, overflowWrap: "anywhere" },
+  syncNotice: { display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", backgroundColor: "#FFF7ED", border: "1px solid #FED7AA", color: "#9A3412", padding: "10px", marginBottom: "18px", fontSize: "11px", fontWeight: "bold", textTransform: "uppercase" },
+  formGroup: { marginBottom: "20px", textAlign: "left" },
+  label: { display: "block", fontSize: "11px", fontWeight: "bold", textTransform: "uppercase", color: "#666666", marginBottom: "8px", letterSpacing: "0.5px" },
+  select: { width: "100%", boxSizing: "border-box", padding: "12px", border: "1px solid #D0D0D0", backgroundColor: "#FFFFFF", fontSize: "14px", color: "#2E2E2E", appearance: "none", backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%232E2E2E' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E\")", backgroundRepeat: "no-repeat", backgroundPosition: "right 12px center", cursor: "pointer" },
+  emptyStaffState: { marginTop: "8px", padding: "10px", border: "1px solid #E0E0E0", backgroundColor: "#F8F8F8", color: "#666666", fontSize: "12px", fontWeight: "bold", textTransform: "uppercase" },
+  loginForm: { marginTop: "25px", borderTop: "1px solid #E0E0E0", paddingTop: "25px" },
+  passcodeInputContainer: { position: "relative" },
+  input: { width: "100%", boxSizing: "border-box", padding: "12px", border: "1px solid #D0D0D0", fontSize: "18px", fontWeight: "bold", textAlign: "center", letterSpacing: "2px", color: "#2E2E2E", backgroundColor: "#FFFFFF" },
+  inputNormal: { width: "100%", boxSizing: "border-box", padding: "12px", border: "1px solid #D0D0D0", fontSize: "14px", fontWeight: "bold", color: "#2E2E2E", backgroundColor: "#FFFFFF" },
+  inputCenter: { width: "100%", boxSizing: "border-box", padding: "12px", border: "1px solid #D0D0D0", textAlign: "center", fontSize: "16px", fontWeight: "bold", letterSpacing: "4px" },
+  togglePasscodeButton: { position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "#666666", padding: "5px" },
+  buttonGroup: { marginTop: "30px", display: "flex", flexDirection: "column", gap: "10px" },
+  loginButton: { width: "100%", padding: "15px", backgroundColor: "#FF6B00", color: "#FFFFFF", border: "none", fontSize: "14px", fontWeight: "bold", textTransform: "uppercase", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" },
+  loginButtonDisabled: { width: "100%", padding: "15px", backgroundColor: "#CCCCCC", color: "#FFFFFF", border: "none", fontSize: "14px", fontWeight: "bold", textTransform: "uppercase", cursor: "not-allowed", display: "flex", alignItems: "center", justifyContent: "center" },
+  cancelButton: { width: "100%", padding: "15px", backgroundColor: "#F0F0F0", color: "#666666", border: "1px solid #D0D0D0", fontSize: "14px", fontWeight: "bold", textTransform: "uppercase", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" },
+  warningBox: { display: "flex", alignItems: "center", gap: "10px", backgroundColor: "#FEE2E2", border: "1px solid #EF4444", padding: "12px", marginBottom: "20px", textAlign: "left" },
+  warningText: { fontSize: "12px", color: "#EF4444", fontWeight: "bold" },
+  errorBox: { display: "flex", alignItems: "center", gap: "10px", backgroundColor: "#FEE2E2", border: "1px solid #EF4444", padding: "12px", marginBottom: "20px", textAlign: "left" },
+  errorText: { fontSize: "12px", color: "#EF4444", fontWeight: "bold" },
+  supportText: { fontSize: "11px", color: "#666666", marginTop: "25px", lineHeight: "1.5" },
+  footer: { marginTop: "30px", fontSize: "11px", color: "#999999", textTransform: "uppercase", letterSpacing: "0.5px" },
+  securityNotice: { display: "flex", alignItems: "center", gap: "10px", backgroundColor: "#F0F0F0", border: "1px solid #D0D0D0", padding: "12px", marginTop: "25px", textAlign: "left" },
+  securityText: { fontSize: "11px", color: "#666666", fontWeight: "bold", margin: 0 },
+  deskExplanation: { marginTop: "25px", borderTop: "1px solid #E0E0E0", paddingTop: "25px", textAlign: "left" },
+  deskExplanationTitle: { fontSize: "12px", fontWeight: "bold", textTransform: "uppercase", color: "#2E2E2E", marginBottom: "15px", letterSpacing: "0.5px" },
+  deskList: { listStyle: "none", padding: 0, margin: 0, fontSize: "11px", lineHeight: "1.8", color: "#444444" },
+  staffDetailsPreview: { marginTop: "25px", borderTop: "1px solid #E0E0E0", paddingTop: "25px", textAlign: "left", marginBottom: "25px" },
+  previewTitle: { fontSize: "12px", fontWeight: "bold", textTransform: "uppercase", color: "#2E2E2E", marginBottom: "10px", letterSpacing: "0.5px" },
+  previewRow: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", padding: "5px 0", borderBottom: "1px dotted #F0F0F0", fontSize: "11px" },
+  previewLabel: { fontWeight: "bold", color: "#666666" },
+  previewValue: { color: "#2E2E2E", textAlign: "right" },
+  setupContainer: { marginTop: "25px" },
+  setupCard: { backgroundColor: "#FFFBEB", border: "1px solid #FCD34D", padding: "30px", textAlign: "center" },
+  setupCardTitle: { fontSize: "18px", fontWeight: "bold", color: "#2E2E2E", textTransform: "uppercase", letterSpacing: "1px", marginBottom: "10px" },
+  setupCardText: { fontSize: "12px", color: "#666666", marginBottom: "20px", lineHeight: "1.5" },
+  setupForm: { textAlign: "left", marginTop: "25px", paddingTop: "25px", borderTop: "1px solid #E0E0E0" },
+  setupButton: { width: "100%", padding: "12px 20px", backgroundColor: "#FF6B00", color: "#FFFFFF", border: "none", fontSize: "13px", fontWeight: "bold", textTransform: "uppercase", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" },
+  setupButtonDisabled: { width: "100%", padding: "12px 20px", backgroundColor: "#CCCCCC", color: "#FFFFFF", border: "none", fontSize: "13px", fontWeight: "bold", textTransform: "uppercase", cursor: "not-allowed", display: "inline-flex", alignItems: "center", justifyContent: "center" },
+  showPasscodeRow: { textAlign: "right", marginBottom: "15px" },
+  linkButton: { background: "none", border: "none", color: "#666666", fontSize: "10px", fontWeight: "bold", cursor: "pointer", textTransform: "uppercase" },
+  grid2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "15px" },
 };
 
 export default WelcomePage;
