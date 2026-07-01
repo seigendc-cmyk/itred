@@ -16,6 +16,7 @@ import { analyticsService } from "../services/analyticsService.ts";
 import { localStorageService } from "../services/localStorageService.ts";
 import { db, auth } from "../lib/firebase.ts";
 import { doc, serverTimestamp, setDoc } from "firebase/firestore";
+import { GoogleAuthProvider, signInWithPopup, signOut } from "firebase/auth";
 
 const isUserAuthorizedForStaff = (): boolean => {
   const currentUser = auth.currentUser;
@@ -108,6 +109,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
   const [isSetupMode, setIsSetupMode] = useState<boolean>(false);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncMessage, setSyncMessage] = useState<string>("");
+  const [currentUser, setCurrentUser] = useState(auth.currentUser);
 
   const [setupFullName, setSetupFullName] = useState<string>("");
   const [setupDisplayName, setSetupDisplayName] = useState<string>("");
@@ -115,6 +117,36 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
   const [setupPasscode, setSetupPasscode] = useState<string>("");
   const [setupConfirmPasscode, setSetupConfirmPasscode] = useState<string>("");
   const [setupShowPass, setSetupShowPass] = useState<boolean>(false);
+
+  const handleGoogleSignIn = async () => {
+    const provider = new GoogleAuthProvider();
+    try {
+      setLoginError(null);
+      await signInWithPopup(auth, provider);
+    } catch (err: any) {
+      console.error("Google Sign-In failed", err);
+      setLoginError(`Google Sign-In failed: ${err.message || err}`);
+    }
+  };
+
+  const handleGoogleSignOut = async () => {
+    try {
+      setLoginError(null);
+      await signOut(auth);
+    } catch (err: any) {
+      console.error("Google Sign-Out failed", err);
+      setLoginError(`Google Sign-Out failed: ${err.message || err}`);
+    }
+  };
+
+  const handleResetLocalLockout = () => {
+    if (selectedStaffId) {
+      staffService.resetLocalLockout(selectedStaffId);
+      setLoginError(null);
+      const localStaff = staffService.getAllStaff();
+      publishStaff(localStaff);
+    }
+  };
 
   const publishStaff = (staffList: Staff[]) => {
     const safeStaff = Array.isArray(staffList) ? staffList : [];
@@ -158,7 +190,13 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
   useEffect(() => {
     const localStaff = staffService.getAllStaff();
     publishStaff(localStaff);
-    void refreshStaff({ blocking: localStaff.length === 0 });
+
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      setCurrentUser(user);
+      void refreshStaff({ blocking: localStaff.length === 0 });
+    });
+
+    return unsubscribe;
   }, []);
 
   const selectedStaff = allStaff.find((staff) => staff.id === selectedStaffId);
@@ -462,10 +500,44 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
         </div>
 
         <div style={styles.panel}>
-          <div style={styles.googleEmailDisplay}>
-            <UserCheck size={16} style={{ color: "#2E2E2E" }} />
-            <span style={styles.googleEmailText}>{googleEmail}</span>
-          </div>
+          {currentUser ? (
+            <div style={styles.googleEmailDisplay}>
+              {currentUser.email === "seigendc@gmail.com" ? (
+                <UserCheck size={16} style={{ color: "#16A34A" }} />
+              ) : (
+                <AlertTriangle size={16} style={{ color: "#EF4444" }} />
+              )}
+              <span style={styles.googleEmailText}>
+                {currentUser.email === "seigendc@gmail.com" ? "Authenticated: " : "Unauthorized: "}
+                {currentUser.email}
+              </span>
+              <button type="button" onClick={handleGoogleSignOut} style={styles.googleAuthBtn}>Sign Out</button>
+            </div>
+          ) : (
+            <div style={styles.googleEmailDisplay}>
+              <Lock size={16} style={{ color: "#666666" }} />
+              <span style={styles.googleEmailText}>Google Sign-In Required for Firestore Sync</span>
+              <button type="button" onClick={handleGoogleSignIn} style={styles.googleAuthBtn}>Sign In</button>
+            </div>
+          )}
+
+          {!currentUser && (
+            <div style={{ ...styles.errorBox, backgroundColor: "#FFF7ED", borderColor: "#FED7AA", color: "#C2410C", display: "flex", alignItems: "center", gap: "10px", padding: "12px", marginBottom: "20px", textAlign: "left" }}>
+              <AlertTriangle size={16} style={{ color: "#C2410C" }} />
+              <span style={{ color: "#C2410C", fontSize: "11px", fontWeight: "bold" }}>
+                Running in Local Fallback Mode. Sign in with Google to enable Firestore sync and prevent permanent lockout.
+              </span>
+            </div>
+          )}
+
+          {currentUser && currentUser.email !== "seigendc@gmail.com" && (
+            <div style={{ ...styles.errorBox, display: "flex", alignItems: "center", gap: "10px", padding: "12px", marginBottom: "20px", textAlign: "left" }}>
+              <AlertTriangle size={16} style={{ color: "#EF4444" }} />
+              <span style={{ color: "#EF4444", fontSize: "11px", fontWeight: "bold" }}>
+                Google session unauthorized for Firestore cloud sync. Running in local fallback mode.
+              </span>
+            </div>
+          )}
 
           {syncMessage && (
             <div style={styles.syncNotice}>
@@ -588,7 +660,14 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
                 <div style={styles.warningBox}><Lock size={16} style={{ color: "#EF4444" }} /><span style={styles.warningText}>Account Suspended. Contact SysAdmin.</span></div>
               )}
               {selectedStaff.isLocked && (
-                <div style={styles.warningBox}><Lock size={16} style={{ color: "#EF4444" }} /><span style={styles.warningText}>Account Locked. Contact SysAdmin.</span></div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "20px" }}>
+                  <div style={{ ...styles.warningBox, marginBottom: 0 }}><Lock size={16} style={{ color: "#EF4444" }} /><span style={styles.warningText}>Account Locked. Contact SysAdmin.</span></div>
+                  {!currentUser && (
+                    <button type="button" onClick={handleResetLocalLockout} style={styles.recoveryButton}>
+                      Reset local lockout
+                    </button>
+                  )}
+                </div>
               )}
 
               <div style={styles.formGroup}>
@@ -725,6 +804,8 @@ const styles: { [key: string]: React.CSSProperties } = {
   showPasscodeRow: { textAlign: "right", marginBottom: "15px" },
   linkButton: { background: "none", border: "none", color: "#666666", fontSize: "10px", fontWeight: "bold", cursor: "pointer", textTransform: "uppercase" },
   grid2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "15px" },
+  googleAuthBtn: { marginLeft: "auto", padding: "4px 8px", backgroundColor: "#FF6B00", color: "#FFFFFF", border: "none", fontSize: "11px", fontWeight: "bold", textTransform: "uppercase", cursor: "pointer" },
+  recoveryButton: { width: "100%", padding: "10px 15px", backgroundColor: "#DC2626", color: "#FFFFFF", border: "none", fontSize: "12px", fontWeight: "bold", textTransform: "uppercase", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" },
 };
 
 export default WelcomePage;

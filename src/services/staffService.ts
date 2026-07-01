@@ -963,6 +963,29 @@ export const staffService = {
       });
     }
   },
+
+  resetLocalLockout: (staffId: string): void => {
+    const staff = staffService.getStaffById(staffId);
+
+    if (staff) {
+      const updatedStaff: Staff = {
+        ...staff,
+        failedAttemptCount: 0,
+        isLocked: false,
+        updatedAt: new Date().toISOString(),
+      };
+
+      const allStaff = getLocalStaff();
+      const index = allStaff.findIndex((item) => item.id === staff.id);
+      if (index >= 0) {
+        allStaff[index] = updatedStaff;
+      }
+      saveLocalStaff(allStaff);
+      dataCacheService.clearCache("staff-list");
+
+      console.log(`[Firebase Diagnostic] Reset local lockout for staff: ${staffId}`);
+    }
+  },
 };
 
 const storedTemplates =
