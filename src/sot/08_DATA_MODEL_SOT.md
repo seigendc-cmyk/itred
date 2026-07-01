@@ -1,8 +1,10 @@
 ﻿# SCI / iTredVD Data Model Source of Truth
 
+
 This file defines the official data model direction for iTredVD and SCI Commerce Console.
 
 ## Core Entities
+
 
 ### Vendor
 

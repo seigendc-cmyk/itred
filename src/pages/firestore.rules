@@ -3,7 +3,7 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     function isConsoleAdmin() {
-      return true;
+      return request.auth != null && request.auth.token.email == 'seigendc@gmail.com';
     }
 
     // Pilot open rules. Must be restricted before production.
@@ -17,8 +17,7 @@ service cloud.firestore {
       allow delete: if isConsoleAdmin();
     }
     match /itred_console_staff/{document=**} {
-      allow get, list, create, update: if true;
-      allow delete: if isConsoleAdmin();
+      allow read, write: if isConsoleAdmin();
     }
     match /itred_role_templates/{document=**} {
       allow get, list, create, update: if true;
@@ -105,9 +104,56 @@ service cloud.firestore {
       allow delete: if isConsoleAdmin();
     }
 
+    // ---- Explicit collection governance blocks (pilot-safe) ----
+
+    // Legacy/current collections currently used by iTredVD code but not explicitly listed earlier.
+
+    match /pricingPlans/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+
+    match /vendorCatalogueStats/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+
+    match /catalogueGenerations/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+
+    match /catalogueUsageLedger/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+
+    match /vendors/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+
+    match /staffAuditLogs/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+
+    match /notifications/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+
+    match /itred_whatsapp_intelligence_logs/{document=**} {
+      allow get, list, create, update: if true;
+      allow delete: if isConsoleAdmin();
+    }
+
+    // ---- Existing broad catch-all (kept temporarily) ----
+
     match /{document=**} {
       allow get, list, create, update: if true;
       allow delete: if isConsoleAdmin();
     }
   }
 }
+

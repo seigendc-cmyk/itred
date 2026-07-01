@@ -244,9 +244,20 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
       }
 
       await refreshStaff();
-    } catch (error) {
+    } catch (error: any) {
       console.error("Login handling error", error);
-      setLoginError("An error occurred during login. Please try again.");
+      const isPermissionDenied =
+        error?.code === "permission-denied" ||
+        (error?.message &&
+          (error.message.includes("permission") ||
+            error.message.includes("unauthorized") ||
+            error.message.includes("insufficient")));
+
+      if (isPermissionDenied) {
+        setLoginError("FirebaseError: Missing or insufficient permissions. You are not authorized to modify staff records.");
+      } else {
+        setLoginError("An error occurred during login. Please try again.");
+      }
     } finally {
       setIsLoggingIn(false);
     }

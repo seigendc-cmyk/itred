@@ -1,7 +1,14 @@
 import { Staff, MenuPermissions } from "../types.ts";
 import { localStorageService } from "./localStorageService.ts";
 import { analyticsService } from "./analyticsService.ts";
-import { db } from "../lib/firebase.ts";
+import { db, auth } from "../lib/firebase.ts";
+
+const isUserAuthorizedForStaff = (): boolean => {
+  const currentUser = auth.currentUser;
+  if (!currentUser) return false;
+  const allowedEmails = ["seigendc@gmail.com"];
+  return !!currentUser.email && allowedEmails.includes(currentUser.email);
+};
 import {
   collection,
   documentId,
@@ -115,44 +122,48 @@ const loadStaffFromFirestore = async (): Promise<Staff[]> => {
 
 const validateUniqueStaffIdentity = async (staff: Staff): Promise<void> => {
   let remoteStaff: Staff[] = [];
-  try {
-    const checks = [
-      staff.staffCode
-        ? getDocs(
-            query(
-              collection(db, FIRESTORE_STAFF_COLLECTION),
-              where("staffCode", "==", staff.staffCode),
-              limit(10),
-            ),
-          )
-        : Promise.resolve(null),
-      staff.email
-        ? getDocs(
-            query(
-              collection(db, FIRESTORE_STAFF_COLLECTION),
-              where("email", "==", staff.email),
-              where("status", "==", "active"),
-              limit(10),
-            ),
-          )
-        : Promise.resolve(null),
-    ];
-    const snapshots = await Promise.all(checks);
-    remoteStaff = snapshots.flatMap((snapshot) =>
-      snapshot
-        ? snapshot.docs.map((staffDoc) => {
-            const data = staffDoc.data() as Partial<Staff>;
-            return {
-              ...data,
-              id: data.id || staffDoc.id,
-              docId: staffDoc.id,
-              firestoreDocId: staffDoc.id,
-            } as Staff;
-          })
-        : [],
-    );
-  } catch (e) {
+  if (!isUserAuthorizedForStaff()) {
     remoteStaff = getLocalStaff();
+  } else {
+    try {
+      const checks = [
+        staff.staffCode
+          ? getDocs(
+              query(
+                collection(db, FIRESTORE_STAFF_COLLECTION),
+                where("staffCode", "==", staff.staffCode),
+                limit(10),
+              ),
+            )
+          : Promise.resolve(null),
+        staff.email
+          ? getDocs(
+              query(
+                collection(db, FIRESTORE_STAFF_COLLECTION),
+                where("email", "==", staff.email),
+                where("status", "==", "active"),
+                limit(10),
+              ),
+            )
+          : Promise.resolve(null),
+      ];
+      const snapshots = await Promise.all(checks);
+      remoteStaff = snapshots.flatMap((snapshot) =>
+        snapshot
+          ? snapshot.docs.map((staffDoc) => {
+              const data = staffDoc.data() as Partial<Staff>;
+              return {
+                ...data,
+                id: data.id || staffDoc.id,
+                docId: staffDoc.id,
+                firestoreDocId: staffDoc.id,
+              } as Staff;
+            })
+          : [],
+      );
+    } catch (e) {
+      remoteStaff = getLocalStaff();
+    }
   }
 
   const isSameStaff = (s: Staff, target: Staff) => {
@@ -598,6 +609,20 @@ export const staffService = {
   },
 
   loadStaffFromFirebase: async (): Promise<Staff[]> => {
+    const currentUser = auth.currentUser;
+    if (currentUser && !isUserAuthorizedForStaff()) {
+      console.info(
+        `[Firebase Diagnostic] Authenticated user is not authorized to load staff from Firestore. Loading local staff records.`
+      );
+      return getLocalStaff();
+    }
+    if (!currentUser) {
+      console.info(
+        `[Firebase Diagnostic] Unauthenticated session. Loading local staff records.`
+      );
+      return getLocalStaff();
+    }
+
     try {
       const remoteStaff = await loadStaffFromFirestore();
       readDiagnosticsService.track("staffService", FIRESTORE_STAFF_COLLECTION, "loadStaffFromFirebase", remoteStaff.length);
@@ -659,6 +684,17 @@ export const staffService = {
     upsertLocalStaff(staffToSave);
     dataCacheService.clearCache("staff-list");
 
+    const currentUser = auth.currentUser;
+    if (currentUser && !isUserAuthorizedForStaff()) {
+      const error = new Error("FirebaseError: Missing or insufficient permissions. Authenticated user is not authorized to modify staff records.");
+      error.name = "FirebaseError";
+      throw error;
+    }
+    if (!currentUser) {
+      console.info("[Firebase Diagnostic] Unauthenticated session. Saved staff locally only.");
+      return;
+    }
+
     try {
       console.log(
         `[Firebase Diagnostic] Saving staff record to Firestore collection: ${FIRESTORE_STAFF_COLLECTION}`,
@@ -679,9 +715,14 @@ export const staffService = {
     saveLocalStaff(allStaff);
     dataCacheService.clearCache("staff-list");
 
-    void deleteDoc(doc(db, FIRESTORE_STAFF_COLLECTION, id)).catch((error) => {
-      console.error(`Failed to delete staff ${id} from Firebase.`, error);
-    });
+    const currentUser = auth.currentUser;
+    if (currentUser && isUserAuthorizedForStaff()) {
+      void deleteDoc(doc(db, FIRESTORE_STAFF_COLLECTION, id)).catch((error) => {
+        console.error(`Failed to delete staff ${id} from Firebase.`, error);
+      });
+    } else {
+      console.warn("[Firebase Diagnostic] User is not authorized to delete staff from Firebase. Deleted locally only.");
+    }
   },
 
   ROLE_TEMPLATES: ROLE_TEMPLATES_OBJECT,
@@ -754,22 +795,26 @@ export const staffService = {
     const prefix = `ITR-STF-${yearMonth}-`;
 
     let allStaff: Staff[] = [];
-    try {
-      const snapshot = await getDocs(
-        query(
-          collection(db, FIRESTORE_STAFF_COLLECTION),
-          where("staffCode", ">=", prefix),
-          where("staffCode", "<", `${prefix}\uf8ff`),
-          orderBy("staffCode", "desc"),
-          limit(1),
-        ),
-      );
-      allStaff = snapshot.docs.map((staffDoc) => ({
-        ...(staffDoc.data() as Partial<Staff>),
-        id: staffDoc.id,
-      })) as Staff[];
-    } catch (e) {
+    if (!isUserAuthorizedForStaff()) {
       allStaff = getLocalStaff();
+    } else {
+      try {
+        const snapshot = await getDocs(
+          query(
+            collection(db, FIRESTORE_STAFF_COLLECTION),
+            where("staffCode", ">=", prefix),
+            where("staffCode", "<", `${prefix}\uf8ff`),
+            orderBy("staffCode", "desc"),
+            limit(1),
+          ),
+        );
+        allStaff = snapshot.docs.map((staffDoc) => ({
+          ...(staffDoc.data() as Partial<Staff>),
+          id: staffDoc.id,
+        })) as Staff[];
+      } catch (e) {
+        allStaff = getLocalStaff();
+      }
     }
 
     const existingCodes = allStaff
@@ -868,17 +913,21 @@ export const staffService = {
     Object.assign(staffService.ROLE_TEMPLATES, templates);
     dataCacheService.clearCache("role-templates");
 
-    void setDoc(
-      doc(db, FIRESTORE_SETTINGS_COLLECTION, "role_templates"),
-      removeUndefinedDeep({
-        templates,
-        updatedAt: new Date().toISOString(),
-        firestoreUpdatedAt: serverTimestamp(),
-      }),
-      { merge: true },
-    ).catch((error) => {
-      console.error("Failed to save role templates to Firebase.", error);
-    });
+    if (isUserAuthorizedForStaff()) {
+      void setDoc(
+        doc(db, FIRESTORE_SETTINGS_COLLECTION, "role_templates"),
+        removeUndefinedDeep({
+          templates,
+          updatedAt: new Date().toISOString(),
+          firestoreUpdatedAt: serverTimestamp(),
+        }),
+        { merge: true },
+      ).catch((error) => {
+        console.error("Failed to save role templates to Firebase.", error);
+      });
+    } else {
+      console.warn("[Firebase Diagnostic] User is not authorized to save role templates to Firebase. Saved locally only.");
+    }
   },
 
   resetPasscode: (
