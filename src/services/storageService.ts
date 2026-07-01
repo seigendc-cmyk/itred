@@ -594,6 +594,7 @@ export const firebaseAdapter: StorageAdapter = {
     collectionName: string,
     callback: (data: T) => void,
   ) => {
+    console.warn(`[Firestore Listener Warning] subscribeCollection was called for ${collectionName}!`);
     const existingListener = activeListeners.get(collectionName);
 
     if (existingListener) {

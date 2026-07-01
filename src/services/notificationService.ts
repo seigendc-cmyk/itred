@@ -10,6 +10,8 @@ import { CACHE_TTL, dataCacheService } from "./dataCacheService.ts";
 import { readDiagnosticsService } from "./readDiagnosticsService.ts";
 import { generateNotificationId } from "../utils/idGenerator.ts";
 import { getSession, getSessionStaffId, getSessionStaffName } from "../utils/session.ts";
+import { db } from "../lib/firebase.ts";
+import { doc, setDoc } from "firebase/firestore";
 
 const STORAGE_KEY = "itred_notifications";
 
@@ -93,12 +95,25 @@ export const notificationService = {
     id: string,
     status: NotificationStatus,
   ): Promise<void> => {
-    const all = await notificationService.getAll();
-    const index = all.findIndex((n) => n.id === id);
-    if (index >= 0) {
-      const before = all[index];
-      const now = new Date().toISOString();
-      all[index] = {
+    const now = new Date().toISOString();
+    let updatedNotif: ITredNotification | undefined;
+
+    // 1. Update localStorage first
+    const rawLocal = localStorage.getItem("itred_notifications");
+    let localList: ITredNotification[] = [];
+    if (rawLocal) {
+      try {
+        localList = JSON.parse(rawLocal) || [];
+      } catch {}
+    }
+    const localIndex = localList.findIndex((n) => n.id === id);
+    if (localIndex >= 0) {
+      const before = localList[localIndex];
+      if (before.status === status) {
+        console.info(`[Notification Service] Status for ${id} is already ${status}. Skipping update.`);
+        return;
+      }
+      updatedNotif = {
         ...before,
         status,
         updatedAt: now,
@@ -109,21 +124,71 @@ export const notificationService = {
             ? now
             : before.archivedAt,
       };
-      await getStorageAdapter().setItem(STORAGE_KEY, all);
-      dataCacheService.clearCache("notifications-all");
-      window.dispatchEvent(new Event("itred_notifications_updated"));
+      localList[localIndex] = updatedNotif;
+      localStorage.setItem("itred_notifications", JSON.stringify(localList));
+    }
 
-      void staffAuditService.logAction({
-        eventType: "NOTIFICATION_UPDATED",
-        module: "notifications",
-        severity: severityFromPriority(before.priority),
-        action: actionForStatus(status),
-        recordType: before.recordType,
-        recordId: before.recordId,
-        recordName: before.title,
-        beforeSnapshot: before,
-        afterSnapshot: all[index],
-      });
+    // 2. Update memory cache
+    const cachedList = dataCacheService.getCached<ITredNotification[]>(
+      "notifications-all",
+      CACHE_TTL.NOTIFICATIONS,
+    );
+    if (cachedList && Array.isArray(cachedList)) {
+      const cachedIndex = cachedList.findIndex((n) => n.id === id);
+      if (cachedIndex >= 0) {
+        if (!updatedNotif) {
+          const before = cachedList[cachedIndex];
+          if (before.status === status) {
+            console.info(`[Notification Service] Status for ${id} is already ${status} in cache. Skipping update.`);
+            return;
+          }
+          updatedNotif = {
+            ...before,
+            status,
+            updatedAt: now,
+            readAt: status === "read" ? now : before.readAt,
+            resolvedAt: status === "resolved" ? now : before.resolvedAt,
+            archivedAt:
+              status === "archived" || status === "dismissed"
+                ? now
+                : before.archivedAt,
+          };
+        }
+        cachedList[cachedIndex] = updatedNotif;
+        dataCacheService.setCached("notifications-all", cachedList);
+      }
+    }
+
+    // Dispatch update event locally
+    window.dispatchEvent(new Event("itred_notifications_updated"));
+
+    // 3. Update Firestore directly targeting the document if mode is firebase
+    if (updatedNotif) {
+      try {
+        const storageMode = import.meta.env.VITE_STORAGE_MODE || "firebase";
+        if (storageMode === "firebase") {
+          await setDoc(doc(db, "itred_notifications", id), updatedNotif, { merge: true });
+        }
+      } catch (firestoreError) {
+        console.warn("Failed to sync notification status update to Firestore", firestoreError);
+      }
+
+      // Log audit action
+      try {
+        void staffAuditService.logAction({
+          eventType: "NOTIFICATION_UPDATED",
+          module: "notifications",
+          severity: severityFromPriority(updatedNotif.priority),
+          action: actionForStatus(status),
+          recordType: updatedNotif.recordType,
+          recordId: updatedNotif.recordId,
+          recordName: updatedNotif.title,
+          beforeSnapshot: updatedNotif,
+          afterSnapshot: updatedNotif,
+        });
+      } catch (auditError) {
+        console.error("Failed to write notification update audit log", auditError);
+      }
     }
   },
 
